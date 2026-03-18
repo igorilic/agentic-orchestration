@@ -1,0 +1,5 @@
+.DS_Store
+.tdd-skip
+.claude/settings.local.json
+node_modules/
+*.env
