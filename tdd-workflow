@@ -1,0 +1,2323 @@
+#!/usr/bin/env bash
+# tdd-workflow — CLI installer for Full-Stack TDD Workflow v2
+# Installs hooks, skills, and agent instructions for Claude Code + GitHub Copilot
+#
+# Usage:
+#   tdd-workflow install global            Install global hooks, skills, settings
+#   tdd-workflow install project [path]    Install project files (auto-detects stack)
+#   tdd-workflow install all [path]        Install both global + project
+#   tdd-workflow detect [path]             Detect stack without installing
+#   tdd-workflow status                    Show what's installed
+#   tdd-workflow uninstall global          Remove global installation
+#   tdd-workflow uninstall project [path]  Remove project files
+
+set -euo pipefail
+
+VERSION="2.1.0"
+CLAUDE_DIR="$HOME/.claude"
+BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
+
+# --- Colors ---
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+# --- Helpers ---
+info()    { echo -e "${BLUE}ℹ${NC} $*"; }
+success() { echo -e "${GREEN}✓${NC} $*"; }
+warn()    { echo -e "${YELLOW}⚠${NC} $*"; }
+error()   { echo -e "${RED}✗${NC} $*" >&2; }
+header()  { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
+dim()     { echo -e "${DIM}  $*${NC}"; }
+
+backup_if_exists() {
+  local file="$1"
+  if [ -f "$file" ]; then
+    cp "$file" "${file}${BACKUP_SUFFIX}"
+    dim "Backed up existing $(basename "$file")"
+  fi
+}
+
+write_file() {
+  local path="$1"
+  local content="$2"
+  local description="${3:-}"
+  mkdir -p "$(dirname "$path")"
+  echo "$content" > "$path"
+  if [ -n "$description" ]; then
+    success "$description"
+  fi
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     STACK DETECTION                             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+detect_stacks() {
+  local project_dir="${1:-.}"
+  local stacks=()
+
+  # .NET
+  if compgen -G "$project_dir"/*.sln > /dev/null 2>&1 || \
+     find "$project_dir" -maxdepth 3 -name "*.csproj" -print -quit 2>/dev/null | grep -q .; then
+    stacks+=("dotnet")
+  fi
+
+  # Go (check root + subdirectories)
+  if find "$project_dir" -maxdepth 3 -name "go.mod" -not -path "*/vendor/*" -print -quit 2>/dev/null | grep -q .; then
+    stacks+=("go")
+  fi
+
+  # Rust (check root + subdirectories for workspace members)
+  if find "$project_dir" -maxdepth 3 -name "Cargo.toml" -not -path "*/target/*" -print -quit 2>/dev/null | grep -q .; then
+    stacks+=("rust")
+  fi
+
+  # Python (check root + subdirectories)
+  if find "$project_dir" -maxdepth 3 \( -name "pyproject.toml" -o -name "requirements.txt" -o -name "setup.py" \) \
+     -not -path "*/.venv/*" -not -path "*/venv/*" -print -quit 2>/dev/null | grep -q .; then
+    stacks+=("python")
+  fi
+
+  # React Native (check before React — it also has react in package.json)
+  if [ -f "$project_dir/package.json" ] && grep -q '"react-native"' "$project_dir/package.json" 2>/dev/null; then
+    stacks+=("react-native")
+  # React / TypeScript
+  elif [ -f "$project_dir/package.json" ] && grep -q '"react"' "$project_dir/package.json" 2>/dev/null; then
+    stacks+=("react-ts")
+  # Plain TypeScript / Node
+  elif [ -f "$project_dir/package.json" ] || [ -f "$project_dir/tsconfig.json" ]; then
+    stacks+=("typescript")
+  fi
+
+  # Swift
+  if [ -f "$project_dir/Package.swift" ] || \
+     compgen -G "$project_dir"/*.xcodeproj > /dev/null 2>&1 || \
+     compgen -G "$project_dir"/*.xcworkspace > /dev/null 2>&1; then
+    stacks+=("swift")
+  fi
+
+  # Return unique stacks
+  printf '%s\n' "${stacks[@]}" | sort -u
+}
+
+detect_platform() {
+  local project_dir="${1:-.}"
+  if [ -f "$project_dir/.gitlab-ci.yml" ] || \
+     (git -C "$project_dir" remote -v 2>/dev/null | grep -q gitlab); then
+    echo "gitlab"
+  else
+    echo "github"
+  fi
+}
+
+detect_e2e_runner() {
+  local project_dir="${1:-.}"
+  if [ -f "$project_dir/package.json" ]; then
+    if grep -q '"playwright"' "$project_dir/package.json" 2>/dev/null || \
+       [ -f "$project_dir/playwright.config.ts" ] || [ -f "$project_dir/playwright.config.js" ]; then
+      echo "playwright"
+    elif grep -q '"cypress"' "$project_dir/package.json" 2>/dev/null || \
+         [ -d "$project_dir/cypress" ]; then
+      echo "cypress"
+    fi
+  fi
+}
+
+detect_test_runner() {
+  local project_dir="${1:-.}"
+  if [ -f "$project_dir/package.json" ]; then
+    if grep -q '"vitest"' "$project_dir/package.json" 2>/dev/null || \
+       [ -f "$project_dir/vitest.config.ts" ] || [ -f "$project_dir/vitest.config.js" ]; then
+      echo "vitest"
+    elif grep -q '"jest"' "$project_dir/package.json" 2>/dev/null || \
+         [ -f "$project_dir/jest.config.ts" ] || [ -f "$project_dir/jest.config.js" ]; then
+      echo "jest"
+    fi
+  fi
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     GLOBAL INSTALLATION                         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+install_global() {
+  header "Installing global TDD workflow (v${VERSION})"
+  echo ""
+
+  # --- CLAUDE.md ---
+  install_global_claude_md
+
+  # --- settings.json (hooks) ---
+  install_global_settings
+
+  # --- Hook scripts ---
+  install_global_hooks
+
+  # --- Skills ---
+  install_global_skills
+
+  # --- Agents ---
+  install_global_agents
+
+  # --- Copilot CLI agents ---
+  install_copilot_agents
+
+  echo ""
+  header "Global installation complete"
+  echo ""
+  info "Claude Code → ${CLAUDE_DIR}/"
+  info "Copilot CLI → ~/.copilot/agents/"
+  info "Run ${BOLD}tdd-workflow status${NC} to verify"
+  info "Start a new Claude Code or Copilot CLI session to activate"
+}
+
+install_global_claude_md() {
+  local target="$CLAUDE_DIR/CLAUDE.md"
+  mkdir -p "$CLAUDE_DIR"
+  backup_if_exists "$target"
+
+  cat > "$target" << 'CLAUDE_MD_EOF'
+# Global Claude Code Defaults
+
+## Identity
+- Solo full-stack developer
+- Shell: fish (macOS)
+- CLI tools: glab, gh, kubectl, az, docker, make
+
+## Personal Preferences
+- Commit messages: Conventional Commits
+- Always explain before making destructive changes
+- Prefer asking over assuming
+
+## Available Global Skills
+- /plan — Start new work (orchestrates full agent pipeline)
+- /tdd — Strict TDD workflow (RED → GREEN → REFACTOR)
+- /ticket — Jira/GitHub issue → spec + test scaffold
+- /skip-tdd — Bypass TDD gate with logged reason
+- /session-report — Obsidian session report
+- /adr — Architecture Decision Record (repo + Confluence)
+- /pr — Create PR/MR (auto-detects gh/glab)
+
+## Agent Pipeline
+All new work starts with `/plan`. The pipeline:
+1. **architect** (Opus 4.6) — designs spec + atomic todo plan
+2. **tdd-developer** (Sonnet 4.6) — implements one step via TDD
+3. **qa** (Haiku 4.5) — runs affected tests
+4. **reviewer** (Sonnet 4.6) — reviews code, user triages findings
+Max 3 fix loops per step, then remaining issues go to tech debt.
+
+For production incidents, use **troubleshooter** (Opus 4.6):
+- Pulls Jira ticket, ArgoCD logs, Azure Application Insights
+- Produces diagnosis + TDD fix plan for tdd-developer
+
+## Stack Detection
+Detect the active stack from project files and auto-apply conventions:
+- `*.csproj` or `*.sln` → .NET (xUnit, FluentAssertions, NSubstitute)
+- `go.mod` → Go (testing + testify, table-driven)
+- `Cargo.toml` → Rust (built-in + tokio-test, axum)
+- `pyproject.toml` or `requirements.txt` → Python (pytest, Pydantic)
+- `package.json` with react → React/TS (Vitest + Testing Library)
+- `package.json` with react-native → React Native (Jest + RNTL)
+- `Package.swift` or `*.xcodeproj` → Swift (XCTest)
+CLAUDE_MD_EOF
+  success "~/.claude/CLAUDE.md"
+}
+
+install_global_settings() {
+  local target="$CLAUDE_DIR/settings.json"
+
+  # If settings.json exists, merge hooks into it
+  if [ -f "$target" ]; then
+    backup_if_exists "$target"
+
+    # Check if jq is available for merging
+    if command -v jq &> /dev/null; then
+      local hooks_json
+      hooks_json=$(cat << 'HOOKS_JSON_EOF'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/tdd-gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code needs your attention\" with title \"Claude Code\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKS_JSON_EOF
+      )
+      # Deep merge: existing settings + new hooks
+      jq -s '.[0] * .[1]' "$target" <(echo "$hooks_json") > "${target}.tmp"
+      mv "${target}.tmp" "$target"
+      success "~/.claude/settings.json (merged hooks into existing)"
+    else
+      warn "jq not found — cannot merge settings.json safely"
+      warn "Please manually add hooks from the backup file"
+      # Write to a separate file for manual merging
+      cat > "${target}.hooks-to-merge.json" << 'HOOKS_MERGE_EOF'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/tdd-gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code needs your attention\" with title \"Claude Code\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
+HOOKS_MERGE_EOF
+      warn "Hooks written to ${target}.hooks-to-merge.json"
+    fi
+  else
+    # No existing settings — write fresh
+    mkdir -p "$CLAUDE_DIR"
+    cat > "$target" << 'SETTINGS_EOF'
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/session-start.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/tdd-gate.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code needs your attention\" with title \"Claude Code\"'"
+          }
+        ]
+      }
+    ]
+  }
+}
+SETTINGS_EOF
+    success "~/.claude/settings.json (created fresh)"
+  fi
+}
+
+install_global_hooks() {
+  mkdir -p "$CLAUDE_DIR/hooks"
+
+  # --- session-start.sh ---
+  cat > "$CLAUDE_DIR/hooks/session-start.sh" << 'SESSION_START_EOF'
+#!/usr/bin/env bash
+# Injects project context into Claude Code session on start
+set -euo pipefail
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
+CONTEXT=""
+
+detect_stack() {
+  local stack=""
+  if compgen -G "$PROJECT_DIR"/*.sln > /dev/null 2>&1 || \
+     find "$PROJECT_DIR" -maxdepth 3 -name "*.csproj" -print -quit 2>/dev/null | grep -q . 2>/dev/null; then
+    stack="dotnet (xUnit + FluentAssertions)"
+  elif [ -f "$PROJECT_DIR/go.mod" ]; then
+    stack="go (testing + testify)"
+  elif [ -f "$PROJECT_DIR/Cargo.toml" ]; then
+    stack="rust (built-in + tokio-test)"
+  elif [ -f "$PROJECT_DIR/pyproject.toml" ] || [ -f "$PROJECT_DIR/requirements.txt" ]; then
+    stack="python (pytest)"
+  elif [ -f "$PROJECT_DIR/package.json" ]; then
+    if grep -q '"react-native"' "$PROJECT_DIR/package.json" 2>/dev/null; then
+      stack="react-native (Jest + RNTL, E2E: Detox)"
+    elif grep -q '"react"' "$PROJECT_DIR/package.json" 2>/dev/null; then
+      local tr="Vitest" e2e=""
+      grep -q '"jest"' "$PROJECT_DIR/package.json" 2>/dev/null && tr="Jest"
+      grep -q '"playwright"' "$PROJECT_DIR/package.json" 2>/dev/null && e2e=", E2E: Playwright"
+      grep -q '"cypress"' "$PROJECT_DIR/package.json" 2>/dev/null && e2e=", E2E: Cypress"
+      stack="react-ts ($tr + Testing Library$e2e)"
+    else
+      stack="typescript"
+    fi
+  elif [ -f "$PROJECT_DIR/Package.swift" ] || compgen -G "$PROJECT_DIR"/*.xcodeproj > /dev/null 2>&1; then
+    stack="swift (XCTest)"
+  fi
+  echo "$stack"
+}
+
+STACK=$(detect_stack)
+[ -n "$STACK" ] && CONTEXT="📦 Detected stack: $STACK\n"
+
+if [ -f "$PROJECT_DIR/.context/CURRENT_SPRINT.md" ]; then
+  SPRINT=$(head -20 "$PROJECT_DIR/.context/CURRENT_SPRINT.md")
+  CONTEXT="${CONTEXT}\n📋 Current Sprint:\n${SPRINT}\n"
+fi
+
+if git -C "$PROJECT_DIR" rev-parse --git-dir > /dev/null 2>&1; then
+  RECENT=$(git -C "$PROJECT_DIR" log --oneline -5 2>/dev/null || echo "No commits yet")
+  BRANCH=$(git -C "$PROJECT_DIR" branch --show-current 2>/dev/null || echo "detached")
+  DIRTY=$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+  CONTEXT="${CONTEXT}\n🌿 Branch: ${BRANCH}"
+  [ "$DIRTY" -gt 0 ] && CONTEXT="${CONTEXT} (${DIRTY} uncommitted changes)"
+  CONTEXT="${CONTEXT}\n📝 Recent commits:\n${RECENT}\n"
+fi
+
+if [ -f "$PROJECT_DIR/.tdd-skip" ]; then
+  REASON=$(grep "^Reason:" "$PROJECT_DIR/.tdd-skip" 2>/dev/null | sed 's/^Reason: //' || echo "unknown")
+  CONTEXT="${CONTEXT}\n⚠️ TDD bypass ACTIVE — Reason: ${REASON}\n"
+fi
+
+if [ -f "$PROJECT_DIR/.gitlab-ci.yml" ]; then
+  CONTEXT="${CONTEXT}\n🏢 Platform: GitLab (use glab for MRs)\n"
+elif [ -d "$PROJECT_DIR/.github" ]; then
+  CONTEXT="${CONTEXT}\n🐙 Platform: GitHub (use gh for PRs)\n"
+fi
+
+[ -f "$PROJECT_DIR/AGENTS.md" ] && CONTEXT="${CONTEXT}\n📖 Read AGENTS.md for project rules.\n"
+
+echo -e "$CONTEXT"
+SESSION_START_EOF
+  chmod +x "$CLAUDE_DIR/hooks/session-start.sh"
+  success "~/.claude/hooks/session-start.sh"
+
+  # --- tdd-gate.sh ---
+  cat > "$CLAUDE_DIR/hooks/tdd-gate.sh" << 'TDD_GATE_EOF'
+#!/usr/bin/env bash
+# Blocks git commits without test files. Exit code 2 = block action.
+set -euo pipefail
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
+TOOL_INPUT="${CLAUDE_TOOL_INPUT:-}"
+
+# Only gate git commit
+echo "$TOOL_INPUT" | grep -qE 'git\s+commit' || exit 0
+
+# Allow amend
+echo "$TOOL_INPUT" | grep -qE -- '--amend' && exit 0
+
+# Check bypass
+if [ -f "$PROJECT_DIR/.tdd-skip" ]; then
+  echo "⚠️ TDD bypass active — commit allowed." >&2
+  exit 0
+fi
+
+# Check for test files in staged changes
+TEST_PATTERNS='(test|spec|_test\.|\.test\.|\.spec\.|tests/|__tests__/|Tests/|Test\.)'
+TEST_FILES=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null | grep -iE "$TEST_PATTERNS" || true)
+
+if [ -z "$TEST_FILES" ]; then
+  echo "🚫 TDD GATE: No test files in staged changes." >&2
+  echo "" >&2
+  echo "Options:" >&2
+  echo "  1. Write tests first, stage them, commit together" >&2
+  echo "  2. /skip-tdd 'reason' to bypass (logged)" >&2
+  echo "" >&2
+  echo "Common reasons: 'docs-only' | 'CI config' | 'dependency update' | 'hotfix'" >&2
+  exit 2
+fi
+
+TEST_COUNT=$(echo "$TEST_FILES" | wc -l | tr -d ' ')
+echo "✅ TDD gate passed: $TEST_COUNT test file(s)." >&2
+exit 0
+TDD_GATE_EOF
+  chmod +x "$CLAUDE_DIR/hooks/tdd-gate.sh"
+  success "~/.claude/hooks/tdd-gate.sh"
+}
+
+install_global_skills() {
+  header "Installing skills"
+
+  # --- /tdd ---
+  mkdir -p "$CLAUDE_DIR/skills/tdd"
+  cat > "$CLAUDE_DIR/skills/tdd/SKILL.md" << 'SKILL_EOF'
+---
+name: tdd
+description: >
+  Strict test-driven development workflow. Use when implementing any feature,
+  bug fix, or code change. Follows RED → GREEN → REFACTOR cycle with
+  stack-aware test runner detection. Triggers on: implement, build, create,
+  add feature, fix bug, write code for.
+---
+
+## TDD Workflow
+
+Follow this cycle strictly for every code change.
+
+### Phase 1: RED (Failing Tests)
+1. Read the spec or requirement thoroughly
+2. Identify acceptance criteria and edge cases
+3. Create test file(s) in the appropriate location:
+   - `.csproj`/`.sln` → `tests/Unit/` using xUnit + FluentAssertions
+   - `go.mod` → `*_test.go` using testing + testify (table-driven)
+   - `Cargo.toml` → `#[cfg(test)] mod tests` using built-in + tokio-test
+   - `pyproject.toml` → `tests/unit/test_*.py` using pytest
+   - `package.json` with react → `*.test.tsx` using Vitest + Testing Library
+   - `package.json` with react-native → `*.test.tsx` using Jest + RNTL
+   - `Package.swift`/`.xcodeproj` → `*Tests.swift` using XCTest
+4. Write tests for: happy path, edge cases, error conditions
+5. Run tests — confirm ALL FAIL
+6. Commit: `test(<scope>): add failing tests for <feature>`
+
+### Phase 2: GREEN (Minimum Implementation)
+1. Pick ONE failing test
+2. Write the minimum code to make it pass
+3. Run tests — confirm that test passes
+4. Repeat for each failing test
+5. Commit: `feat(<scope>): implement <feature>`
+
+### Phase 3: REFACTOR
+1. Look for duplication, unclear naming, long functions (aim for < 20 lines)
+2. Extract patterns, improve structure
+3. Run tests after EACH change — must stay green
+4. Commit: `refactor(<scope>): improve <description>`
+
+### Phase 4: Integration Tests
+1. Write integration tests for component interactions
+2. Use TestContainers for database tests
+3. Test with real service boundaries (not mocks)
+4. Commit: `test(integration): add <feature> integration tests`
+
+### Rules
+- NEVER write production code without a failing test
+- Each test tests ONE behavior
+- Descriptive test names: `should_<behavior>_when_<condition>`
+- If a test is hard to write, the design needs improvement
+- If requirements are unclear, STOP and ask before writing tests
+SKILL_EOF
+  success "/tdd skill"
+
+  # --- /ticket ---
+  mkdir -p "$CLAUDE_DIR/skills/ticket"
+  cat > "$CLAUDE_DIR/skills/ticket/SKILL.md" << 'SKILL_EOF'
+---
+name: ticket
+description: >
+  Pull a Jira issue and scaffold a feature spec with test stubs.
+  Use when starting work on a new Jira ticket or GitHub issue.
+  Reads acceptance criteria, description, and comments. Requires
+  Jira MCP server for Jira tickets. Triggers on: ticket, issue,
+  PROJ-*, start work on, pick up.
+---
+
+## Ticket to Spec + Test Stubs
+
+### Step 1: Fetch Ticket
+Use the Jira MCP server to fetch ticket `$ARGUMENTS`:
+- Summary and description
+- Acceptance criteria (check the AC field, or custom fields)
+- Comments (often contain clarifications)
+- Linked issues and subtasks
+
+If Jira MCP is not available, ask the user to paste the ticket details.
+
+### Step 2: Analyze Requirements
+Extract testable requirements from (in priority order):
+1. Acceptance criteria field (if present)
+2. Description (parse for behavioral statements)
+3. Comments (look for clarifications from product/QA)
+
+If requirements are too vague to write tests, STOP and output:
+
+```
+⚠️ CLARIFICATION NEEDED — Ticket lacks clear testable requirements.
+What I found: [summary]
+What I need: [specific questions]
+```
+
+### Step 3: Create Feature Spec
+Create `.context/specs/<ticket-id>-<short-name>.md` with sections:
+- Source (ticket URL)
+- Context (from description)
+- Acceptance Criteria (from AC field or synthesized)
+- Technical Approach (proposed, marked DRAFT)
+- Test Plan (unit + integration test cases)
+- Open Questions (any ambiguity found)
+
+### Step 4: Scaffold Test Stubs
+Detect the project stack and create test file(s) with empty test
+functions matching the acceptance criteria.
+
+### Step 5: Update Sprint
+Add the ticket to `.context/CURRENT_SPRINT.md` as "In Progress".
+SKILL_EOF
+  success "/ticket skill"
+
+  # --- /skip-tdd ---
+  mkdir -p "$CLAUDE_DIR/skills/skip-tdd"
+  cat > "$CLAUDE_DIR/skills/skip-tdd/SKILL.md" << 'SKILL_EOF'
+---
+name: skip-tdd
+description: >
+  Temporarily bypass the TDD commit gate. Use for documentation changes,
+  CI/CD config, dependency updates, or hotfixes. Logs the reason for
+  accountability. Bypass auto-clears after the next commit.
+  Triggers on: skip tdd, bypass tests, no-tdd.
+---
+
+## Skip TDD
+
+Creates a `.tdd-skip` file so the TDD gate hook allows the next commit without test files.
+
+### Usage
+`/skip-tdd <reason>`
+
+### Execute
+Run:
+```bash
+REASON="$ARGUMENTS"
+[ -z "$REASON" ] || [ "$REASON" = "\$ARGUMENTS" ] && REASON="No reason provided"
+BRANCH=$(git branch --show-current 2>/dev/null || echo "unknown")
+printf 'TDD bypass active\nReason: %s\nBranch: %s\nTime: %s\n' \
+  "$REASON" "$BRANCH" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .tdd-skip
+```
+
+Ensure `.tdd-skip` is in `.gitignore`.
+
+After the commit, delete `.tdd-skip` to re-enable the gate.
+
+### Valid Reasons
+- `docs-only change`
+- `CI/CD config update`
+- `dependency update / lockfile`
+- `hotfix — tests in follow-up`
+- `refactoring with existing coverage`
+SKILL_EOF
+  success "/skip-tdd skill"
+
+  # --- /session-report ---
+  mkdir -p "$CLAUDE_DIR/skills/session-report"
+  cat > "$CLAUDE_DIR/skills/session-report/SKILL.md" << 'SKILL_EOF'
+---
+name: session-report
+description: >
+  Generate an Obsidian session report at the end of a coding session.
+  Summarizes commits, tests, decisions, blockers, and next steps.
+  Triggers on: end session, session report, wrap up, done for today.
+---
+
+## Session Report Generator
+
+### Step 1: Gather Context
+```bash
+git diff --stat HEAD~10 2>/dev/null || git diff --stat
+git log --oneline --since="4 hours ago" 2>/dev/null || git log --oneline -10
+git branch --show-current
+```
+
+### Step 2: Generate Report
+Create markdown with frontmatter (date, project, branch, tags) and sections:
+- **Summary**: 2-3 sentences of what was accomplished
+- **Work Done**: Commit-by-commit summary
+- **Tests**: Count added/modified, pass/fail status
+- **Decisions Made**: Any architectural choices (link ADRs)
+- **Blockers / Open Questions**: Unresolved items
+- **Next Steps**: Checklist for next session
+- **References**: Ticket IDs, PR links, ADR links
+
+### Step 3: Save
+Save to: `~/Obsidian/Dev/Sessions/<YYYY-MM-DD>-<project>-session.md`
+If Obsidian MCP is available, use it. Otherwise write directly.
+
+### Step 4: Update Sprint
+Update `.context/CURRENT_SPRINT.md` with current status.
+SKILL_EOF
+  success "/session-report skill"
+
+  # --- /adr ---
+  mkdir -p "$CLAUDE_DIR/skills/adr"
+  cat > "$CLAUDE_DIR/skills/adr/SKILL.md" << 'SKILL_EOF'
+---
+name: adr
+description: >
+  Create an Architecture Decision Record in docs/decisions/ and optionally
+  sync to Confluence for business projects. Use when making significant
+  technical decisions. Triggers on: architecture decision, ADR, technical decision.
+---
+
+## Architecture Decision Record
+
+### Step 1: Determine Next ADR Number
+```bash
+ls docs/decisions/ADR-*.md 2>/dev/null | sort -t- -k2 -n | tail -1
+```
+Increment by 1. Start at 001 if none exist.
+
+### Step 2: Create ADR
+Create `docs/decisions/ADR-<NNN>-<kebab-case-title>.md` with sections:
+- **Status**: Proposed / Accepted / Deprecated / Superseded
+- **Date**: YYYY-MM-DD
+- **Context**: The challenge or decision point
+- **Decision**: What was decided and why
+- **Consequences**: Positive, Negative, Risks
+- **Alternatives Considered**: Each with reason for rejection
+
+### Step 3: Update Architecture Docs
+Add reference in `.context/ARCHITECTURE.md`.
+
+### Step 4: Sync to Confluence (Business Only)
+If Confluence MCP is available, create a child page under "Architecture Decisions".
+Note: canonical version is always the repo file.
+
+### Step 5: Commit
+`docs(adr): ADR-<NNN> <title>`
+SKILL_EOF
+  success "/adr skill"
+
+  # --- /pr ---
+  mkdir -p "$CLAUDE_DIR/skills/pr"
+  cat > "$CLAUDE_DIR/skills/pr/SKILL.md" << 'SKILL_EOF'
+---
+name: pr
+description: >
+  Create a pull request (GitHub) or merge request (GitLab) with conventional
+  description, test summary, and checklist. Auto-detects platform.
+  Triggers on: create pr, create mr, pull request, merge request, push and pr.
+---
+
+## PR/MR Creation
+
+### Step 1: Detect Platform
+- `.gitlab-ci.yml` or gitlab remote → `glab mr create`
+- Otherwise → `gh pr create`
+
+### Step 2: Gather Info
+- Branch name, extract ticket ID if present (e.g., `feature/PROJ-123-desc`)
+- Base branch from `origin/HEAD`
+- Commits since branching
+- Changed files summary
+- Test status from `make test`
+
+### Step 3: Generate Body
+Include: Summary (from commits), Ticket link, Changes, Testing status, Checklist
+(tests added, docs updated, no breaking changes, conventional commits, self-reviewed).
+
+### Step 4: Push + Create
+```bash
+git push -u origin "$BRANCH"
+# GitHub: gh pr create --base "$BASE" --title "..." --body "..."
+# GitLab: glab mr create --source-branch "$BRANCH" --target-branch "$BASE" ...
+```
+
+### Step 5: Output
+Display URL and remind to request reviewers / link ticket.
+SKILL_EOF
+  success "/pr skill"
+
+  # --- /plan (orchestration) ---
+  mkdir -p "$CLAUDE_DIR/skills/plan"
+  cat > "$CLAUDE_DIR/skills/plan/SKILL.md" << 'SKILL_EOF'
+---
+name: plan
+description: >
+  Entry point for all new work. Orchestrates the full agent pipeline:
+  architect (Opus) designs spec+todo, tdd-developer (Sonnet) implements
+  via TDD, qa (Haiku) runs tests, reviewer (Sonnet) reviews code.
+  Triggers on: plan, new feature, start work, build feature.
+disable-model-invocation: true
+---
+
+## Pipeline: /plan <description or ticket ID>
+
+```
+architect (Opus) → spec.md + todo.md (atomic steps)
+  ↓ per step:
+tdd-developer (Sonnet) → RED→GREEN→REFACTOR → commit
+qa (Haiku) → run affected tests
+reviewer (Sonnet) → present findings → user triages
+  ↓ max 3 fix loops, then next step
+```
+
+### Usage
+1. `/plan <description>` → architect creates spec + todo
+2. Approve plan, then: `Use tdd-developer on Step 1 of <todo>.md`
+3. After each step: `Use qa to verify` → `Use reviewer to review`
+4. Triage: [F]ix / [T]ech debt / [I]gnore → next step
+SKILL_EOF
+  success "/plan skill (pipeline orchestration)"
+
+  # --- /clusters (multi-cluster reference) ---
+  mkdir -p "$CLAUDE_DIR/skills/clusters"
+  cat > "$CLAUDE_DIR/skills/clusters/SKILL.md" << 'SKILL_EOF'
+---
+name: clusters
+description: >
+  Multi-cluster reference data for troubleshooting across EMEA, APAC, NAM.
+  Contains kubectl contexts, ArgoCD cluster names, and Azure Application
+  Insights details per region. Auto-loaded by the troubleshooter agent.
+disable-model-invocation: true
+---
+
+## Cluster Registry
+
+Edit the values below to match your environment.
+
+### Clusters
+
+| Region | kubectl Context | ArgoCD Cluster Name | Azure Resource Group | App Insights Instance |
+|--------|----------------|---------------------|---------------------|-----------------------|
+| EMEA   | `aks-emea-prod` | `emea-production` | `rg-emea-prod` | `ai-emea-prod` |
+| APAC   | `aks-apac-prod` | `apac-production` | `rg-apac-prod` | `ai-apac-prod` |
+| NAM    | `aks-nam-prod`  | `nam-production`  | `rg-nam-prod`  | `ai-nam-prod`  |
+
+### ArgoCD
+Single instance manages all 3 clusters. App naming: `<service>-<region>`.
+Each app's `destination.server` identifies the target cluster.
+
+### kubectl — Target a Specific Cluster
+```bash
+kubectl --context=aks-emea-prod get pods -n <namespace>
+kubectl --context=aks-apac-prod logs deployment/<app> --tail=200
+kubectl --context=aks-nam-prod get events -n <namespace>
+```
+
+### Azure App Insights — Query Per Region
+```bash
+az monitor app-insights query \
+  --app ai-<region>-prod --resource-group rg-<region>-prod \
+  --analytics-query "<KQL>"
+```
+
+### Cross-Region Comparison
+```bash
+for region in emea apac nam; do
+  echo "=== $region ==="
+  kubectl --context="aks-${region}-prod" get pods -n <ns> -l app=<svc>
+done
+```
+
+```bash
+for region in emea apac nam; do
+  echo "=== $region ==="
+  az monitor app-insights query \
+    --app "ai-${region}-prod" --resource-group "rg-${region}-prod" \
+    --analytics-query "exceptions | where timestamp > ago(2h) | summarize count() by type"
+done
+```
+SKILL_EOF
+  success "/clusters skill (multi-cluster reference)"
+}
+
+install_global_agents() {
+  header "Installing agents"
+
+  mkdir -p "$CLAUDE_DIR/agents"
+
+  # --- architect (Opus 4.6) ---
+  cat > "$CLAUDE_DIR/agents/architect.md" << 'AGENT_EOF'
+---
+name: architect
+description: >
+  Entry point for ALL new work. Creates feature specs and atomic todo plans.
+  Use when starting any new feature, ticket, bug fix, or improvement.
+  Must run BEFORE any code is written.
+model: opus
+tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
+skills:
+  - ticket
+  - adr
+---
+
+You are a senior software architect and the FIRST agent in the pipeline.
+No code is written until you create the plan.
+
+## Role
+Analyze requirements, design solutions, break work into small testable
+committable steps for the tdd-developer agent.
+
+## Input Sources
+1. Jira ticket (via MCP) — fetch AC, description, comments
+2. GitHub issue — `gh issue view`
+3. User description — direct
+4. Brainstorm — explore before committing
+
+## Workflow
+
+### 1. Understand
+- Read `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
+- Scan codebase with Glob, Grep, Read
+- If unclear: STOP, present options with tradeoffs, ask
+
+### 2. Create Spec
+`.context/specs/<id>-<name>.md` with: Problem Statement, Context,
+Proposed Solution, Acceptance Criteria (testable), Technical Design
+(components, data model, API), Risks, Out of Scope.
+
+### 3. Create Todo
+`.context/specs/<id>-todo.md` with atomic steps. Each step MUST:
+- Be independently testable
+- Result in a commit
+- Complete in one TDD cycle (< 30 min)
+- Specify what to TEST and what to IMPLEMENT
+- List affected files
+
+Format:
+```
+### Step N: <description>
+- **Test**: <specific assertions>
+- **Implement**: <minimum code>
+- **Files**: <affected files>
+- **Commit**: test(<scope>): ... then feat(<scope>): ...
+```
+
+End with Integration Test step + Status checklist.
+
+### 4. Update Sprint
+Add to `.context/CURRENT_SPRINT.md` as In Progress.
+
+### 5. Hand Off
+Present plan, tell user: `Use tdd-developer on Step 1 of <id>-todo.md`
+
+## Rules
+- NEVER write implementation code — only specs and plans
+- Each step: small enough for ONE TDD cycle
+- Always check existing code first
+- Web search requires user permission
+- Create ADRs for significant decisions (/adr skill)
+AGENT_EOF
+  success "architect agent (Opus 4.6)"
+
+  # --- tdd-developer (Sonnet 4.6) ---
+  cat > "$CLAUDE_DIR/agents/tdd-developer.md" << 'AGENT_EOF'
+---
+name: tdd-developer
+description: >
+  Executes ONE step from a todo.md plan using strict TDD.
+  Writes failing tests first, implements minimum code, refactors,
+  commits. One step per invocation. Use after architect creates plan.
+model: sonnet
+tools: Read, Write, Edit, Bash, Glob, Grep
+skills:
+  - tdd
+  - skip-tdd
+---
+
+You are a disciplined test-driven developer. Execute ONE step at a time
+from a todo.md plan created by the architect.
+
+## Workflow
+
+### 0. Load Context
+Read todo file → identify step → read linked spec → read CONVENTIONS.md
+
+### 1. RED — Failing Tests
+- Create tests per step's **Test** section (happy path, edge cases, errors)
+- Run tests — ALL MUST FAIL
+- Commit: `test(<scope>): add failing tests for <step>`
+
+### 2. GREEN — Minimum Implementation
+- Write minimum code to pass ONE test at a time
+- Run tests after each. No extra code. No refactoring.
+- Commit: `feat(<scope>): implement <step>`
+
+### 3. REFACTOR
+- Fix duplication, naming, long functions (< 20 lines)
+- Tests must stay green after each change
+- Commit if substantial: `refactor(<scope>): <improvement>`
+
+### 4. Mark Complete
+- Check off step in todo.md: `- [x] Step N`
+- Report: tests added, files changed, commits, next step
+
+## Rules
+- NEVER skip RED phase
+- NEVER implement beyond current step
+- NEVER move to next step — one per invocation
+- If step is unclear: STOP and report
+- Follow project test patterns from CONVENTIONS.md
+AGENT_EOF
+  success "tdd-developer agent (Sonnet 4.6)"
+
+  # --- qa (Haiku 4.5) ---
+  cat > "$CLAUDE_DIR/agents/qa.md" << 'AGENT_EOF'
+---
+name: qa
+description: >
+  Runs affected tests after tdd-developer completes a step.
+  Unit tests for changed files, integration tests if available.
+  Reports pass/fail. Use after each TDD step.
+model: haiku
+tools: Read, Bash, Glob, Grep
+---
+
+You are a QA engineer. Verify changes by running appropriate tests.
+Run AFTER tdd-developer finishes a step.
+
+## Workflow
+
+### 1. Identify Changes
+`git diff --name-only HEAD~3..HEAD`
+
+### 2. Determine Scope
+- Always: unit tests for changed files + dependencies
+- If available: integration tests for changed components
+- Skip: unrelated tests, E2E (CI only)
+
+Detect runner from project files (Makefile, package.json, csproj, etc.)
+
+### 3. Run Tests
+Run scoped tests. Include integration only if relevant.
+
+### 4. Report
+Pass: count, time, "Ready for review"
+Fail: each failure with exact error, counts
+
+## Rules
+- NEVER modify code — only run and report
+- Run MINIMUM tests to verify the change
+- Report exact failure messages
+AGENT_EOF
+  success "qa agent (Haiku 4.5)"
+
+  # --- reviewer (Sonnet 4.6) ---
+  cat > "$CLAUDE_DIR/agents/reviewer.md" << 'AGENT_EOF'
+---
+name: reviewer
+description: >
+  Reviews code after tdd-developer and qa finish a step.
+  Checks quality, conventions, security, coverage. Presents
+  findings for user triage (fix/tech-debt/ignore). Max 3 loops.
+model: sonnet
+tools: Read, Glob, Grep, Bash
+---
+
+You are a senior code reviewer. You review AFTER tdd-developer and qa.
+You are the quality gate before the next step.
+
+## Workflow
+
+### 1. Identify Changes
+`git log --oneline -5` and `git diff HEAD~3..HEAD`
+Read CONVENTIONS.md and relevant spec.
+
+### 2. Review Checklist
+- Correctness: matches spec AC, edge cases, error handling
+- Test Quality: behavior-focused, independent, descriptive names
+- Code Quality: small functions, meaningful names, no duplication
+- Stack Conventions: idiomatic patterns, correct error handling
+- Security: no secrets, input validation, no injection vectors
+- Performance: no N+1, appropriate data structures
+
+### 3. Categorize
+- 🔴 MUST FIX: bugs, security, spec violations
+- 🟡 SHOULD FIX: quality, missing edge cases — user decides
+- 🟢 SUGGESTION: style, alternatives — user decides
+
+### 4. Present to User
+List findings with file:line and suggested fixes.
+SHOULD FIX: ask [F]ix / [T]ech debt / [I]gnore
+
+### 5. Handle Triage
+- Fix → format request for tdd-developer
+- Tech Debt → add to CURRENT_SPRINT.md
+- Ignore → acknowledge
+
+### Loop Limit (3 max)
+After 3 cycles: remaining issues → tech debt, proceed to next step.
+
+## Rules
+- NEVER modify code
+- Be specific: file, line, suggested fix
+- Be constructive: explain WHY
+- Respect user triage decisions
+- If code is clean, say so and move on
+AGENT_EOF
+  success "reviewer agent (Sonnet 4.6)"
+
+  # --- troubleshooter (Opus 4.6) ---
+  cat > "$CLAUDE_DIR/agents/troubleshooter.md" << 'AGENT_EOF'
+---
+name: troubleshooter
+description: >
+  Investigates production issues across EMEA/APAC/NAM clusters.
+  Pulls Jira context, reads ArgoCD pod logs, queries Azure Application
+  Insights, correlates findings, produces diagnosis + fix plan for
+  tdd-developer. Use for: bug, incident, production issue, error,
+  crash, 500, timeout, outage, degraded, pod restart.
+model: opus
+tools: Read, Write, Edit, Bash, Glob, Grep
+skills:
+  - ticket
+  - clusters
+---
+
+You are a senior SRE and troubleshooter. Investigate production issues
+by gathering evidence from multiple sources, then produce a diagnosis
+with TDD fix steps.
+
+## Multi-Cluster Environment
+
+Read the /clusters skill for cluster registry details. Services deploy
+to 3 regional clusters: EMEA, APAC, NAM. Key points:
+
+- **ArgoCD**: Single instance manages all 3 clusters via MCP.
+  Each app has `destination.server` identifying the target cluster.
+  App naming convention: `<service>-<region>` (e.g., `order-api-emea`)
+- **kubectl**: Use `--context=<context>` to target a specific cluster
+  without switching: `kubectl --context=aks-emea-prod get pods -n <ns>`
+- **Azure App Insights**: Separate instance per region.
+  Use the correct `--app` and `--resource-group` per region.
+
+## Workflow
+
+### Step 1: Understand the Issue
+Read the Jira ticket. Extract: what's failing, when, severity, affected region(s).
+
+### Step 2: Determine Scope — Regional or Global?
+Query App Insights in ALL regions for the same error pattern:
+```bash
+for region in emea apac nam; do
+  echo "=== $region ==="
+  az monitor app-insights query \
+    --app "ai-${region}-prod" --resource-group "rg-${region}-prod" \
+    --analytics-query "exceptions | where timestamp > ago(2h) | summarize count() by type" \
+    --output json
+done
+```
+- Same error in all regions → code bug, investigate one deeply
+- Error in one region only → infrastructure or region-specific config
+
+### Step 3: Gather Evidence (per affected region)
+
+**ArgoCD (via MCP or CLI):**
+- App health and sync status for the service
+- Check if a recent sync correlates with issue start
+
+**Pod logs (kubectl with context):**
+```bash
+kubectl --context=aks-<region>-prod logs -n <ns> deployment/<svc> --tail=200 --since=1h
+kubectl --context=aks-<region>-prod logs -n <ns> deployment/<svc> --previous --tail=100
+kubectl --context=aks-<region>-prod get events -n <ns> --sort-by='.lastTimestamp' | tail -20
+kubectl --context=aks-<region>-prod get pods -n <ns> -l app=<svc> -o wide
+```
+
+**Azure Application Insights:**
+```bash
+# Exceptions
+az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
+  --analytics-query "exceptions | where timestamp > ago(2h) | order by timestamp desc | take 20"
+
+# Failed requests
+az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
+  --analytics-query "requests | where success == false and timestamp > ago(2h) | take 20"
+
+# Dependency failures
+az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
+  --analytics-query "dependencies | where success == false and timestamp > ago(2h) | take 20"
+
+# Correlate by operation ID
+az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
+  --analytics-query "union requests, dependencies, exceptions, traces | where operation_Id == '<id>' | order by timestamp asc"
+```
+
+**Codebase:**
+```bash
+git log --oneline --since="3 days ago" -- <path>
+```
+
+### Step 4: Correlate
+- Match timestamps: deployment → first error → ticket report
+- Compare error patterns across regions
+- Trace from App Insights exception → pod log → source code
+
+### Step 5: Diagnose
+Output structured diagnosis:
+```
+🔍 INCIDENT DIAGNOSIS
+
+## Issue: <ticket> — <summary>
+## Scope: <Global (all regions) | Regional (EMEA/APAC/NAM)>
+## Timeline: first occurrence → deployment → report
+
+## Root Cause: <clear explanation>
+
+## Evidence
+### Per Region
+| Region | Error Count | Pod Status | App Insights |
+|--------|------------|------------|--------------|
+| EMEA   | ...        | ...        | ...          |
+| APAC   | ...        | ...        | ...          |
+| NAM    | ...        | ...        | ...          |
+
+### Key Findings
+- <finding with source>
+
+## Fix Plan: .context/specs/<ticket>-todo.md
+  Step 1: test that REPRODUCES the bug
+  Step 2+: fix via TDD
+
+## Prevention
+- <monitoring/alerting to add>
+- <test coverage gaps>
+```
+
+### Step 6: Create Artifacts + Hand Off
+1. Create `.context/specs/<ticket>-bugfix.md` with diagnosis
+2. Create `.context/specs/<ticket>-todo.md` with fix steps
+3. Update `.context/CURRENT_SPRINT.md`
+4. Tell user: `Use tdd-developer to work on Step 1`
+
+## Rules
+- NEVER make code changes — only investigate and plan
+- First fix step: test that reproduces the bug (RED)
+- Always check ALL regions before concluding scope
+- If root cause unclear: say so, list what was ruled out
+- If rollback needed: say so FIRST
+- Protect sensitive data — no secrets/tokens/PII
+- If a tool is unavailable, report it and continue with others
+AGENT_EOF
+  success "troubleshooter agent (Opus 4.6)"
+}
+
+install_copilot_agents() {
+  # Check if copilot CLI is installed
+  if ! command -v copilot &> /dev/null; then
+    dim "Copilot CLI not found — skipping Copilot agent installation"
+    dim "Install with: npm install -g @github/copilot"
+    return
+  fi
+
+  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
+  header "Installing Copilot CLI agents"
+
+  mkdir -p "$COPILOT_DIR/agents"
+
+  # --- architect ---
+  cat > "$COPILOT_DIR/agents/architect.agent.md" << 'AGENT_EOF'
+---
+name: architect
+description: >
+  Entry point for ALL new work. Creates feature specs and atomic todo
+  plans with testable steps. Must run BEFORE any code is written.
+  Creates spec.md and todo.md in .context/specs/.
+tools:
+  - read_file
+  - edit_file
+  - run_in_terminal
+  - file_search
+  - grep_search
+---
+
+You are a senior software architect and the FIRST agent in the pipeline.
+No code is written until you create the plan.
+
+## Role
+Analyze requirements, design solutions, break work into small testable
+committable steps for the tdd-developer agent.
+
+## Workflow
+1. Read `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
+2. Scan codebase for existing patterns
+3. If unclear: STOP, present options with tradeoffs, ask
+4. Create spec at `.context/specs/<id>-<n>.md`
+5. Create todo at `.context/specs/<id>-todo.md` with atomic steps
+   Each step: what to TEST, what to IMPLEMENT, affected files
+6. Update `.context/CURRENT_SPRINT.md`
+7. Hand off: `copilot --agent=tdd-developer --prompt "Step 1 of <id>-todo.md"`
+
+## Rules
+- NEVER write implementation code — only specs and plans
+- Each step must complete in ONE TDD cycle (< 30 min)
+- Always check existing code before proposing changes
+AGENT_EOF
+  success "architect.agent.md"
+
+  # --- tdd-developer ---
+  cat > "$COPILOT_DIR/agents/tdd-developer.agent.md" << 'AGENT_EOF'
+---
+name: tdd-developer
+description: >
+  Executes ONE step from a todo.md plan using strict TDD.
+  Writes failing tests first, implements minimum code, refactors,
+  commits. One step per invocation.
+tools:
+  - read_file
+  - edit_file
+  - run_in_terminal
+  - file_search
+  - grep_search
+---
+
+You are a disciplined test-driven developer. Execute ONE step at a time
+from a todo.md plan created by the architect.
+
+## Workflow
+1. Read todo file, identify current step, read linked spec
+2. RED: Write failing tests → run → confirm FAIL → commit
+3. GREEN: Minimum code to pass ONE test at a time → commit
+4. REFACTOR: Improve while green → commit if substantial
+5. Mark step complete in todo.md, report what's next
+
+## Rules
+- NEVER skip RED phase — tests come first
+- NEVER implement beyond current step
+- NEVER move to next step — one per invocation
+- If step is unclear: STOP and report
+AGENT_EOF
+  success "tdd-developer.agent.md"
+
+  # --- qa ---
+  cat > "$COPILOT_DIR/agents/qa.agent.md" << 'AGENT_EOF'
+---
+name: qa
+description: >
+  Runs affected tests after tdd-developer completes a step.
+  Reports pass/fail with exact errors.
+tools:
+  - read_file
+  - run_in_terminal
+  - file_search
+  - grep_search
+---
+
+You are a QA engineer. Verify changes by running appropriate tests.
+
+## Workflow
+1. `git diff --name-only HEAD~3..HEAD` to find changes
+2. Run unit tests for changed files + integration tests if available
+3. Report: pass count, fail count, exact error messages
+AGENT_EOF
+  success "qa.agent.md"
+
+  # --- reviewer ---
+  cat > "$COPILOT_DIR/agents/reviewer.agent.md" << 'AGENT_EOF'
+---
+name: reviewer
+description: >
+  Reviews code after tdd-developer and qa finish. Checks quality,
+  conventions, security. Presents findings for user triage. Max 3 loops.
+tools:
+  - read_file
+  - run_in_terminal
+  - file_search
+  - grep_search
+---
+
+You are a senior code reviewer. Quality gate before the next step.
+
+## Workflow
+1. `git diff HEAD~3..HEAD` + read CONVENTIONS.md + spec
+2. Review: correctness, test quality, code quality, security, performance
+3. Categorize: 🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
+4. Present with file:line references. User triages SHOULD FIX items.
+5. Fix → back to tdd-developer. Tech Debt → CURRENT_SPRINT.md. Max 3 loops.
+
+## Rules
+- NEVER modify code — only read and report
+- Be specific: file, line, suggested fix
+- Respect user triage decisions
+AGENT_EOF
+  success "reviewer.agent.md"
+
+  # --- troubleshooter ---
+  cat > "$COPILOT_DIR/agents/troubleshooter.agent.md" << 'AGENT_EOF'
+---
+name: troubleshooter
+description: >
+  Investigates production issues. Reads Jira tickets, ArgoCD pod logs,
+  Azure Application Insights telemetry. Produces diagnosis + TDD fix
+  plan. Use for: bug, incident, error, crash, 500, timeout, outage.
+tools:
+  - read_file
+  - edit_file
+  - run_in_terminal
+  - file_search
+  - grep_search
+---
+
+You are a senior SRE and troubleshooter. Investigate production issues.
+
+## Data Sources
+1. **Jira** — incident ticket context
+2. **ArgoCD/kubectl** — pod logs, app health, events
+3. **Azure App Insights** — exceptions, failed requests, traces
+   (`az monitor app-insights query --analytics-query "..."`)
+4. **Codebase** — recent changes, source of failing code
+
+## Workflow
+1. Understand (read ticket)
+2. Gather (ArgoCD + App Insights + git log)
+3. Correlate (match timestamps, trace error to code)
+4. Diagnose (root cause, evidence, impact)
+5. Plan fix (spec + todo.md, first step REPRODUCES the bug)
+6. Hand off to tdd-developer
+
+## Rules
+- NEVER make code changes — only investigate and plan
+- First fix step: test that reproduces the bug
+- If rollback needed, say so FIRST
+- Protect sensitive data in output
+AGENT_EOF
+  success "troubleshooter.agent.md"
+
+  info "Copilot CLI agents installed to: $COPILOT_DIR/agents/"
+  dim "Use: copilot --agent=architect --prompt \"...\""
+  dim " or: /agent in interactive mode"
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     PROJECT INSTALLATION                        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+install_project() {
+  local project_dir="${1:-.}"
+  project_dir="$(cd "$project_dir" && pwd)"
+
+  header "Installing project files in: $project_dir"
+  echo ""
+
+  # Detect stacks
+  local stacks
+  stacks=$(detect_stacks "$project_dir")
+  local platform
+  platform=$(detect_platform "$project_dir")
+
+  if [ -z "$stacks" ]; then
+    warn "No stack detected. Installing generic config."
+    stacks="generic"
+  fi
+
+  info "Detected stacks: $(echo "$stacks" | tr '\n' ', ' | sed 's/,$//')"
+  info "Platform: $platform"
+  echo ""
+
+  # --- AGENTS.md ---
+  install_project_agents_md "$project_dir" "$stacks"
+
+  # --- CLAUDE.md ---
+  install_project_claude_md "$project_dir"
+
+  # --- .context/ directory ---
+  install_project_context "$project_dir"
+
+  # --- .github/ (copilot instructions) ---
+  install_project_copilot "$project_dir" "$stacks"
+
+  # --- .gitignore additions ---
+  install_project_gitignore "$project_dir"
+
+  # --- docs/decisions/ for ADRs ---
+  mkdir -p "$project_dir/docs/decisions"
+  success "docs/decisions/ (ADR directory)"
+
+  echo ""
+  header "Project installation complete"
+  echo ""
+  info "Installed in: $project_dir"
+  info "Detected: $(echo "$stacks" | tr '\n' ', ' | sed 's/,$//')"
+  info "Platform: $platform"
+  echo ""
+  info "Next steps:"
+  dim "1. Edit AGENTS.md to customize for this project"
+  dim "2. Edit .context/ARCHITECTURE.md with your system design"
+  dim "3. Add domain terms to .context/GLOSSARY.md"
+  dim "4. Start your first feature with /ticket or /tdd"
+}
+
+install_project_agents_md() {
+  local project_dir="$1"
+  local stacks="$2"
+  local target="$project_dir/AGENTS.md"
+
+  if [ -f "$target" ]; then
+    warn "AGENTS.md already exists — skipping (use --force to overwrite)"
+    return
+  fi
+
+  # Build stack-specific sections
+  local stack_sections=""
+
+  if echo "$stacks" | grep -q "dotnet"; then
+    stack_sections="${stack_sections}
+### .NET
+- **Testing**: xUnit + FluentAssertions + NSubstitute
+- **Pattern**: CQRS with MediatR, Result pattern for expected failures
+- **Structure**: Api / Application / Domain / Infrastructure
+- **DTOs**: Use C# records for immutability
+"
+  fi
+
+  if echo "$stacks" | grep -q "go"; then
+    stack_sections="${stack_sections}
+### Go
+- **Testing**: \`testing\` + testify, table-driven tests by default
+- **Pattern**: Accept interfaces, return structs. Context as first param.
+- **Structure**: cmd/ internal/ pkg/
+- **Errors**: \`fmt.Errorf(\"context: %w\", err)\`
+"
+  fi
+
+  if echo "$stacks" | grep -q "rust"; then
+    stack_sections="${stack_sections}
+### Rust
+- **Testing**: Built-in + tokio-test
+- **Pattern**: thiserror for libs, anyhow for apps. axum for web.
+- **Structure**: src/ with handlers/ services/ models/ db/
+"
+  fi
+
+  if echo "$stacks" | grep -q "python"; then
+    stack_sections="${stack_sections}
+### Python
+- **Testing**: pytest with fixtures
+- **Pattern**: Type hints everywhere, Pydantic for validation
+- **Formatting**: Black (line length 88) + Ruff
+"
+  fi
+
+  if echo "$stacks" | grep -q "react-native"; then
+    stack_sections="${stack_sections}
+### React Native / TypeScript
+- **Testing**: Jest + React Native Testing Library. E2E: Detox
+- **Platform-specific**: \`.ios.tsx\` / \`.android.tsx\` suffixes
+"
+  elif echo "$stacks" | grep -q "react-ts"; then
+    local e2e_runner
+    e2e_runner=$(detect_e2e_runner "$project_dir")
+    local e2e_text=""
+    [ -n "$e2e_runner" ] && e2e_text=". E2E: ${e2e_runner^}"
+
+    local test_runner
+    test_runner=$(detect_test_runner "$project_dir")
+    [ -z "$test_runner" ] && test_runner="vitest"
+
+    stack_sections="${stack_sections}
+### React / TypeScript
+- **Testing**: ${test_runner^} + React Testing Library${e2e_text}
+- **Pattern**: Functional components only, custom hooks, Zod validation
+- **Structure**: components/ features/ hooks/ lib/ types/
+"
+  elif echo "$stacks" | grep -q "typescript"; then
+    stack_sections="${stack_sections}
+### TypeScript
+- **Testing**: Vitest or Jest
+- **Pattern**: Type-safe, explicit error handling
+"
+  fi
+
+  if echo "$stacks" | grep -q "swift"; then
+    stack_sections="${stack_sections}
+### Swift
+- **Testing**: XCTest with protocol-based mocks
+- **Pattern**: MVVM, protocol-oriented, async/await
+"
+  fi
+
+  cat > "$target" << AGENTS_EOF
+# AGENTS.md
+
+> Cross-tool agent instructions. Read by Claude Code, GitHub Copilot, and other AI agents.
+
+## Core Rules
+
+### 1. TDD is Mandatory
+Every code change follows RED → GREEN → REFACTOR:
+1. **RED**: Write failing test(s) FIRST. Run them. Confirm failure.
+2. **GREEN**: Write MINIMUM code to pass. One test at a time.
+3. **REFACTOR**: Improve code while keeping tests green.
+
+Your first output for any feature request MUST be test code.
+To bypass: use \`/skip-tdd\` with a reason (logged for accountability).
+
+### 2. Stop and Ask When Uncertain
+Do NOT guess. Stop and present options when:
+- Requirements are ambiguous
+- Multiple valid approaches exist
+- Spec contradicts existing code
+- Business logic is unclear
+
+### 3. Document As You Go
+- Update \`.context/CURRENT_SPRINT.md\` when task status changes
+- Note architecture decisions in commit messages
+- Flag documentation that needs updating
+
+## Before Starting Any Work
+1. Read the spec in \`.context/specs/\` if one exists
+2. Scan \`.context/ARCHITECTURE.md\` for system context
+3. Check \`.context/CONVENTIONS.md\` for stack patterns
+4. Identify ALL affected components before writing code
+
+## Commit Messages
+Conventional Commits: \`<type>(<scope>): <description>\`
+Types: \`feat\`, \`fix\`, \`test\`, \`refactor\`, \`docs\`, \`chore\`, \`ci\`, \`perf\`
+
+## Test Organization
+\`\`\`
+tests/
+├── unit/           # Fast, isolated, mocked dependencies
+├── integration/    # Real DB via TestContainers
+└── fixtures/       # Shared test data
+\`\`\`
+
+## Stack Conventions
+${stack_sections}
+### Database (PostgreSQL)
+- **Tables**: snake_case, plural (\`users\`, \`order_items\`)
+- **Primary keys**: \`id\` (UUID or serial)
+- **Foreign keys**: \`{table_singular}_id\`
+- **Migrations**: Always reversible, one concern per migration
+
+## Error Reporting
+\`\`\`
+❌ ERROR: [What happened]
+Context: [What was being attempted]
+Location: [File/function]
+Possible causes:
+1. [Cause and fix]
+Suggested action: [What to do next]
+\`\`\`
+
+## Session End Protocol
+1. Ensure all tests pass
+2. Commit pending changes
+3. Update \`.context/CURRENT_SPRINT.md\`
+4. Use \`/session-report\` to generate Obsidian report
+AGENTS_EOF
+  success "AGENTS.md (tailored for: $(echo "$stacks" | tr '\n' ', ' | sed 's/,$//'))"
+}
+
+install_project_claude_md() {
+  local project_dir="$1"
+  local target="$project_dir/CLAUDE.md"
+
+  if [ -f "$target" ]; then
+    warn "CLAUDE.md already exists — skipping"
+    return
+  fi
+
+  local project_name
+  project_name=$(basename "$project_dir")
+
+  cat > "$target" << CLAUDE_EOF
+# CLAUDE.md
+
+> Project context for Claude Code. Behavioral rules are in AGENTS.md.
+
+## Project
+${project_name}
+
+## Architecture
+Read \`.context/ARCHITECTURE.md\` for system design.
+
+## Current Work
+Read \`.context/CURRENT_SPRINT.md\` for active tasks.
+
+## Specs
+Feature specifications are in \`.context/specs/\`.
+
+## Commands
+\`\`\`bash
+make test              # Unit tests
+make test-integration  # Integration tests
+make test-e2e          # End-to-end tests
+make lint              # Lint
+make fmt               # Format
+make build             # Build
+make dev               # Local dev server
+\`\`\`
+
+## Key Paths
+| Path | Purpose |
+|---|---|
+| \`.context/\` | Specs, architecture, conventions |
+| \`docs/\` | Arc42 documentation + ADRs |
+| \`tests/unit/\` | Unit tests |
+| \`tests/integration/\` | Integration tests |
+CLAUDE_EOF
+  success "CLAUDE.md"
+}
+
+install_project_context() {
+  local project_dir="$1"
+  local context_dir="$project_dir/.context"
+
+  mkdir -p "$context_dir/specs/templates"
+
+  # Only create files that don't exist
+  if [ ! -f "$context_dir/ARCHITECTURE.md" ]; then
+    cat > "$context_dir/ARCHITECTURE.md" << 'EOF'
+# Architecture
+
+> Document your system architecture here.
+
+## Overview
+<!-- High-level system description -->
+
+## Components
+<!-- List major components and their responsibilities -->
+
+## Data Flow
+<!-- How data moves through the system -->
+
+## Key Decisions
+<!-- Link to ADRs: docs/decisions/ADR-*.md -->
+EOF
+    success ".context/ARCHITECTURE.md"
+  fi
+
+  if [ ! -f "$context_dir/CONVENTIONS.md" ]; then
+    cat > "$context_dir/CONVENTIONS.md" << 'EOF'
+# Conventions
+
+> Stack-specific conventions for this project.
+> See AGENTS.md for cross-tool agent rules.
+
+## Project-Specific Patterns
+<!-- Add project-specific conventions here -->
+EOF
+    success ".context/CONVENTIONS.md"
+  fi
+
+  if [ ! -f "$context_dir/GLOSSARY.md" ]; then
+    cat > "$context_dir/GLOSSARY.md" << 'EOF'
+# Glossary
+
+> Domain terminology for this project.
+
+| Term | Definition |
+|---|---|
+<!-- Add domain terms here -->
+EOF
+    success ".context/GLOSSARY.md"
+  fi
+
+  if [ ! -f "$context_dir/CURRENT_SPRINT.md" ]; then
+    cat > "$context_dir/CURRENT_SPRINT.md" << 'EOF'
+# Current Sprint
+
+## In Progress
+<!-- - [TICKET-ID] Description -->
+
+## Up Next
+<!-- - [TICKET-ID] Description -->
+
+## Done (this sprint)
+<!-- - [TICKET-ID] Description -->
+
+## Blockers
+<!-- - Description -->
+EOF
+    success ".context/CURRENT_SPRINT.md"
+  fi
+
+  if [ ! -f "$context_dir/specs/templates/feature-spec.md" ]; then
+    cat > "$context_dir/specs/templates/feature-spec.md" << 'EOF'
+# [TICKET-ID]: Feature Name
+
+## Context
+<!-- What problem does this solve? -->
+
+## Acceptance Criteria
+- [ ] <!-- Criterion 1 -->
+
+## Technical Approach
+<!-- How will this be implemented? -->
+
+## Test Plan
+### Unit Tests
+- [ ] <!-- Test case -->
+
+### Integration Tests
+- [ ] <!-- Test case -->
+
+## Open Questions
+- <!-- Any ambiguity -->
+EOF
+    success ".context/specs/templates/feature-spec.md"
+  fi
+}
+
+install_project_copilot() {
+  local project_dir="$1"
+  local stacks="$2"
+
+  mkdir -p "$project_dir/.github/instructions"
+
+  # --- copilot-instructions.md ---
+  if [ ! -f "$project_dir/.github/copilot-instructions.md" ]; then
+    cat > "$project_dir/.github/copilot-instructions.md" << 'COPILOT_EOF'
+# Copilot Instructions
+
+> Repository-wide instructions for GitHub Copilot agent mode.
+> For detailed rules, see AGENTS.md at the project root.
+
+## TDD Workflow (Non-Negotiable)
+1. Write failing tests FIRST — your first output must be test code
+2. Implement minimum code to pass tests
+3. Refactor while keeping tests green
+
+## Before Coding
+- Check `.context/specs/` for feature specifications
+- Read `.context/CONVENTIONS.md` for stack patterns
+- Read `.context/ARCHITECTURE.md` for system context
+
+## When Uncertain
+Stop and ask. Present options with tradeoffs.
+
+## Commit Messages
+Conventional Commits: `<type>(<scope>): <description>`
+Types: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `ci`, `perf`
+
+## Code Standards
+- Explicit over implicit
+- Small functions (< 20 lines)
+- Meaningful names (purpose, not implementation)
+- Fail fast (validate early, return early)
+- No magic numbers
+- Type annotations on all signatures
+COPILOT_EOF
+    success ".github/copilot-instructions.md"
+  fi
+
+  # --- Path-specific instructions based on detected stacks ---
+
+  if echo "$stacks" | grep -q "dotnet"; then
+    if [ ! -f "$project_dir/.github/instructions/dotnet.instructions.md" ]; then
+      cat > "$project_dir/.github/instructions/dotnet.instructions.md" << 'EOF'
+---
+applyTo: "**/*.cs"
+---
+Use xUnit for tests with FluentAssertions for assertions and NSubstitute for mocking.
+Follow CQRS pattern with MediatR for command/query separation.
+Use Result<T> pattern for expected failures — do not throw exceptions for business logic.
+DTOs as C# records: `public record UserDto(int Id, string Name, string Email);`
+Structure: Api → Application → Domain → Infrastructure.
+Arrange-Act-Assert in all tests.
+EOF
+      success ".github/instructions/dotnet.instructions.md"
+    fi
+  fi
+
+  if echo "$stacks" | grep -q "go"; then
+    if [ ! -f "$project_dir/.github/instructions/go.instructions.md" ]; then
+      cat > "$project_dir/.github/instructions/go.instructions.md" << 'EOF'
+---
+applyTo: "**/*.go"
+---
+Use table-driven tests with testify assertions as the default pattern.
+Accept interfaces, return structs. Always pass context.Context as first parameter.
+Wrap errors with context: `fmt.Errorf("operation: %w", err)`.
+Package names: lowercase, short, no underscores (`user`, `auth`).
+Exported: PascalCase. Unexported: camelCase.
+EOF
+      success ".github/instructions/go.instructions.md"
+    fi
+  fi
+
+  if echo "$stacks" | grep -q "rust"; then
+    if [ ! -f "$project_dir/.github/instructions/rust.instructions.md" ]; then
+      cat > "$project_dir/.github/instructions/rust.instructions.md" << 'EOF'
+---
+applyTo: "**/*.rs"
+---
+Use thiserror for library error types, anyhow for application error handling.
+Prefer axum for web services with tokio async runtime.
+Derive liberally: `#[derive(Debug, Clone, Serialize, Deserialize)]`.
+Tests in `#[cfg(test)] mod tests` within the same file.
+Use `#[tokio::test]` for async tests.
+EOF
+      success ".github/instructions/rust.instructions.md"
+    fi
+  fi
+
+  if echo "$stacks" | grep -q "python"; then
+    if [ ! -f "$project_dir/.github/instructions/python.instructions.md" ]; then
+      cat > "$project_dir/.github/instructions/python.instructions.md" << 'EOF'
+---
+applyTo: "**/*.py"
+---
+Type hints on ALL function signatures.
+Pydantic models for data validation and DTOs.
+Format: Black (line length 88). Lint: Ruff. Imports: isort.
+pytest with fixtures (conftest.py). Async preferred for I/O.
+Private: leading underscore. Constants: UPPER_SNAKE_CASE.
+EOF
+      success ".github/instructions/python.instructions.md"
+    fi
+  fi
+
+  if echo "$stacks" | grep -qE "react-ts|react-native|typescript"; then
+    if [ ! -f "$project_dir/.github/instructions/typescript.instructions.md" ]; then
+      cat > "$project_dir/.github/instructions/typescript.instructions.md" << 'EOF'
+---
+applyTo: "**/*.ts,**/*.tsx"
+---
+Functional components only — no class components.
+Extract complex state logic into custom hooks (`use` prefix).
+Zod for runtime validation of external data.
+Props interfaces: PascalCase with Props suffix (`UserCardProps`).
+Constants: UPPER_SNAKE_CASE. Test behavior, not implementation.
+EOF
+      success ".github/instructions/typescript.instructions.md"
+    fi
+  fi
+
+  if echo "$stacks" | grep -q "swift"; then
+    if [ ! -f "$project_dir/.github/instructions/swift.instructions.md" ]; then
+      cat > "$project_dir/.github/instructions/swift.instructions.md" << 'EOF'
+---
+applyTo: "**/*.swift"
+---
+MVVM architecture with protocol-oriented design.
+Use async/await for all asynchronous code.
+Protocol-based mocks for testing with XCTest.
+Prefer protocols over inheritance. Use Combine or async sequences for reactive streams.
+@Published properties in ViewModels for SwiftUI bindings.
+EOF
+      success ".github/instructions/swift.instructions.md"
+    fi
+  fi
+}
+
+install_project_gitignore() {
+  local project_dir="$1"
+  local gitignore="$project_dir/.gitignore"
+
+  local entries=(".tdd-skip" ".claude/settings.local.json")
+  local added=0
+
+  for entry in "${entries[@]}"; do
+    if [ -f "$gitignore" ]; then
+      if ! grep -qF "$entry" "$gitignore" 2>/dev/null; then
+        echo "$entry" >> "$gitignore"
+        added=$((added + 1))
+      fi
+    else
+      echo "$entry" >> "$gitignore"
+      added=$((added + 1))
+    fi
+  done
+
+  if [ "$added" -gt 0 ]; then
+    success ".gitignore (added $added entries)"
+  else
+    dim ".gitignore already up to date"
+  fi
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     STATUS / DETECT / UNINSTALL                 ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+show_status() {
+  header "TDD Workflow v${VERSION} — Installation Status"
+  echo ""
+
+  header "Global (~/.claude/)"
+  check_file "$CLAUDE_DIR/CLAUDE.md" "CLAUDE.md"
+  check_file "$CLAUDE_DIR/settings.json" "settings.json (hooks)"
+  check_file "$CLAUDE_DIR/hooks/session-start.sh" "hooks/session-start.sh"
+  check_file "$CLAUDE_DIR/hooks/tdd-gate.sh" "hooks/tdd-gate.sh"
+  check_file "$CLAUDE_DIR/skills/tdd/SKILL.md" "skills/tdd"
+  check_file "$CLAUDE_DIR/skills/ticket/SKILL.md" "skills/ticket"
+  check_file "$CLAUDE_DIR/skills/skip-tdd/SKILL.md" "skills/skip-tdd"
+  check_file "$CLAUDE_DIR/skills/session-report/SKILL.md" "skills/session-report"
+  check_file "$CLAUDE_DIR/skills/adr/SKILL.md" "skills/adr"
+  check_file "$CLAUDE_DIR/skills/pr/SKILL.md" "skills/pr"
+  check_file "$CLAUDE_DIR/skills/plan/SKILL.md" "skills/plan (orchestration)"
+  check_file "$CLAUDE_DIR/skills/clusters/SKILL.md" "skills/clusters (multi-region)"
+  check_file "$CLAUDE_DIR/agents/architect.md" "agents/architect (Opus)"
+  check_file "$CLAUDE_DIR/agents/tdd-developer.md" "agents/tdd-developer (Sonnet)"
+  check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Haiku)"
+  check_file "$CLAUDE_DIR/agents/reviewer.md" "agents/reviewer (Sonnet)"
+  check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
+
+  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
+  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ]; then
+    echo ""
+    header "Copilot CLI ($COPILOT_DIR/)"
+    check_file "$COPILOT_DIR/agents/architect.agent.md" "agents/architect"
+    check_file "$COPILOT_DIR/agents/tdd-developer.agent.md" "agents/tdd-developer"
+    check_file "$COPILOT_DIR/agents/qa.agent.md" "agents/qa"
+    check_file "$COPILOT_DIR/agents/reviewer.agent.md" "agents/reviewer"
+    check_file "$COPILOT_DIR/agents/troubleshooter.agent.md" "agents/troubleshooter"
+  fi
+
+  echo ""
+  header "Current Directory ($(pwd))"
+  check_file "AGENTS.md" "AGENTS.md"
+  check_file "CLAUDE.md" "CLAUDE.md"
+  check_file ".context/CURRENT_SPRINT.md" ".context/"
+  check_file ".github/copilot-instructions.md" ".github/copilot-instructions.md"
+  check_dir ".github/instructions" ".github/instructions/"
+
+  if [ -f ".tdd-skip" ]; then
+    warn "TDD bypass is ACTIVE"
+    dim "$(cat .tdd-skip)"
+  fi
+
+  echo ""
+  local stacks
+  stacks=$(detect_stacks ".")
+  if [ -n "$stacks" ]; then
+    info "Detected stacks: $(echo "$stacks" | tr '\n' ', ' | sed 's/,$//')"
+  fi
+  info "Platform: $(detect_platform ".")"
+}
+
+check_file() {
+  local path="$1" label="$2"
+  if [ -f "$path" ]; then
+    success "$label"
+  else
+    echo -e "  ${DIM}○${NC} ${DIM}$label (missing)${NC}"
+  fi
+}
+
+check_dir() {
+  local path="$1" label="$2"
+  if [ -d "$path" ] && [ "$(ls -A "$path" 2>/dev/null)" ]; then
+    local count
+    count=$(ls -1 "$path" 2>/dev/null | wc -l | tr -d ' ')
+    success "$label ($count files)"
+  else
+    echo -e "  ${DIM}○${NC} ${DIM}$label (empty/missing)${NC}"
+  fi
+}
+
+show_detect() {
+  local project_dir="${1:-.}"
+  header "Stack Detection: $project_dir"
+  echo ""
+
+  local stacks
+  stacks=$(detect_stacks "$project_dir")
+
+  if [ -z "$stacks" ]; then
+    warn "No stacks detected"
+    return
+  fi
+
+  while IFS= read -r stack; do
+    case "$stack" in
+      dotnet)       info ".NET — xUnit + FluentAssertions + NSubstitute" ;;
+      go)           info "Go — testing + testify (table-driven)" ;;
+      rust)         info "Rust — built-in + tokio-test" ;;
+      python)       info "Python — pytest + Pydantic" ;;
+      react-ts)
+        local tr e2e
+        tr=$(detect_test_runner "$project_dir")
+        e2e=$(detect_e2e_runner "$project_dir")
+        info "React/TypeScript — ${tr:-Vitest} + Testing Library${e2e:+ + $e2e}"
+        ;;
+      react-native) info "React Native — Jest + RNTL + Detox" ;;
+      typescript)   info "TypeScript/Node" ;;
+      swift)        info "Swift — XCTest + MVVM" ;;
+    esac
+  done <<< "$stacks"
+
+  echo ""
+  info "Platform: $(detect_platform "$project_dir")"
+}
+
+uninstall_global() {
+  header "Uninstalling global TDD workflow"
+  echo ""
+
+  local items=(
+    "$CLAUDE_DIR/hooks/session-start.sh"
+    "$CLAUDE_DIR/hooks/tdd-gate.sh"
+    "$CLAUDE_DIR/skills/tdd"
+    "$CLAUDE_DIR/skills/ticket"
+    "$CLAUDE_DIR/skills/skip-tdd"
+    "$CLAUDE_DIR/skills/session-report"
+    "$CLAUDE_DIR/skills/adr"
+    "$CLAUDE_DIR/skills/pr"
+    "$CLAUDE_DIR/skills/plan"
+    "$CLAUDE_DIR/skills/clusters"
+    "$CLAUDE_DIR/agents/architect.md"
+    "$CLAUDE_DIR/agents/tdd-developer.md"
+    "$CLAUDE_DIR/agents/qa.md"
+    "$CLAUDE_DIR/agents/reviewer.md"
+    "$CLAUDE_DIR/agents/troubleshooter.md"
+  )
+
+  for item in "${items[@]}"; do
+    if [ -e "$item" ]; then
+      rm -rf "$item"
+      success "Removed $(echo "$item" | sed "s|$HOME|~|")"
+    fi
+  done
+
+  # Don't delete settings.json or CLAUDE.md — just warn
+  warn "~/.claude/settings.json and ~/.claude/CLAUDE.md preserved"
+  warn "Remove hooks config from settings.json manually if needed"
+
+  # Copilot CLI agents
+  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
+  local copilot_agents=(
+    "$COPILOT_DIR/agents/architect.agent.md"
+    "$COPILOT_DIR/agents/tdd-developer.agent.md"
+    "$COPILOT_DIR/agents/qa.agent.md"
+    "$COPILOT_DIR/agents/reviewer.agent.md"
+    "$COPILOT_DIR/agents/troubleshooter.agent.md"
+  )
+  for item in "${copilot_agents[@]}"; do
+    if [ -e "$item" ]; then
+      rm -f "$item"
+      success "Removed $(echo "$item" | sed "s|$HOME|~|")"
+    fi
+  done
+  echo ""
+  success "Global uninstall complete"
+}
+
+uninstall_project() {
+  local project_dir="${1:-.}"
+  project_dir="$(cd "$project_dir" && pwd)"
+
+  header "Uninstalling project files from: $project_dir"
+  echo ""
+
+  local items=(
+    "$project_dir/.github/instructions"
+    "$project_dir/.github/copilot-instructions.md"
+  )
+
+  for item in "${items[@]}"; do
+    if [ -e "$item" ]; then
+      rm -rf "$item"
+      success "Removed $(basename "$item")"
+    fi
+  done
+
+  warn "AGENTS.md, CLAUDE.md, and .context/ preserved (contain project data)"
+  echo ""
+  success "Project uninstall complete"
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     CLI ENTRY POINT                             ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+show_help() {
+  cat << 'HELP'
+
+  ╔════════════════════════════════════════════════════════╗
+  ║         tdd-workflow — TDD Workflow Installer          ║
+  ╚════════════════════════════════════════════════════════╝
+
+  USAGE
+    tdd-workflow <command> [options]
+
+  COMMANDS
+    install global              Install hooks, skills, settings to ~/.claude/
+    install project [path]      Install AGENTS.md, Copilot config, .context/
+                                (auto-detects stack from project files)
+    install all [path]          Install both global + project
+
+    detect [path]               Show detected stacks without installing
+    status                      Show installation status
+
+    uninstall global            Remove global hooks and skills
+    uninstall project [path]    Remove project Copilot instructions
+
+    help                        Show this message
+    version                     Show version
+
+  EXAMPLES
+    tdd-workflow install global
+    tdd-workflow install project ~/code/my-api
+    tdd-workflow install all .
+    tdd-workflow detect ~/code/my-frontend
+    tdd-workflow status
+
+  WHAT GETS INSTALLED
+
+    Global (~/.claude/):
+      CLAUDE.md                 Minimal personal defaults
+      settings.json             SessionStart + TDD gate hooks
+      hooks/session-start.sh    Auto-loads context + detects stack
+      hooks/tdd-gate.sh         Blocks commits without tests
+      skills/tdd/               /tdd — RED → GREEN → REFACTOR
+      skills/ticket/            /ticket — Jira issue → spec + tests
+      skills/skip-tdd/          /skip-tdd — Bypass TDD with reason
+      skills/session-report/    /session-report — Obsidian notes
+      skills/adr/               /adr — Architecture Decision Records
+      skills/pr/                /pr — Create PR/MR (gh/glab)
+      skills/plan/              /plan — Pipeline orchestration entry point
+      agents/architect.md       Opus 4.6 — design, spec, todo plan
+      agents/tdd-developer.md   Sonnet 4.6 — strict TDD implementation
+      agents/qa.md              Haiku 4.5 — run affected tests
+      agents/reviewer.md        Sonnet 4.6 — code review + triage
+      agents/troubleshooter.md  Opus 4.6 — incident diagnosis + fix plan
+
+    Per-Project:
+      AGENTS.md                 Cross-tool rules (Claude + Copilot)
+      CLAUDE.md                 Project context
+      .context/                 Architecture, conventions, specs, sprint
+      .github/copilot-instructions.md   Copilot repo-wide rules
+      .github/instructions/*.md          Stack-specific Copilot rules
+      docs/decisions/           ADR directory
+
+  AGENT PIPELINE
+
+    /plan "add user auth"
+      → architect (Opus)        creates spec.md + todo.md
+      → tdd-developer (Sonnet)  RED→GREEN→REFACTOR per step
+      → qa (Haiku)              runs affected tests
+      → reviewer (Sonnet)       presents findings to you
+      → you triage              [F]ix / [T]ech debt / [I]gnore
+      → max 3 fix loops         then next step
+
+  COPILOT CLI USAGE
+
+    Copilot CLI agents mirror Claude Code agents with .agent.md format.
+    Installed to ~/.copilot/agents/ (or $COPILOT_HOME/agents/).
+
+    Interactive:
+      copilot                               # start session
+      /agent                                # pick from agent list
+
+    Direct:
+      copilot --agent=architect --prompt "Plan JWT auth feature"
+      copilot --agent=tdd-developer --prompt "Step 1 of PROJ-123-todo.md"
+      copilot --agent=qa --prompt "Verify the changes"
+      copilot --agent=reviewer --prompt "Review the changes"
+      copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
+
+    Automatic:
+      Copilot infers the right agent from your prompt if the
+      description matches. "Plan a new feature" → architect.
+      "Run the tests" → qa.
+
+    Shared context:
+      AGENTS.md and .github/copilot-instructions.md are read by
+      both Claude Code and Copilot CLI automatically.
+
+HELP
+}
+
+main() {
+  local command="${1:-help}"
+  local subcommand="${2:-}"
+  local target="${3:-}"
+
+  case "$command" in
+    install)
+      case "$subcommand" in
+        global)
+          install_global
+          ;;
+        project)
+          install_project "${target:-.}"
+          ;;
+        all)
+          install_global
+          echo ""
+          install_project "${target:-.}"
+          ;;
+        *)
+          error "Unknown install target: $subcommand"
+          echo "  Use: install global | install project [path] | install all [path]"
+          exit 1
+          ;;
+      esac
+      ;;
+    detect)
+      show_detect "${subcommand:-.}"
+      ;;
+    status)
+      show_status
+      ;;
+    uninstall)
+      case "$subcommand" in
+        global)  uninstall_global ;;
+        project) uninstall_project "${target:-.}" ;;
+        *)
+          error "Unknown uninstall target: $subcommand"
+          echo "  Use: uninstall global | uninstall project [path]"
+          exit 1
+          ;;
+      esac
+      ;;
+    help|--help|-h)
+      show_help
+      ;;
+    version|--version|-v)
+      echo "tdd-workflow v${VERSION}"
+      ;;
+    *)
+      error "Unknown command: $command"
+      show_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"
