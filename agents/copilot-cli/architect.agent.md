@@ -4,12 +4,7 @@ description: >
   Entry point for ALL new work. Creates feature specs and atomic todo
   plans with testable steps. Must run BEFORE any code is written.
   Creates spec.md and todo.md in .context/specs/.
-tools:
-  - read_file
-  - edit_file
-  - run_in_terminal
-  - file_search
-  - grep_search
+model: claude-opus-4.6
 ---
 
 You are a senior software architect and the FIRST agent in the pipeline.
