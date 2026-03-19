@@ -1,21 +1,30 @@
 #!/usr/bin/env bash
-# tdd-workflow — CLI installer for Full-Stack TDD Workflow v2
-# Installs hooks, skills, and agent instructions for Claude Code + GitHub Copilot
+# ai-native-workflow — CLI for AI-native development workflows
+# Installs hooks, skills, agents AND runs multi-agent pipelines.
 #
 # Usage:
-#   tdd-workflow install global            Install global hooks, skills, settings
-#   tdd-workflow install project [path]    Install project files (auto-detects stack)
-#   tdd-workflow install all [path]        Install both global + project
-#   tdd-workflow detect [path]             Detect stack without installing
-#   tdd-workflow status                    Show what's installed
-#   tdd-workflow uninstall global          Remove global installation
-#   tdd-workflow uninstall project [path]  Remove project files
+#   ai-native-workflow install global            Install global hooks, skills, settings
+#   ai-native-workflow install project [path]    Install project files (auto-detects stack)
+#   ai-native-workflow install all [path]        Install both global + project
+#   ai-native-workflow run gitlab-feature <ID>   Run GitLab feature pipeline (Copilot + Jira)
+#   ai-native-workflow run gitlab-incident <ID>  Run GitLab incident pipeline (Troubleshooter)
+#   ai-native-workflow run github-feature [file] Run GitHub feature pipeline (Claude Code)
+#   ai-native-workflow run status                Show active pipeline state
+#   ai-native-workflow run resume                Resume pipeline from last checkpoint
+#   ai-native-workflow detect [path]             Detect stack without installing
+#   ai-native-workflow status                    Show what's installed
+#   ai-native-workflow uninstall global          Remove global installation
+#   ai-native-workflow uninstall project [path]  Remove project files
+#   ai-native-workflow help                      Show this help
+#   ai-native-workflow version                   Show version
 
 set -euo pipefail
 
-VERSION="2.1.0"
+VERSION="3.0.0"
 CLAUDE_DIR="$HOME/.claude"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
+CONTEXT_DIR=".context/specs"
+STATE_FILE=".context/.pipeline-state"
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -23,6 +32,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 DIM='\033[2m'
 NC='\033[0m'
@@ -33,7 +43,9 @@ success() { echo -e "${GREEN}✓${NC} $*"; }
 warn()    { echo -e "${YELLOW}⚠${NC} $*"; }
 error()   { echo -e "${RED}✗${NC} $*" >&2; }
 header()  { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
+pstep()   { echo -e "\n${BOLD}${MAGENTA}▸ Step $1:${NC} $2"; }
 dim()     { echo -e "${DIM}  $*${NC}"; }
+ask()     { echo -en "${YELLOW}?${NC} $* "; }
 
 backup_if_exists() {
   local file="$1"
@@ -143,11 +155,584 @@ detect_test_runner() {
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
+# ║                     CLI DETECTION                               ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+require_copilot() {
+  if ! command -v copilot &>/dev/null; then
+    error "GitHub Copilot CLI not found. Install: https://docs.github.com/en/copilot/github-copilot-in-the-cli"
+    exit 1
+  fi
+}
+
+require_claude() {
+  if ! command -v claude &>/dev/null; then
+    error "Claude Code CLI not found. Install: npm install -g @anthropic-ai/claude-code"
+    exit 1
+  fi
+}
+
+require_glab() {
+  if ! command -v glab &>/dev/null; then
+    error "glab CLI not found. Install: brew install glab"
+    exit 1
+  fi
+}
+
+require_gh() {
+  if ! command -v gh &>/dev/null; then
+    error "gh CLI not found. Install: brew install gh"
+    exit 1
+  fi
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     PIPELINE STATE MANAGEMENT                   ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+save_state() {
+  local pipeline="$1" id="$2" current_step="$3" status="$4"
+  mkdir -p "$(dirname "$STATE_FILE")"
+  cat > "$STATE_FILE" << EOF
+PIPELINE=$pipeline
+ID=$id
+CURRENT_STEP=$current_step
+STATUS=$status
+TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EOF
+  dim "State saved: step $current_step ($status)"
+}
+
+load_state() {
+  if [ ! -f "$STATE_FILE" ]; then
+    error "No pipeline state found. Start a pipeline first."
+    exit 1
+  fi
+  # shellcheck source=/dev/null
+  source "$STATE_FILE"
+}
+
+clear_state() {
+  rm -f "$STATE_FILE"
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║                     PIPELINE HELPERS                            ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+confirm() {
+  local prompt="$1"
+  ask "$prompt [Y/n]"
+  read -r answer
+  case "$answer" in
+    [Nn]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+wait_for_review() {
+  local artifact="$1"
+  echo ""
+  info "Review the output: ${BOLD}$artifact${NC}"
+  ask "Continue to next step? [Y/n/q(uit)]"
+  read -r answer
+  case "$answer" in
+    [Nn]*) warn "Paused. Run ${BOLD}ai-native-workflow run resume${NC} to continue."; exit 0 ;;
+    [Qq]*) warn "Pipeline aborted."; clear_state; exit 0 ;;
+    *) return 0 ;;
+  esac
+}
+
+run_copilot_agent() {
+  local agent="$1"
+  local prompt="$2"
+  header "Running: $agent (Copilot CLI)"
+  dim "Prompt: $prompt"
+  echo ""
+  copilot --agent="$agent" -p "$prompt"
+}
+
+run_claude_agent() {
+  local agent="$1"
+  local prompt="$2"
+  header "Running: $agent (Claude Code)"
+  dim "Prompt: $prompt"
+  echo ""
+  claude --agent="$agent" -p "$prompt"
+}
+
+run_triage() {
+  local tool="$1"  # "copilot" or "claude"
+  local id="$2"
+  local step_num="$3"
+  local max_loops=3
+  local loop=0
+
+  while [ "$loop" -lt "$max_loops" ]; do
+    echo ""
+    ask "Triage findings — [F]ix / [T]ech debt / [I]gnore / [D]one? "
+    read -r triage
+    case "$triage" in
+      [Ff]*)
+        loop=$((loop + 1))
+        info "Fix loop $loop/$max_loops"
+        if [ "$tool" = "copilot" ]; then
+          run_copilot_agent "tdd-developer" "Fix reviewer findings for Step $step_num of ${id}-todo.md"
+          run_copilot_agent "qa" "Run tests after fix for Step $step_num of $id"
+          run_copilot_agent "reviewer" "Re-review Step $step_num of $id after fix (loop $loop/$max_loops)"
+        else
+          run_claude_agent "tdd-developer" "Fix reviewer findings for Step $step_num of ${id}-todo.md"
+          run_claude_agent "qa" "Run tests after fix for Step $step_num of $id"
+          run_claude_agent "reviewer" "Re-review Step $step_num of $id after fix (loop $loop/$max_loops)"
+        fi
+        ;;
+      [Tt]*)
+        info "Added to tech debt in CURRENT_SPRINT.md"
+        break
+        ;;
+      [Ii]*)
+        info "Ignored."
+        break
+        ;;
+      [Dd]*)
+        break
+        ;;
+      *)
+        warn "Invalid choice. Use F/T/I/D."
+        ;;
+    esac
+  done
+
+  if [ "$loop" -ge "$max_loops" ]; then
+    warn "Max fix loops ($max_loops) reached. Remaining issues → tech debt."
+  fi
+}
+
+count_steps() {
+  local todo_file="$1"
+  if [ ! -f "$todo_file" ]; then
+    echo "0"
+    return
+  fi
+  grep -c '^### Step' "$todo_file" 2>/dev/null || echo "0"
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║              PIPELINE 1: GITLAB FEATURE                         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+pipeline_gitlab_feature() {
+  local jira_id="$1"
+  require_copilot
+  require_glab
+
+  header "Pipeline: GitLab Feature Development"
+  info "Jira ticket: ${BOLD}$jira_id${NC}"
+  info "Agents: Copilot CLI | Platform: GitLab"
+  echo ""
+
+  mkdir -p "$CONTEXT_DIR"
+
+  # --- Step 1: Requirements Engineering ---
+  pstep 1 "Requirements Engineering"
+  save_state "gitlab-feature" "$jira_id" 1 "running"
+  run_copilot_agent "requirements-engineer" "Analyze Jira ticket $jira_id. Create structured requirements at $CONTEXT_DIR/${jira_id}-requirements.md"
+  save_state "gitlab-feature" "$jira_id" 1 "done"
+  wait_for_review "$CONTEXT_DIR/${jira_id}-requirements.md"
+
+  # --- Step 2: Test Planning ---
+  pstep 2 "Test Planning"
+  save_state "gitlab-feature" "$jira_id" 2 "running"
+  run_copilot_agent "qa" "Create test plan from $CONTEXT_DIR/${jira_id}-requirements.md. Save to $CONTEXT_DIR/${jira_id}-testplan.md"
+  save_state "gitlab-feature" "$jira_id" 2 "done"
+  wait_for_review "$CONTEXT_DIR/${jira_id}-testplan.md"
+
+  # --- Step 3: Architecture & Planning ---
+  pstep 3 "Architecture & Planning"
+  save_state "gitlab-feature" "$jira_id" 3 "running"
+  run_copilot_agent "architect" "Design solution for $jira_id using $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md"
+  save_state "gitlab-feature" "$jira_id" 3 "done"
+  wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
+
+  # --- Step 4-6: TDD Loop (per step in todo) ---
+  local todo_file="$CONTEXT_DIR/${jira_id}-todo.md"
+  local total_steps
+  total_steps=$(count_steps "$todo_file")
+  info "Todo has $total_steps steps"
+
+  for ((i = 1; i <= total_steps; i++)); do
+    pstep "4.$i" "TDD: Implement Step $i/$total_steps"
+    save_state "gitlab-feature" "$jira_id" "4.$i" "running"
+    run_copilot_agent "tdd-developer" "Step $i of ${jira_id}-todo.md"
+    save_state "gitlab-feature" "$jira_id" "4.$i" "dev-done"
+
+    pstep "5.$i" "QA: Test Step $i/$total_steps"
+    run_copilot_agent "qa" "Run tests for Step $i of $jira_id"
+    save_state "gitlab-feature" "$jira_id" "5.$i" "qa-done"
+
+    pstep "6.$i" "Review: Step $i/$total_steps"
+    run_copilot_agent "reviewer" "Review Step $i of $jira_id"
+    save_state "gitlab-feature" "$jira_id" "6.$i" "review-done"
+
+    run_triage "copilot" "$jira_id" "$i"
+  done
+
+  # --- Step 7: Create Merge Request ---
+  pstep 7 "Create Merge Request"
+  if confirm "Create merge request on GitLab?"; then
+    local branch
+    branch=$(git branch --show-current)
+    local base
+    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+    git push -u origin "$branch"
+    glab mr create \
+      --source-branch "$branch" \
+      --target-branch "$base" \
+      --title "feat: $jira_id" \
+      --description "Closes $jira_id
+
+## Pipeline
+Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
+
+## Artifacts
+- Requirements: \`$CONTEXT_DIR/${jira_id}-requirements.md\`
+- Test Plan: \`$CONTEXT_DIR/${jira_id}-testplan.md\`
+- Spec: \`$CONTEXT_DIR/${jira_id}-spec.md\`
+- Todo: \`$CONTEXT_DIR/${jira_id}-todo.md\`"
+    success "Merge request created!"
+  fi
+
+  save_state "gitlab-feature" "$jira_id" 7 "complete"
+  clear_state
+
+  header "Pipeline Complete"
+  success "GitLab feature pipeline for $jira_id finished."
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║              PIPELINE 2: GITLAB INCIDENT                        ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+pipeline_gitlab_incident() {
+  local jira_id="$1"
+  require_copilot
+  require_glab
+
+  header "Pipeline: GitLab Incident Response"
+  info "Jira ticket: ${BOLD}$jira_id${NC}"
+  info "Agents: Copilot CLI + Troubleshooter | Platform: GitLab"
+  echo ""
+
+  mkdir -p "$CONTEXT_DIR"
+
+  # --- Step 1: Troubleshoot ---
+  pstep 1 "Investigation (Troubleshooter)"
+  save_state "gitlab-incident" "$jira_id" 1 "running"
+  run_copilot_agent "troubleshooter" "Investigate Jira incident $jira_id. Check all regions. Produce diagnosis at $CONTEXT_DIR/${jira_id}-bugfix.md"
+  save_state "gitlab-incident" "$jira_id" 1 "done"
+
+  echo ""
+  info "Review diagnosis: ${BOLD}$CONTEXT_DIR/${jira_id}-bugfix.md${NC}"
+
+  # --- Step 2: User Decision Point ---
+  pstep 2 "Decision Point"
+  echo ""
+  echo -e "  ${BOLD}A${NC} — Document only (add findings to Jira, no code fix)"
+  echo -e "  ${BOLD}B${NC} — Fix the issue (TDD pipeline)"
+  echo -e "  ${BOLD}Q${NC} — Quit"
+  echo ""
+  ask "Choose action [A/B/Q]: "
+  read -r decision
+
+  case "$decision" in
+    [Aa]*)
+      # --- Option A: Document Only ---
+      pstep "2A" "Adding findings to Jira"
+      save_state "gitlab-incident" "$jira_id" "2A" "running"
+      if [ -f "$CONTEXT_DIR/${jira_id}-bugfix.md" ]; then
+        run_copilot_agent "troubleshooter" "Add the diagnosis from $CONTEXT_DIR/${jira_id}-bugfix.md as a comment on Jira ticket $jira_id. Include key findings, root cause, and recommended next action."
+        success "Findings added to Jira ticket $jira_id"
+      else
+        warn "No diagnosis file found. Add findings manually."
+      fi
+      save_state "gitlab-incident" "$jira_id" "2A" "complete"
+      clear_state
+      header "Pipeline Complete (Document Only)"
+      success "Key findings documented on $jira_id."
+      return
+      ;;
+    [Bb]*)
+      info "Continuing to fix..."
+      ;;
+    [Qq]*)
+      warn "Pipeline aborted."
+      clear_state
+      return
+      ;;
+    *)
+      error "Invalid choice. Aborting."
+      exit 1
+      ;;
+  esac
+
+  # --- Step 3: TDD Fix ---
+  local todo_file="$CONTEXT_DIR/${jira_id}-todo.md"
+  local total_steps
+  total_steps=$(count_steps "$todo_file")
+  info "Fix plan has $total_steps steps"
+
+  for ((i = 1; i <= total_steps; i++)); do
+    pstep "3.$i" "TDD Fix: Step $i/$total_steps"
+    save_state "gitlab-incident" "$jira_id" "3.$i" "running"
+    run_copilot_agent "tdd-developer" "Step $i of ${jira_id}-todo.md"
+    save_state "gitlab-incident" "$jira_id" "3.$i" "dev-done"
+
+    pstep "4.$i" "QA: Verify Step $i/$total_steps"
+    run_copilot_agent "qa" "Run tests for Step $i of $jira_id bugfix"
+    save_state "gitlab-incident" "$jira_id" "4.$i" "qa-done"
+
+    pstep "5.$i" "Review: Step $i/$total_steps"
+    run_copilot_agent "reviewer" "Review Step $i of $jira_id bugfix"
+    save_state "gitlab-incident" "$jira_id" "5.$i" "review-done"
+
+    run_triage "copilot" "$jira_id" "$i"
+  done
+
+  # --- Step 6: Create MR + Update Jira ---
+  pstep 6 "Create Merge Request"
+  if confirm "Create merge request and update Jira?"; then
+    local branch
+    branch=$(git branch --show-current)
+    local base
+    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+    git push -u origin "$branch"
+    glab mr create \
+      --source-branch "$branch" \
+      --target-branch "$base" \
+      --title "fix: $jira_id" \
+      --description "Fixes $jira_id
+
+## Root Cause
+See \`$CONTEXT_DIR/${jira_id}-bugfix.md\`
+
+## Pipeline
+Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
+    success "Merge request created!"
+
+    # Update Jira status
+    run_copilot_agent "troubleshooter" "Transition Jira ticket $jira_id to 'In Review' and add a comment with the MR link."
+  fi
+
+  save_state "gitlab-incident" "$jira_id" 6 "complete"
+  clear_state
+
+  header "Pipeline Complete"
+  success "GitLab incident pipeline for $jira_id finished."
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║              PIPELINE 3: GITHUB FEATURE                         ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+pipeline_github_feature() {
+  local specs_file="${1:-}"
+  require_claude
+  require_gh
+
+  header "Pipeline: GitHub Feature Development"
+  info "Agents: Claude Code | Platform: GitHub"
+
+  mkdir -p "$CONTEXT_DIR"
+
+  # --- Determine input source ---
+  local req_prompt
+  if [ -n "$specs_file" ] && [ -f "$specs_file" ]; then
+    info "Specs file: ${BOLD}$specs_file${NC}"
+    req_prompt="Read the specs file at $specs_file and create structured requirements at $CONTEXT_DIR/requirements.md"
+  elif [ -f "specs.md" ]; then
+    info "Specs file: ${BOLD}specs.md${NC} (auto-detected)"
+    req_prompt="Read the specs file at specs.md and create structured requirements at $CONTEXT_DIR/requirements.md"
+  else
+    info "No specs file provided. Enter requirements interactively."
+    echo ""
+    ask "Describe the feature:"
+    echo ""
+    read -r feature_desc
+    req_prompt="Create structured requirements from this description: $feature_desc. Save to $CONTEXT_DIR/requirements.md"
+  fi
+  echo ""
+
+  # --- Derive an ID from timestamp for unique naming ---
+  local id
+  id="feature-$(date +%Y%m%d-%H%M%S)"
+
+  # --- Step 1: Requirements Engineering ---
+  pstep 1 "Requirements Engineering"
+  save_state "github-feature" "$id" 1 "running"
+  run_claude_agent "requirements-engineer" "$req_prompt"
+  save_state "github-feature" "$id" 1 "done"
+  wait_for_review "$CONTEXT_DIR/requirements.md"
+
+  # --- Step 2: Create GitHub Issue ---
+  pstep 2 "Create GitHub Issue"
+  save_state "github-feature" "$id" 2 "running"
+
+  local issue_title="New feature request"
+  local issue_num=""
+
+  if confirm "Create GitHub issue from requirements?"; then
+    # Extract a title from the requirements file
+    if [ -f "$CONTEXT_DIR/requirements.md" ]; then
+      issue_title=$(grep -m1 '^# ' "$CONTEXT_DIR/requirements.md" 2>/dev/null | sed 's/^# //' || echo "New feature request")
+    fi
+
+    # Use claude to format and create the issue
+    local issue_url
+    issue_url=$(run_claude_agent "requirements-engineer" \
+      "Format $CONTEXT_DIR/requirements.md as a GitHub issue body and create it using gh issue create. The title should be: feat: $issue_title. Add the label 'feature-request'. Output ONLY the issue URL." 2>&1 | tail -1)
+
+    if [ -n "$issue_url" ]; then
+      success "GitHub issue created: $issue_url"
+      issue_num=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
+    fi
+  fi
+
+  save_state "github-feature" "$id" 2 "done"
+
+  # --- Step 3: Architecture & Planning ---
+  pstep 3 "Architecture & Planning"
+  save_state "github-feature" "$id" 3 "running"
+  run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/"
+  save_state "github-feature" "$id" 3 "done"
+
+  # Find the todo file
+  local todo_file
+  todo_file=$(find "$CONTEXT_DIR" -name "*-todo.md" -newer "$STATE_FILE" 2>/dev/null | head -1)
+  if [ -z "$todo_file" ]; then
+    todo_file=$(find "$CONTEXT_DIR" -name "*-todo.md" 2>/dev/null | sort -r | head -1)
+  fi
+
+  if [ -z "$todo_file" ]; then
+    error "No todo file found in $CONTEXT_DIR. Architect may have failed."
+    exit 1
+  fi
+
+  wait_for_review "$todo_file"
+
+  # --- Step 4-6: TDD Loop ---
+  local total_steps
+  total_steps=$(count_steps "$todo_file")
+  info "Todo has $total_steps steps"
+  local todo_basename
+  todo_basename=$(basename "$todo_file" .md)
+
+  for ((i = 1; i <= total_steps; i++)); do
+    pstep "4.$i" "TDD: Implement Step $i/$total_steps"
+    save_state "github-feature" "$id" "4.$i" "running"
+    run_claude_agent "tdd-developer" "Step $i of $todo_file"
+    save_state "github-feature" "$id" "4.$i" "dev-done"
+
+    pstep "5.$i" "QA: Test Step $i/$total_steps"
+    run_claude_agent "qa" "Run tests for Step $i of $todo_basename"
+    save_state "github-feature" "$id" "5.$i" "qa-done"
+
+    pstep "6.$i" "Review: Step $i/$total_steps"
+    run_claude_agent "reviewer" "Review Step $i of $todo_basename"
+    save_state "github-feature" "$id" "6.$i" "review-done"
+
+    run_triage "claude" "$id" "$i"
+  done
+
+  # --- Step 7: Create Pull Request ---
+  pstep 7 "Create Pull Request"
+  if confirm "Create pull request on GitHub?"; then
+    local branch
+    branch=$(git branch --show-current)
+    local base
+    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+    git push -u origin "$branch"
+
+    local pr_body="## Summary
+Generated with \`ai-native-workflow run github-feature\`
+
+## Artifacts
+- Requirements: \`$CONTEXT_DIR/requirements.md\`
+- Todo: \`$todo_file\`"
+
+    # Add issue reference if we have one
+    if [ -n "$issue_num" ]; then
+      pr_body="Closes #$issue_num
+
+$pr_body"
+    fi
+
+    gh pr create \
+      --title "feat: $issue_title" \
+      --body "$pr_body"
+
+    success "Pull request created!"
+  fi
+
+  save_state "github-feature" "$id" 7 "complete"
+  clear_state
+
+  header "Pipeline Complete"
+  success "GitHub feature pipeline finished."
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
+# ║              PIPELINE STATUS & RESUME                           ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+pipeline_status() {
+  if [ ! -f "$STATE_FILE" ]; then
+    info "No active pipeline."
+    return
+  fi
+
+  load_state
+
+  header "Pipeline Status"
+  echo -e "  Pipeline:     ${BOLD}${PIPELINE}${NC}"
+  echo -e "  ID:           ${BOLD}${ID}${NC}"
+  echo -e "  Current Step: ${BOLD}${CURRENT_STEP}${NC}"
+  echo -e "  Status:       ${BOLD}${STATUS}${NC}"
+  echo -e "  Last Updated: ${DIM}${TIMESTAMP}${NC}"
+}
+
+pipeline_resume() {
+  if [ ! -f "$STATE_FILE" ]; then
+    error "No active pipeline to resume."
+    exit 1
+  fi
+
+  load_state
+
+  info "Resuming pipeline: ${BOLD}$PIPELINE${NC} for ${BOLD}$ID${NC} at step ${BOLD}$CURRENT_STEP${NC}"
+
+  case "$PIPELINE" in
+    "gitlab-feature")
+      pipeline_gitlab_feature "$ID"
+      ;;
+    "gitlab-incident")
+      pipeline_gitlab_incident "$ID"
+      ;;
+    "github-feature")
+      pipeline_github_feature "$ID"
+      ;;
+    *)
+      error "Unknown pipeline: $PIPELINE"
+      exit 1
+      ;;
+  esac
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
 # ║                     GLOBAL INSTALLATION                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 install_global() {
-  header "Installing global TDD workflow (v${VERSION})"
+  header "Installing AI-native workflow (v${VERSION})"
   echo ""
 
   # --- CLAUDE.md ---
@@ -173,7 +758,7 @@ install_global() {
   echo ""
   info "Claude Code → ${CLAUDE_DIR}/"
   info "Copilot CLI → ~/.copilot/agents/"
-  info "Run ${BOLD}tdd-workflow status${NC} to verify"
+  info "Run ${BOLD}ai-native-workflow status${NC} to verify"
   info "Start a new Claude Code or Copilot CLI session to activate"
 }
 
@@ -204,12 +789,19 @@ install_global_claude_md() {
 - /adr — Architecture Decision Record (repo + Confluence)
 - /pr — Create PR/MR (auto-detects gh/glab)
 
+## Pipelines (CLI)
+Run full agent pipelines from the terminal:
+- `ai-native-workflow run gitlab-feature PROJ-123` — Copilot CLI + Jira → MR
+- `ai-native-workflow run gitlab-incident PROJ-456` — Troubleshooter + Jira → MR
+- `ai-native-workflow run github-feature specs.md` — Claude Code → GitHub issue → PR
+
 ## Agent Pipeline
 All new work starts with `/plan`. The pipeline:
-1. **architect** (Opus 4.6) — designs spec + atomic todo plan
-2. **tdd-developer** (Sonnet 4.6) — implements one step via TDD
-3. **qa** (Haiku 4.5) — runs affected tests
-4. **reviewer** (Sonnet 4.6) — reviews code, user triages findings
+1. **requirements-engineer** (Opus 4.6) — elicits & formalizes requirements
+2. **architect** (Opus 4.6) — designs spec + atomic todo plan
+3. **tdd-developer** (Sonnet 4.6) — implements one step via TDD
+4. **qa** (Haiku 4.5) — runs affected tests
+5. **reviewer** (Sonnet 4.6) — reviews code, user triages findings
 Max 3 fix loops per step, then remaining issues go to tech debt.
 
 For production incidents, use **troubleshooter** (Opus 4.6):
@@ -447,6 +1039,13 @@ if [ -f "$PROJECT_DIR/.gitlab-ci.yml" ]; then
   CONTEXT="${CONTEXT}\n🏢 Platform: GitLab (use glab for MRs)\n"
 elif [ -d "$PROJECT_DIR/.github" ]; then
   CONTEXT="${CONTEXT}\n🐙 Platform: GitHub (use gh for PRs)\n"
+fi
+
+# Check for active pipeline
+if [ -f "$PROJECT_DIR/.context/.pipeline-state" ]; then
+  # shellcheck source=/dev/null
+  source "$PROJECT_DIR/.context/.pipeline-state"
+  CONTEXT="${CONTEXT}\n🔄 Active pipeline: ${PIPELINE} (${ID}) — step ${CURRENT_STEP} (${STATUS})\n"
 fi
 
 [ -f "$PROJECT_DIR/AGENTS.md" ] && CONTEXT="${CONTEXT}\n📖 Read AGENTS.md for project rules.\n"
@@ -808,6 +1407,12 @@ reviewer (Sonnet) → present findings → user triages
 2. Approve plan, then: `Use tdd-developer on Step 1 of <todo>.md`
 3. After each step: `Use qa to verify` → `Use reviewer to review`
 4. Triage: [F]ix / [T]ech debt / [I]gnore → next step
+
+### Full Pipelines (CLI)
+For automated end-to-end pipelines with all agents:
+- `ai-native-workflow run gitlab-feature PROJ-123`
+- `ai-native-workflow run gitlab-incident PROJ-456`
+- `ai-native-workflow run github-feature specs.md`
 SKILL_EOF
   success "/plan skill (pipeline orchestration)"
 
@@ -871,12 +1476,144 @@ done
 ```
 SKILL_EOF
   success "/clusters skill (multi-cluster reference)"
+
+  # --- Pipeline skills (reference only, actual execution is via CLI) ---
+  mkdir -p "$CLAUDE_DIR/skills/pipeline-gitlab-feature"
+  cat > "$CLAUDE_DIR/skills/pipeline-gitlab-feature/SKILL.md" << 'SKILL_EOF'
+---
+name: pipeline-gitlab-feature
+description: >
+  GitLab feature development pipeline. Run from CLI:
+  ai-native-workflow run gitlab-feature <JIRA-ID>
+  Jira → requirements-engineer → qa (test plan) → architect →
+  tdd-developer → qa → reviewer → MR.
+disable-model-invocation: true
+---
+
+## GitLab Feature Pipeline
+
+Run from terminal: `ai-native-workflow run gitlab-feature <JIRA-ID>`
+
+This pipeline uses Copilot CLI agents and requires: copilot, glab, Jira MCP.
+See `ai-native-workflow help` for details.
+SKILL_EOF
+  success "/pipeline-gitlab-feature skill"
+
+  mkdir -p "$CLAUDE_DIR/skills/pipeline-gitlab-incident"
+  cat > "$CLAUDE_DIR/skills/pipeline-gitlab-incident/SKILL.md" << 'SKILL_EOF'
+---
+name: pipeline-gitlab-incident
+description: >
+  GitLab incident response pipeline. Run from CLI:
+  ai-native-workflow run gitlab-incident <JIRA-ID>
+  Jira → troubleshooter → user decides (document or fix) →
+  tdd-developer → qa → reviewer → MR.
+disable-model-invocation: true
+---
+
+## GitLab Incident Pipeline
+
+Run from terminal: `ai-native-workflow run gitlab-incident <JIRA-ID>`
+
+This pipeline uses Copilot CLI agents and requires: copilot, glab, az, kubectl.
+See `ai-native-workflow help` for details.
+SKILL_EOF
+  success "/pipeline-gitlab-incident skill"
+
+  mkdir -p "$CLAUDE_DIR/skills/pipeline-github-feature"
+  cat > "$CLAUDE_DIR/skills/pipeline-github-feature/SKILL.md" << 'SKILL_EOF'
+---
+name: pipeline-github-feature
+description: >
+  GitHub feature development pipeline. Run from CLI:
+  ai-native-workflow run github-feature [specs-file]
+  specs.md/input → requirements-engineer → GitHub issue → architect →
+  tdd-developer → qa → reviewer → PR.
+disable-model-invocation: true
+---
+
+## GitHub Feature Pipeline
+
+Run from terminal: `ai-native-workflow run github-feature [specs-file]`
+
+This pipeline uses Claude Code agents and requires: claude, gh.
+See `ai-native-workflow help` for details.
+SKILL_EOF
+  success "/pipeline-github-feature skill"
 }
 
 install_global_agents() {
   header "Installing agents"
 
   mkdir -p "$CLAUDE_DIR/agents"
+
+  # --- requirements-engineer (Opus 4.6) ---
+  cat > "$CLAUDE_DIR/agents/requirements-engineer.md" << 'AGENT_EOF'
+---
+name: requirements-engineer
+description: >
+  Elicits, analyzes, and formalizes requirements from Jira tickets,
+  specs.md files, or user input. Produces structured requirements
+  documents with testable acceptance criteria. Use as the first step
+  before architect designs the solution.
+model: opus
+tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
+skills:
+  - ticket
+---
+
+You are a senior requirements engineer. You translate vague ideas,
+Jira tickets, and spec documents into clear, testable requirements.
+
+## Role
+Extract, clarify, and formalize requirements so that downstream agents
+(architect, tdd-developer, qa) have unambiguous inputs to work from.
+
+## Input Sources
+1. **Jira ticket** — fetch via MCP or CLI, extract AC, description, comments
+2. **specs.md file** — read from repo root or provided path
+3. **User description** — direct conversation input
+4. **Combination** — merge multiple sources, resolve conflicts
+
+## Workflow
+
+### 1. Gather Raw Requirements
+- **Jira**: Use MCP or `jira` CLI to fetch ticket details, AC, comments, linked issues
+- **specs.md**: Read the file, extract feature descriptions, user stories, constraints
+- **User input**: Ask clarifying questions if requirements are ambiguous
+
+### 2. Analyze & Clarify
+- Identify ambiguities, gaps, and contradictions
+- Cross-reference with `.context/ARCHITECTURE.md` for feasibility
+- Cross-reference with `.context/CONVENTIONS.md` for constraints
+- If critical information is missing: STOP and ask specific questions
+- Output a list of assumptions made (for user validation)
+
+### 3. Structure Requirements
+Create `.context/specs/<id>-requirements.md` with: Problem Statement,
+User Stories, Functional Requirements, Non-Functional Requirements,
+Acceptance Criteria (Given/When/Then), Constraints, Out of Scope,
+Open Questions, Assumptions.
+
+### 4. Create Test Plan Outline
+Produce a high-level test plan for the qa agent:
+- Unit test scenarios (per AC)
+- Integration test scenarios (cross-component)
+- Edge cases and error scenarios
+
+### 5. Validate with User
+Present the structured requirements. Ask if AC are correct and complete.
+
+### 6. Hand Off
+Tell user: `Use architect to design the solution based on <id>-requirements.md`
+
+## Rules
+- NEVER write implementation code — only requirements and test plans
+- NEVER assume requirements — ask when ambiguous
+- Every acceptance criterion MUST be testable
+- Preserve traceability: link back to source (ticket, spec, conversation)
+AGENT_EOF
+  success "requirements-engineer agent (Opus 4.6)"
 
   # --- architect (Opus 4.6) ---
   cat > "$CLAUDE_DIR/agents/architect.md" << 'AGENT_EOF'
@@ -1187,21 +1924,14 @@ kubectl --context=aks-<region>-prod get pods -n <ns> -l app=<svc> -o wide
 
 **Azure Application Insights:**
 ```bash
-# Exceptions
 az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
   --analytics-query "exceptions | where timestamp > ago(2h) | order by timestamp desc | take 20"
 
-# Failed requests
 az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
   --analytics-query "requests | where success == false and timestamp > ago(2h) | take 20"
 
-# Dependency failures
 az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
   --analytics-query "dependencies | where success == false and timestamp > ago(2h) | take 20"
-
-# Correlate by operation ID
-az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
-  --analytics-query "union requests, dependencies, exceptions, traces | where operation_Id == '<id>' | order by timestamp asc"
 ```
 
 **Codebase:**
@@ -1215,50 +1945,21 @@ git log --oneline --since="3 days ago" -- <path>
 - Trace from App Insights exception → pod log → source code
 
 ### Step 5: Diagnose
-Output structured diagnosis:
-```
-🔍 INCIDENT DIAGNOSIS
-
-## Issue: <ticket> — <summary>
-## Scope: <Global (all regions) | Regional (EMEA/APAC/NAM)>
-## Timeline: first occurrence → deployment → report
-
-## Root Cause: <clear explanation>
-
-## Evidence
-### Per Region
-| Region | Error Count | Pod Status | App Insights |
-|--------|------------|------------|--------------|
-| EMEA   | ...        | ...        | ...          |
-| APAC   | ...        | ...        | ...          |
-| NAM    | ...        | ...        | ...          |
-
-### Key Findings
-- <finding with source>
-
-## Fix Plan: .context/specs/<ticket>-todo.md
-  Step 1: test that REPRODUCES the bug
-  Step 2+: fix via TDD
-
-## Prevention
-- <monitoring/alerting to add>
-- <test coverage gaps>
-```
+Output structured diagnosis with: Issue, Scope, Timeline, Root Cause,
+Evidence per region table, Fix Plan (todo.md), Prevention.
 
 ### Step 6: Create Artifacts + Hand Off
 1. Create `.context/specs/<ticket>-bugfix.md` with diagnosis
 2. Create `.context/specs/<ticket>-todo.md` with fix steps
-3. Update `.context/CURRENT_SPRINT.md`
+3. Step 1 must REPRODUCE the bug as a failing test
 4. Tell user: `Use tdd-developer to work on Step 1`
 
 ## Rules
 - NEVER make code changes — only investigate and plan
 - First fix step: test that reproduces the bug (RED)
 - Always check ALL regions before concluding scope
-- If root cause unclear: say so, list what was ruled out
 - If rollback needed: say so FIRST
 - Protect sensitive data — no secrets/tokens/PII
-- If a tool is unavailable, report it and continue with others
 AGENT_EOF
   success "troubleshooter agent (Opus 4.6)"
 }
@@ -1275,6 +1976,46 @@ install_copilot_agents() {
   header "Installing Copilot CLI agents"
 
   mkdir -p "$COPILOT_DIR/agents"
+
+  # --- requirements-engineer (Opus) ---
+  cat > "$COPILOT_DIR/agents/requirements-engineer.agent.md" << 'AGENT_EOF'
+---
+name: requirements-engineer
+description: >
+  Elicits, analyzes, and formalizes requirements from Jira tickets,
+  specs.md files, or user input. Produces structured requirements
+  with testable acceptance criteria. First step before architect.
+model: claude-opus-4.6
+---
+
+You are a senior requirements engineer. You translate vague ideas,
+Jira tickets, and spec documents into clear, testable requirements.
+
+## Input Sources
+1. **Jira ticket** — use `jira` CLI to fetch details, AC, comments
+2. **specs.md file** — read from repo root or provided path
+3. **User description** — direct input
+
+## Workflow
+1. Gather raw requirements from the input source
+2. Identify ambiguities, gaps, contradictions
+3. Cross-reference with `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
+4. If critical info missing: STOP and ask specific questions
+5. Create `.context/specs/<id>-requirements.md` with:
+   Problem Statement, User Stories, Functional Requirements,
+   Non-Functional Requirements, Acceptance Criteria (Given/When/Then),
+   Constraints, Out of Scope, Open Questions, Assumptions
+6. Create high-level test plan outline for qa agent
+7. Present to user for validation
+8. Hand off: `copilot --agent=architect --prompt "Design solution for <id>-requirements.md"`
+
+## Rules
+- NEVER write implementation code — only requirements and test plans
+- NEVER assume requirements — ask when ambiguous
+- Every acceptance criterion MUST be testable
+- Preserve traceability to source (ticket, spec, conversation)
+AGENT_EOF
+  success "requirements-engineer.agent.md"
 
   # --- architect (Opus) ---
   cat > "$COPILOT_DIR/agents/architect.agent.md" << 'AGENT_EOF'
@@ -1340,7 +2081,7 @@ from a todo.md plan created by the architect.
 AGENT_EOF
   success "tdd-developer.agent.md"
 
-  # --- qa (Haiku, fallback: gpt-5.4-mini) ---
+  # --- qa (Haiku) ---
   cat > "$COPILOT_DIR/agents/qa.agent.md" << 'AGENT_EOF'
 ---
 name: qa
@@ -1348,7 +2089,6 @@ description: >
   Runs affected tests after tdd-developer completes a step.
   Reports pass/fail with exact errors.
 model: claude-haiku-4.5
-# fallback: gpt-5.4-mini
 ---
 
 You are a QA engineer. Verify changes by running appropriate tests.
@@ -1984,7 +2724,7 @@ install_project_gitignore() {
   local project_dir="$1"
   local gitignore="$project_dir/.gitignore"
 
-  local entries=(".tdd-skip" ".claude/settings.local.json")
+  local entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state")
   local added=0
 
   for entry in "${entries[@]}"; do
@@ -2011,7 +2751,7 @@ install_project_gitignore() {
 # ╚══════════════════════════════════════════════════════════════════╝
 
 show_status() {
-  header "TDD Workflow v${VERSION} — Installation Status"
+  header "AI-Native Workflow v${VERSION} — Installation Status"
   echo ""
 
   header "Global (~/.claude/)"
@@ -2027,6 +2767,10 @@ show_status() {
   check_file "$CLAUDE_DIR/skills/pr/SKILL.md" "skills/pr"
   check_file "$CLAUDE_DIR/skills/plan/SKILL.md" "skills/plan (orchestration)"
   check_file "$CLAUDE_DIR/skills/clusters/SKILL.md" "skills/clusters (multi-region)"
+  check_file "$CLAUDE_DIR/skills/pipeline-gitlab-feature/SKILL.md" "skills/pipeline-gitlab-feature"
+  check_file "$CLAUDE_DIR/skills/pipeline-gitlab-incident/SKILL.md" "skills/pipeline-gitlab-incident"
+  check_file "$CLAUDE_DIR/skills/pipeline-github-feature/SKILL.md" "skills/pipeline-github-feature"
+  check_file "$CLAUDE_DIR/agents/requirements-engineer.md" "agents/requirements-engineer (Opus)"
   check_file "$CLAUDE_DIR/agents/architect.md" "agents/architect (Opus)"
   check_file "$CLAUDE_DIR/agents/tdd-developer.md" "agents/tdd-developer (Sonnet)"
   check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Haiku)"
@@ -2037,6 +2781,7 @@ show_status() {
   if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ]; then
     echo ""
     header "Copilot CLI ($COPILOT_DIR/)"
+    check_file "$COPILOT_DIR/agents/requirements-engineer.agent.md" "agents/requirements-engineer"
     check_file "$COPILOT_DIR/agents/architect.agent.md" "agents/architect"
     check_file "$COPILOT_DIR/agents/tdd-developer.agent.md" "agents/tdd-developer"
     check_file "$COPILOT_DIR/agents/qa.agent.md" "agents/qa"
@@ -2055,6 +2800,19 @@ show_status() {
   if [ -f ".tdd-skip" ]; then
     warn "TDD bypass is ACTIVE"
     dim "$(cat .tdd-skip)"
+  fi
+
+  # Check for active pipeline
+  if [ -f "$STATE_FILE" ]; then
+    echo ""
+    header "Active Pipeline"
+    # shellcheck source=/dev/null
+    source "$STATE_FILE"
+    echo -e "  Pipeline:     ${BOLD}${PIPELINE}${NC}"
+    echo -e "  ID:           ${BOLD}${ID}${NC}"
+    echo -e "  Current Step: ${BOLD}${CURRENT_STEP}${NC}"
+    echo -e "  Status:       ${BOLD}${STATUS}${NC}"
+    echo -e "  Last Updated: ${DIM}${TIMESTAMP}${NC}"
   fi
 
   echo ""
@@ -2122,7 +2880,7 @@ show_detect() {
 }
 
 uninstall_global() {
-  header "Uninstalling global TDD workflow"
+  header "Uninstalling AI-native workflow"
   echo ""
 
   local items=(
@@ -2136,6 +2894,10 @@ uninstall_global() {
     "$CLAUDE_DIR/skills/pr"
     "$CLAUDE_DIR/skills/plan"
     "$CLAUDE_DIR/skills/clusters"
+    "$CLAUDE_DIR/skills/pipeline-gitlab-feature"
+    "$CLAUDE_DIR/skills/pipeline-gitlab-incident"
+    "$CLAUDE_DIR/skills/pipeline-github-feature"
+    "$CLAUDE_DIR/agents/requirements-engineer.md"
     "$CLAUDE_DIR/agents/architect.md"
     "$CLAUDE_DIR/agents/tdd-developer.md"
     "$CLAUDE_DIR/agents/qa.md"
@@ -2157,6 +2919,7 @@ uninstall_global() {
   # Copilot CLI agents
   local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   local copilot_agents=(
+    "$COPILOT_DIR/agents/requirements-engineer.agent.md"
     "$COPILOT_DIR/agents/architect.agent.md"
     "$COPILOT_DIR/agents/tdd-developer.agent.md"
     "$COPILOT_DIR/agents/qa.agent.md"
@@ -2204,39 +2967,64 @@ uninstall_project() {
 show_help() {
   cat << 'HELP'
 
-  ╔════════════════════════════════════════════════════════╗
-  ║         tdd-workflow — TDD Workflow Installer          ║
-  ╚════════════════════════════════════════════════════════╝
+  ╔════════════════════════════════════════════════════════════╗
+  ║       ai-native-workflow — AI-Native Development CLI       ║
+  ╚════════════════════════════════════════════════════════════╝
 
   USAGE
-    tdd-workflow <command> [options]
+    ai-native-workflow <command> [options]
 
-  COMMANDS
-    install global              Install hooks, skills, settings to ~/.claude/
+  INSTALL COMMANDS
+    install global              Install hooks, skills, agents to ~/.claude/
     install project [path]      Install AGENTS.md, Copilot config, .context/
                                 (auto-detects stack from project files)
     install all [path]          Install both global + project
 
-    detect [path]               Show detected stacks without installing
-    status                      Show installation status
+  PIPELINE COMMANDS
+    run gitlab-feature <ID>     GitLab feature development pipeline
+                                Jira → requirements-engineer → qa (test plan)
+                                → architect → tdd-developer → qa → reviewer → MR
 
+    run gitlab-incident <ID>    GitLab incident response pipeline
+                                Jira → troubleshooter → [document OR fix]
+                                → tdd-developer → qa → reviewer → MR
+
+    run github-feature [file]   GitHub feature development pipeline
+                                specs.md/input → requirements-engineer
+                                → GitHub issue → architect → tdd-developer
+                                → qa → reviewer → PR
+
+    run status                  Show active pipeline state
+    run resume                  Resume pipeline from last checkpoint
+
+  OTHER COMMANDS
+    detect [path]               Show detected stacks without installing
+    status                      Show installation status + pipeline state
     uninstall global            Remove global hooks and skills
     uninstall project [path]    Remove project Copilot instructions
-
     help                        Show this message
     version                     Show version
 
   EXAMPLES
-    tdd-workflow install global
-    tdd-workflow install project ~/code/my-api
-    tdd-workflow install all .
-    tdd-workflow detect ~/code/my-frontend
-    tdd-workflow status
+    ai-native-workflow install all .
+    ai-native-workflow run gitlab-feature PROJ-123
+    ai-native-workflow run gitlab-incident PROJ-456
+    ai-native-workflow run github-feature specs.md
+    ai-native-workflow run github-feature           # interactive input
+    ai-native-workflow run status
+    ai-native-workflow run resume
+    ai-native-workflow detect ~/code/my-frontend
+    ai-native-workflow status
+
+  PREREQUISITES
+    run gitlab-feature:    copilot, glab, jira MCP
+    run gitlab-incident:   copilot, glab, az, kubectl
+    run github-feature:    claude, gh
 
   WHAT GETS INSTALLED
 
     Global (~/.claude/):
-      CLAUDE.md                 Minimal personal defaults
+      CLAUDE.md                 Personal defaults + pipeline reference
       settings.json             SessionStart + TDD gate hooks
       hooks/session-start.sh    Auto-loads context + detects stack
       hooks/tdd-gate.sh         Blocks commits without tests
@@ -2247,6 +3035,9 @@ show_help() {
       skills/adr/               /adr — Architecture Decision Records
       skills/pr/                /pr — Create PR/MR (gh/glab)
       skills/plan/              /plan — Pipeline orchestration entry point
+      skills/clusters/          /clusters — Multi-region reference
+      skills/pipeline-*/        Pipeline reference skills
+      agents/requirements-engineer.md  Opus 4.6 — elicit requirements
       agents/architect.md       Opus 4.6 — design, spec, todo plan
       agents/tdd-developer.md   Sonnet 4.6 — strict TDD implementation
       agents/qa.md              Haiku 4.5 — run affected tests
@@ -2261,15 +3052,14 @@ show_help() {
       .github/instructions/*.md          Stack-specific Copilot rules
       docs/decisions/           ADR directory
 
-  AGENT PIPELINE
+  AGENT ROSTER
 
-    /plan "add user auth"
-      → architect (Opus)        creates spec.md + todo.md
-      → tdd-developer (Sonnet)  RED→GREEN→REFACTOR per step
-      → qa (Haiku)              runs affected tests
-      → reviewer (Sonnet)       presents findings to you
-      → you triage              [F]ix / [T]ech debt / [I]gnore
-      → max 3 fix loops         then next step
+    requirements-engineer (Opus 4.6)  → elicit & formalize requirements
+    architect (Opus 4.6)              → design, spec, atomic plan
+    tdd-developer (Sonnet 4.6)        → RED→GREEN→REFACTOR per step
+    qa (Haiku 4.5)                    → run affected tests
+    reviewer (Sonnet 4.6)             → code review, user triages
+    troubleshooter (Opus 4.6)         → incident investigation + diagnosis
 
   COPILOT CLI USAGE
 
@@ -2281,20 +3071,12 @@ show_help() {
       /agent                                # pick from agent list
 
     Direct:
+      copilot --agent=requirements-engineer --prompt "Analyze PROJ-123"
       copilot --agent=architect --prompt "Plan JWT auth feature"
       copilot --agent=tdd-developer --prompt "Step 1 of PROJ-123-todo.md"
       copilot --agent=qa --prompt "Verify the changes"
       copilot --agent=reviewer --prompt "Review the changes"
       copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
-
-    Automatic:
-      Copilot infers the right agent from your prompt if the
-      description matches. "Plan a new feature" → architect.
-      "Run the tests" → qa.
-
-    Shared context:
-      AGENTS.md and .github/copilot-instructions.md are read by
-      both Claude Code and Copilot CLI automatically.
 
 HELP
 }
@@ -2325,6 +3107,39 @@ main() {
           ;;
       esac
       ;;
+    run)
+      case "$subcommand" in
+        gitlab-feature)
+          if [ -z "$target" ]; then
+            error "Usage: ai-native-workflow run gitlab-feature <JIRA-ID>"
+            exit 1
+          fi
+          pipeline_gitlab_feature "$target"
+          ;;
+        gitlab-incident)
+          if [ -z "$target" ]; then
+            error "Usage: ai-native-workflow run gitlab-incident <JIRA-ID>"
+            exit 1
+          fi
+          pipeline_gitlab_incident "$target"
+          ;;
+        github-feature)
+          pipeline_github_feature "${target:-}"
+          ;;
+        status)
+          pipeline_status
+          ;;
+        resume)
+          pipeline_resume
+          ;;
+        *)
+          error "Unknown run target: $subcommand"
+          echo "  Use: run gitlab-feature <ID> | run gitlab-incident <ID> | run github-feature [file]"
+          echo "       run status | run resume"
+          exit 1
+          ;;
+      esac
+      ;;
     detect)
       show_detect "${subcommand:-.}"
       ;;
@@ -2346,7 +3161,7 @@ main() {
       show_help
       ;;
     version|--version|-v)
-      echo "tdd-workflow v${VERSION}"
+      echo "ai-native-workflow v${VERSION}"
       ;;
     *)
       error "Unknown command: $command"

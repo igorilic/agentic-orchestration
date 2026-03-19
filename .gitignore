@@ -1,5 +1,6 @@
 .DS_Store
 .tdd-skip
 .claude/settings.local.json
+.context/.pipeline-state
 node_modules/
 *.env

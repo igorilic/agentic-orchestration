@@ -1,9 +1,9 @@
 # Agentic Orchestration
 
-A multi-agent pipeline for test-driven development with Claude Code and GitHub Copilot CLI.
+An AI-native development CLI with multi-agent pipelines for test-driven development using Claude Code and GitHub Copilot CLI.
 
-Five specialized AI agents collaborate through a deterministic pipeline:
-**architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents).
+Six specialized AI agents collaborate through platform-specific pipelines:
+**requirements-engineer** → **architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents).
 
 ## The Problem
 
@@ -21,46 +21,63 @@ Separate concerns by guarantee level:
 
 The TDD gate is a `PreToolUse` hook that **blocks `git commit`** if no test files are staged. It's not a suggestion — it's a shell script that returns exit code 2. The AI cannot override it.
 
-## Agent Pipeline
+## Pipelines
 
+### Pipeline 1: GitLab Feature (Copilot CLI + Jira)
 ```
-/plan "add user authentication"
+ai-native-workflow run gitlab-feature PROJ-123
   │
-  ├─ architect (Opus 4.6)         → spec.md + todo.md (atomic steps)
-  │
-  ├─ tdd-developer (Sonnet 4.6)   → RED: failing tests → commit
-  │                                  GREEN: implement → commit
-  │                                  REFACTOR: improve → commit
-  │
-  ├─ qa (Haiku 4.5)               → runs affected tests only
-  │
-  ├─ reviewer (Sonnet 4.6)        → 🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
-  │                                  → you triage: [F]ix / [T]ech debt / [I]gnore
-  │
-  └─ (max 3 fix loops, then next step)
+  ├─ requirements-engineer  → structured requirements from Jira
+  ├─ qa                     → test plan
+  ├─ architect              → spec.md + todo.md
+  ├─ tdd-developer          → RED → GREEN → REFACTOR (per step)
+  ├─ qa                     → run affected tests
+  ├─ reviewer               → code review + triage
+  └─ glab mr create         → merge request
 ```
 
-For production incidents:
+### Pipeline 2: GitLab Incident (Copilot CLI + Jira + Troubleshooter)
 ```
-Use the troubleshooter to investigate PROJ-456
-  → Jira ticket context
-  → ArgoCD pod logs (EMEA/APAC/NAM)
-  → Azure Application Insights queries
-  → Root cause diagnosis + TDD fix plan
+ai-native-workflow run gitlab-incident PROJ-456
+  │
+  ├─ troubleshooter         → Jira + ArgoCD + App Insights + kubectl
+  ├─ USER DECIDES           → document findings OR fix the issue
+  ├─ tdd-developer          → reproduce bug + fix via TDD
+  ├─ qa                     → verify fix
+  ├─ reviewer               → review MR
+  └─ glab mr create         → merge request + update Jira
+```
+
+### Pipeline 3: GitHub Feature (Claude Code)
+```
+ai-native-workflow run github-feature specs.md
+  │
+  ├─ requirements-engineer  → structured requirements from specs.md
+  ├─ gh issue create        → GitHub issue (feature request)
+  ├─ architect              → spec.md + todo.md
+  ├─ tdd-developer          → RED → GREEN → REFACTOR (per step)
+  ├─ qa                     → run affected tests
+  ├─ reviewer               → code review + triage
+  └─ gh pr create           → pull request (Closes #issue)
 ```
 
 ## Quick Start
 
 ```bash
 # Install globally (hooks, skills, agents for Claude Code + Copilot CLI)
-./tdd-workflow install global
+./ai-native-workflow install global
 
 # Install per project (auto-detects your stack)
 cd ~/code/my-project
-tdd-workflow install project .
+ai-native-workflow install project .
+
+# Run a pipeline
+ai-native-workflow run gitlab-feature PROJ-123
+ai-native-workflow run gitlab-incident PROJ-456
+ai-native-workflow run github-feature specs.md
 
 # Check what's installed
-tdd-workflow status
+ai-native-workflow status
 ```
 
 ## What Gets Installed
@@ -79,6 +96,8 @@ tdd-workflow status
 | `skills/adr/` | Architecture Decision Records |
 | `skills/pr/` | Create PR/MR (auto-detects gh/glab) |
 | `skills/clusters/` | Multi-cluster reference (EMEA/APAC/NAM) |
+| `skills/pipeline-*/` | Pipeline reference skills |
+| `agents/requirements-engineer.md` | Opus 4.6 — elicit & formalize requirements |
 | `agents/architect.md` | Opus 4.6 — design, spec, atomic plans |
 | `agents/tdd-developer.md` | Sonnet 4.6 — strict TDD implementation |
 | `agents/qa.md` | Haiku 4.5 — run affected tests |
@@ -114,12 +133,26 @@ Scans 3 levels deep for monorepo support.
 
 ## Usage
 
-### Claude Code
+### CLI Pipelines
+```bash
+# Full automated pipelines
+ai-native-workflow run gitlab-feature PROJ-123
+ai-native-workflow run gitlab-incident PROJ-456
+ai-native-workflow run github-feature specs.md
+ai-native-workflow run github-feature            # interactive input
+
+# Pipeline management
+ai-native-workflow run status                    # check progress
+ai-native-workflow run resume                    # resume from checkpoint
+```
+
+### Claude Code (Interactive)
 ```bash
 # Start the pipeline
 /plan Add JWT authentication
 
 # Or invoke agents directly
+Use the requirements-engineer to analyze the specs
 Use the architect agent to plan the auth feature
 Use tdd-developer to work on Step 1 of auth-todo.md
 Use qa to verify the changes
@@ -136,6 +169,7 @@ copilot
 > /agent    # pick from list
 
 # Direct
+copilot --agent=requirements-engineer --prompt "Analyze PROJ-123"
 copilot --agent=architect --prompt "Plan JWT auth"
 copilot --agent=tdd-developer --prompt "Step 1 of auth-todo.md"
 copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
@@ -162,14 +196,14 @@ Edit `~/.claude/skills/clusters/SKILL.md` with your cluster details after instal
 ## Documentation
 
 - [PAPER.md](PAPER.md) — Scientific paper describing the architecture
-- [docs/WORKFLOW-ARCHITECTURE-V2.md](docs/WORKFLOW-ARCHITECTURE-V2.md) — Full technical specification
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architecture v3.0 with all pipelines
 
 ## Requirements
 
 - [Claude Code](https://code.claude.com) (for Claude Code agents/hooks/skills)
 - [GitHub Copilot CLI](https://github.com/features/copilot/cli) (optional, for Copilot agents)
-- `gh` CLI (for `/pr` skill with GitHub repos)
-- `glab` CLI (for `/pr` skill with GitLab repos)
+- `gh` CLI (for GitHub pipelines and `/pr` skill)
+- `glab` CLI (for GitLab pipelines and `/pr` skill)
 - `kubectl` (for troubleshooter)
 - `az` CLI (for Azure Application Insights queries)
 - `jq` (optional, for merging existing settings.json)
