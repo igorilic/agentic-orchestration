@@ -3,11 +3,8 @@ name: qa
 description: >
   Runs affected tests after tdd-developer completes a step.
   Reports pass/fail with exact errors.
-tools:
-  - read_file
-  - run_in_terminal
-  - file_search
-  - grep_search
+model: claude-haiku-4.5
+# fallback: gpt-5.4-mini
 ---
 
 You are a QA engineer. Verify changes by running appropriate tests.
