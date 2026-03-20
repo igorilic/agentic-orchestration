@@ -322,6 +322,52 @@ count_steps() {
   grep -c '^### Step' "$todo_file" 2>/dev/null || echo "0"
 }
 
+# Check if a step should be skipped during resume.
+# Returns 0 (true) if the step should be skipped, 1 (false) if it should run.
+# Steps use format: "1", "2", "4.1", "5.2", "7"
+# A step is skipped if it was completed (status=done/dev-done/qa-done/review-done/complete)
+# The step matching RESUME_FROM_STEP runs again (it may have been interrupted).
+should_skip_step() {
+  local step="$1"
+  local resume="${RESUME_FROM_STEP:-}"
+
+  # No resume in progress — run everything
+  [ -z "$resume" ] && return 1
+
+  # Parse major.minor for comparison
+  local step_major step_minor resume_major resume_minor
+  step_major=$(echo "$step" | cut -d. -f1)
+  step_minor=$(echo "$step" | cut -d. -f2 -s)
+  resume_major=$(echo "$resume" | cut -d. -f1)
+  resume_minor=$(echo "$resume" | cut -d. -f2 -s)
+
+  # Handle non-numeric steps (like "2A")
+  # Strip letters for comparison
+  step_major=$(echo "$step_major" | sed 's/[^0-9]//g')
+  resume_major=$(echo "$resume_major" | sed 's/[^0-9]//g')
+  [ -z "$step_major" ] && return 1
+  [ -z "$resume_major" ] && return 1
+
+  step_minor=${step_minor:-0}
+  resume_minor=${resume_minor:-0}
+
+  # Skip if step is strictly before the resume point
+  if [ "$step_major" -lt "$resume_major" ]; then
+    dim "Skipping step $step (already done)"
+    return 0
+  elif [ "$step_major" -eq "$resume_major" ] && [ "$step_minor" -lt "$resume_minor" ]; then
+    dim "Skipping step $step (already done)"
+    return 0
+  fi
+
+  # Clear the resume flag once we've caught up
+  if [ "$step_major" -ge "$resume_major" ]; then
+    unset RESUME_FROM_STEP
+  fi
+
+  return 1
+}
+
 create_feature_branch() {
   local prefix="$1"  # "feat" or "fix"
   local id="$2"      # JIRA-ID or feature name
@@ -511,30 +557,43 @@ pipeline_gitlab_feature() {
   echo ""
 
   mkdir -p "$CONTEXT_DIR"
+  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
 
-  # --- Create feature branch ---
-  create_feature_branch "feat" "$jira_id"
+  # --- Create/checkout feature branch ---
+  if [ -n "${RESUME_FROM_STEP:-}" ]; then
+    local expected_branch
+    expected_branch=$(echo "feat/$jira_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
+    git checkout "$expected_branch" 2>/dev/null || true
+  else
+    create_feature_branch "feat" "$jira_id"
+  fi
 
   # --- Step 1: Requirements Engineering ---
-  pstep 1 "Requirements Engineering"
-  save_state "gitlab-feature" "$jira_id" 1 "running"
-  run_copilot_agent "requirements-engineer" "Analyze Jira ticket $jira_id. Create structured requirements at $CONTEXT_DIR/${jira_id}-requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
-  save_state "gitlab-feature" "$jira_id" 1 "done"
-  wait_for_review "$CONTEXT_DIR/${jira_id}-requirements.md"
+  if ! should_skip_step 1; then
+    pstep 1 "Requirements Engineering"
+    save_state "gitlab-feature" "$jira_id" 1 "running"
+    run_copilot_agent "requirements-engineer" "Analyze Jira ticket $jira_id. Create structured requirements at $CONTEXT_DIR/${jira_id}-requirements.md. $NI_SUFFIX"
+    save_state "gitlab-feature" "$jira_id" 1 "done"
+    wait_for_review "$CONTEXT_DIR/${jira_id}-requirements.md"
+  fi
 
   # --- Step 2: Test Planning ---
-  pstep 2 "Test Planning"
-  save_state "gitlab-feature" "$jira_id" 2 "running"
-  run_copilot_agent "qa" "Create test plan from $CONTEXT_DIR/${jira_id}-requirements.md. Save to $CONTEXT_DIR/${jira_id}-testplan.md"
-  save_state "gitlab-feature" "$jira_id" 2 "done"
-  wait_for_review "$CONTEXT_DIR/${jira_id}-testplan.md"
+  if ! should_skip_step 2; then
+    pstep 2 "Test Planning"
+    save_state "gitlab-feature" "$jira_id" 2 "running"
+    run_copilot_agent "qa" "Create test plan from $CONTEXT_DIR/${jira_id}-requirements.md. Save to $CONTEXT_DIR/${jira_id}-testplan.md"
+    save_state "gitlab-feature" "$jira_id" 2 "done"
+    wait_for_review "$CONTEXT_DIR/${jira_id}-testplan.md"
+  fi
 
   # --- Step 3: Architecture & Planning ---
-  pstep 3 "Architecture & Planning"
-  save_state "gitlab-feature" "$jira_id" 3 "running"
-  run_copilot_agent "architect" "Design solution for $jira_id using $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md. You are running non-interactively — do NOT ask questions. Write the spec and todo files directly. If unclear, document assumptions in the spec."
-  save_state "gitlab-feature" "$jira_id" 3 "done"
-  wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
+  if ! should_skip_step 3; then
+    pstep 3 "Architecture & Planning"
+    save_state "gitlab-feature" "$jira_id" 3 "running"
+    run_copilot_agent "architect" "Design solution for $jira_id using $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md. $NI_SUFFIX Write the spec and todo files directly. If unclear, document assumptions in the spec."
+    save_state "gitlab-feature" "$jira_id" 3 "done"
+    wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
+  fi
 
   # --- Step 4-6: TDD Loop (per step in todo) ---
   local todo_file="$CONTEXT_DIR/${jira_id}-todo.md"
@@ -543,35 +602,42 @@ pipeline_gitlab_feature() {
   info "Todo has $total_steps steps"
 
   for ((i = 1; i <= total_steps; i++)); do
-    pstep "4.$i" "TDD: Implement Step $i/$total_steps"
-    save_state "gitlab-feature" "$jira_id" "4.$i" "running"
-    run_copilot_agent "tdd-developer" "Step $i of ${jira_id}-todo.md"
-    save_state "gitlab-feature" "$jira_id" "4.$i" "dev-done"
+    if ! should_skip_step "4.$i"; then
+      pstep "4.$i" "TDD: Implement Step $i/$total_steps"
+      save_state "gitlab-feature" "$jira_id" "4.$i" "running"
+      run_copilot_agent "tdd-developer" "Step $i of ${jira_id}-todo.md"
+      save_state "gitlab-feature" "$jira_id" "4.$i" "dev-done"
+    fi
 
-    pstep "5.$i" "QA: Test Step $i/$total_steps"
-    run_copilot_agent "qa" "Run tests for Step $i of $jira_id"
-    save_state "gitlab-feature" "$jira_id" "5.$i" "qa-done"
+    if ! should_skip_step "5.$i"; then
+      pstep "5.$i" "QA: Test Step $i/$total_steps"
+      run_copilot_agent "qa" "Run tests for Step $i of $jira_id"
+      save_state "gitlab-feature" "$jira_id" "5.$i" "qa-done"
+    fi
 
-    pstep "6.$i" "Review: Step $i/$total_steps"
-    run_copilot_agent "reviewer" "Review Step $i of $jira_id"
-    save_state "gitlab-feature" "$jira_id" "6.$i" "review-done"
+    if ! should_skip_step "6.$i"; then
+      pstep "6.$i" "Review: Step $i/$total_steps"
+      run_copilot_agent "reviewer" "Review Step $i of $jira_id"
+      save_state "gitlab-feature" "$jira_id" "6.$i" "review-done"
 
-    run_triage "copilot" "$jira_id" "$i"
+      run_triage "copilot" "$jira_id" "$i"
+    fi
   done
 
   # --- Step 7: Create Merge Request ---
-  pstep 7 "Create Merge Request"
-  if confirm "Create merge request on GitLab?"; then
-    local branch
-    branch=$(git branch --show-current)
-    local base
-    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
-    git push -u origin "$branch"
-    glab mr create \
-      --source-branch "$branch" \
-      --target-branch "$base" \
-      --title "feat: $jira_id" \
-      --description "Closes $jira_id
+  if ! should_skip_step 7; then
+    pstep 7 "Create Merge Request"
+    if confirm "Create merge request on GitLab?"; then
+      local branch
+      branch=$(git branch --show-current)
+      local base
+      base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+      git push -u origin "$branch"
+      glab mr create \
+        --source-branch "$branch" \
+        --target-branch "$base" \
+        --title "feat: $jira_id" \
+        --description "Closes $jira_id
 
 ## Pipeline
 Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
@@ -581,7 +647,8 @@ Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
 - Test Plan: \`$CONTEXT_DIR/${jira_id}-testplan.md\`
 - Spec: \`$CONTEXT_DIR/${jira_id}-spec.md\`
 - Todo: \`$CONTEXT_DIR/${jira_id}-todo.md\`"
-    success "Merge request created!"
+      success "Merge request created!"
+    fi
   fi
 
   save_state "gitlab-feature" "$jira_id" 7 "complete"
@@ -606,53 +673,61 @@ pipeline_gitlab_incident() {
   mkdir -p "$CONTEXT_DIR"
 
   # --- Step 1: Troubleshoot ---
-  pstep 1 "Investigation (Troubleshooter)"
-  save_state "gitlab-incident" "$jira_id" 1 "running"
-  run_copilot_agent "troubleshooter" "Investigate Jira incident $jira_id. Check all regions. Produce diagnosis at $CONTEXT_DIR/${jira_id}-bugfix.md"
-  save_state "gitlab-incident" "$jira_id" 1 "done"
+  if ! should_skip_step 1; then
+    pstep 1 "Investigation (Troubleshooter)"
+    save_state "gitlab-incident" "$jira_id" 1 "running"
+    run_copilot_agent "troubleshooter" "Investigate Jira incident $jira_id. Check all regions. Produce diagnosis at $CONTEXT_DIR/${jira_id}-bugfix.md"
+    save_state "gitlab-incident" "$jira_id" 1 "done"
 
-  echo ""
-  info "Review diagnosis: ${BOLD}$CONTEXT_DIR/${jira_id}-bugfix.md${NC}"
+    echo ""
+    info "Review diagnosis: ${BOLD}$CONTEXT_DIR/${jira_id}-bugfix.md${NC}"
+  fi
 
   # --- Step 2: User Decision Point ---
-  pstep 2 "Decision Point"
-  echo ""
-  echo -e "  ${BOLD}A${NC} — Document only (add findings to Jira, no code fix)"
-  echo -e "  ${BOLD}B${NC} — Fix the issue (TDD pipeline)"
-  echo -e "  ${BOLD}Q${NC} — Quit"
-  echo ""
-  ask "Choose action [A/B/Q]: "
-  read -r decision
+  if ! should_skip_step 2; then
+    pstep 2 "Decision Point"
+    echo ""
+    echo -e "  ${BOLD}A${NC} — Document only (add findings to Jira, no code fix)"
+    echo -e "  ${BOLD}B${NC} — Fix the issue (TDD pipeline)"
+    echo -e "  ${BOLD}Q${NC} — Quit"
+    echo ""
+    ask "Choose action [A/B/Q]: "
+    read -r decision
 
-  case "$decision" in
-    [Aa]*)
-      # --- Option A: Document Only ---
-      pstep "2A" "Adding findings to Jira"
-      save_state "gitlab-incident" "$jira_id" "2A" "running"
-      if [ -f "$CONTEXT_DIR/${jira_id}-bugfix.md" ]; then
-        run_copilot_agent "troubleshooter" "Add the diagnosis from $CONTEXT_DIR/${jira_id}-bugfix.md as a comment on Jira ticket $jira_id. Include key findings, root cause, and recommended next action."
-        success "Findings added to Jira ticket $jira_id"
-      else
-        warn "No diagnosis file found. Add findings manually."
-      fi
-      save_state "gitlab-incident" "$jira_id" "2A" "complete"
-      pipeline_finish "gitlab-incident-doconly" "$jira_id" "copilot"
-      return
-      ;;
-    [Bb]*)
-      info "Continuing to fix..."
-      create_feature_branch "fix" "$jira_id"
-      ;;
-    [Qq]*)
-      warn "Pipeline aborted."
-      clear_state
-      return
-      ;;
-    *)
-      error "Invalid choice. Aborting."
-      exit 1
-      ;;
-  esac
+    case "$decision" in
+      [Aa]*)
+        pstep "2A" "Adding findings to Jira"
+        save_state "gitlab-incident" "$jira_id" "2A" "running"
+        if [ -f "$CONTEXT_DIR/${jira_id}-bugfix.md" ]; then
+          run_copilot_agent "troubleshooter" "Add the diagnosis from $CONTEXT_DIR/${jira_id}-bugfix.md as a comment on Jira ticket $jira_id. Include key findings, root cause, and recommended next action."
+          success "Findings added to Jira ticket $jira_id"
+        else
+          warn "No diagnosis file found. Add findings manually."
+        fi
+        save_state "gitlab-incident" "$jira_id" "2A" "complete"
+        pipeline_finish "gitlab-incident-doconly" "$jira_id" "copilot"
+        return
+        ;;
+      [Bb]*)
+        info "Continuing to fix..."
+        create_feature_branch "fix" "$jira_id"
+        ;;
+      [Qq]*)
+        warn "Pipeline aborted."
+        clear_state
+        return
+        ;;
+      *)
+        error "Invalid choice. Aborting."
+        exit 1
+        ;;
+    esac
+  else
+    # On resume past step 2, ensure we're on the fix branch
+    local expected_branch
+    expected_branch=$(echo "fix/$jira_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
+    git checkout "$expected_branch" 2>/dev/null || true
+  fi
 
   # --- Step 3: TDD Fix ---
   local todo_file="$CONTEXT_DIR/${jira_id}-todo.md"
@@ -661,45 +736,53 @@ pipeline_gitlab_incident() {
   info "Fix plan has $total_steps steps"
 
   for ((i = 1; i <= total_steps; i++)); do
-    pstep "3.$i" "TDD Fix: Step $i/$total_steps"
-    save_state "gitlab-incident" "$jira_id" "3.$i" "running"
-    run_copilot_agent "tdd-developer" "Step $i of ${jira_id}-todo.md"
-    save_state "gitlab-incident" "$jira_id" "3.$i" "dev-done"
+    if ! should_skip_step "3.$i"; then
+      pstep "3.$i" "TDD Fix: Step $i/$total_steps"
+      save_state "gitlab-incident" "$jira_id" "3.$i" "running"
+      run_copilot_agent "tdd-developer" "Step $i of ${jira_id}-todo.md"
+      save_state "gitlab-incident" "$jira_id" "3.$i" "dev-done"
+    fi
 
-    pstep "4.$i" "QA: Verify Step $i/$total_steps"
-    run_copilot_agent "qa" "Run tests for Step $i of $jira_id bugfix"
-    save_state "gitlab-incident" "$jira_id" "4.$i" "qa-done"
+    if ! should_skip_step "4.$i"; then
+      pstep "4.$i" "QA: Verify Step $i/$total_steps"
+      run_copilot_agent "qa" "Run tests for Step $i of $jira_id bugfix"
+      save_state "gitlab-incident" "$jira_id" "4.$i" "qa-done"
+    fi
 
-    pstep "5.$i" "Review: Step $i/$total_steps"
-    run_copilot_agent "reviewer" "Review Step $i of $jira_id bugfix"
-    save_state "gitlab-incident" "$jira_id" "5.$i" "review-done"
+    if ! should_skip_step "5.$i"; then
+      pstep "5.$i" "Review: Step $i/$total_steps"
+      run_copilot_agent "reviewer" "Review Step $i of $jira_id bugfix"
+      save_state "gitlab-incident" "$jira_id" "5.$i" "review-done"
 
-    run_triage "copilot" "$jira_id" "$i"
+      run_triage "copilot" "$jira_id" "$i"
+    fi
   done
 
   # --- Step 6: Create MR + Update Jira ---
-  pstep 6 "Create Merge Request"
-  if confirm "Create merge request and update Jira?"; then
-    local branch
-    branch=$(git branch --show-current)
-    local base
-    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
-    git push -u origin "$branch"
-    glab mr create \
-      --source-branch "$branch" \
-      --target-branch "$base" \
-      --title "fix: $jira_id" \
-      --description "Fixes $jira_id
+  if ! should_skip_step 6; then
+    pstep 6 "Create Merge Request"
+    if confirm "Create merge request and update Jira?"; then
+      local branch
+      branch=$(git branch --show-current)
+      local base
+      base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+      git push -u origin "$branch"
+      glab mr create \
+        --source-branch "$branch" \
+        --target-branch "$base" \
+        --title "fix: $jira_id" \
+        --description "Fixes $jira_id
 
 ## Root Cause
 See \`$CONTEXT_DIR/${jira_id}-bugfix.md\`
 
 ## Pipeline
 Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
-    success "Merge request created!"
+      success "Merge request created!"
 
-    # Update Jira status
-    run_copilot_agent "troubleshooter" "Transition Jira ticket $jira_id to 'In Review' and add a comment with the MR link."
+      # Update Jira status
+      run_copilot_agent "troubleshooter" "Transition Jira ticket $jira_id to 'In Review' and add a comment with the MR link."
+    fi
   fi
 
   save_state "gitlab-incident" "$jira_id" 6 "complete"
@@ -721,83 +804,98 @@ pipeline_github_feature() {
 
   mkdir -p "$CONTEXT_DIR"
 
-  # --- Determine input source ---
-  local req_prompt
-  if [ -n "$specs_file" ] && [ -f "$specs_file" ]; then
-    info "Specs file: ${BOLD}$specs_file${NC}"
-    req_prompt="Read the specs file at $specs_file and create structured requirements at $CONTEXT_DIR/requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
-  elif [ -f "specs.md" ]; then
-    info "Specs file: ${BOLD}specs.md${NC} (auto-detected)"
-    req_prompt="Read the specs file at specs.md and create structured requirements at $CONTEXT_DIR/requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
-  else
-    info "No specs file provided. Enter requirements interactively."
-    echo ""
-    ask "Describe the feature:"
-    echo ""
-    read -r feature_desc
-    req_prompt="Create structured requirements from this description: $feature_desc. Save to $CONTEXT_DIR/requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
-  fi
-  echo ""
-
-  # --- Derive an ID from timestamp for unique naming ---
   local id
-  id="feature-$(date +%Y%m%d-%H%M%S)"
-
-  # --- Create feature branch ---
-  create_feature_branch "feat" "$id"
-
-  # --- Step 1: Requirements Engineering ---
-  pstep 1 "Requirements Engineering"
-  save_state "github-feature" "$id" 1 "running"
-  run_claude_agent "requirements-engineer" "$req_prompt"
-  save_state "github-feature" "$id" 1 "done"
-  wait_for_review "$CONTEXT_DIR/requirements.md"
-
-  # --- Step 2: Create GitHub Issue ---
-  pstep 2 "Create GitHub Issue"
-  save_state "github-feature" "$id" 2 "running"
-
   local issue_title="New feature request"
   local issue_num=""
+  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
 
-  if confirm "Create GitHub issue from requirements?"; then
-    # Extract a title from the requirements file
-    if [ -f "$CONTEXT_DIR/requirements.md" ]; then
-      issue_title=$(grep -m1 '^# ' "$CONTEXT_DIR/requirements.md" 2>/dev/null | sed 's/^# //' || echo "New feature request")
+  # --- On resume, recover ID from state; otherwise generate new ---
+  if [ -n "${RESUME_FROM_STEP:-}" ] && [ -f "$STATE_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$STATE_FILE"
+    id="$ID"
+    info "Resuming with ID: ${BOLD}$id${NC}"
+    # Make sure we're on the right branch
+    local expected_branch
+    expected_branch=$(echo "feat/$id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
+    git checkout "$expected_branch" 2>/dev/null || true
+  else
+    # --- Determine input source ---
+    local req_prompt
+    if [ -n "$specs_file" ] && [ -f "$specs_file" ]; then
+      info "Specs file: ${BOLD}$specs_file${NC}"
+      req_prompt="Read the specs file at $specs_file and create structured requirements at $CONTEXT_DIR/requirements.md. $NI_SUFFIX"
+    elif [ -f "specs.md" ]; then
+      info "Specs file: ${BOLD}specs.md${NC} (auto-detected)"
+      req_prompt="Read the specs file at specs.md and create structured requirements at $CONTEXT_DIR/requirements.md. $NI_SUFFIX"
+    else
+      info "No specs file provided. Enter requirements interactively."
+      echo ""
+      ask "Describe the feature:"
+      echo ""
+      read -r feature_desc
+      req_prompt="Create structured requirements from this description: $feature_desc. Save to $CONTEXT_DIR/requirements.md. $NI_SUFFIX"
     fi
+    echo ""
 
-    # Use claude to format and create the issue
-    local issue_url
-    issue_url=$(run_claude_agent "requirements-engineer" \
-      "Format $CONTEXT_DIR/requirements.md as a GitHub issue body and create it using gh issue create. The title should be: feat: $issue_title. Add the label 'feature-request'. Output ONLY the issue URL." 2>&1 | tail -1)
+    id="feature-$(date +%Y%m%d-%H%M%S)"
 
-    if [ -n "$issue_url" ]; then
-      success "GitHub issue created: $issue_url"
-      issue_num=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
-    fi
+    # --- Create feature branch ---
+    create_feature_branch "feat" "$id"
   fi
 
-  save_state "github-feature" "$id" 2 "done"
+  # --- Step 1: Requirements Engineering ---
+  if ! should_skip_step 1; then
+    pstep 1 "Requirements Engineering"
+    save_state "github-feature" "$id" 1 "running"
+    run_claude_agent "requirements-engineer" "${req_prompt:-Continue requirements engineering for $id. Read existing files in $CONTEXT_DIR/ and complete requirements at $CONTEXT_DIR/requirements.md. $NI_SUFFIX}"
+    save_state "github-feature" "$id" 1 "done"
+    wait_for_review "$CONTEXT_DIR/requirements.md"
+  fi
+
+  # --- Step 2: Create GitHub Issue ---
+  if ! should_skip_step 2; then
+    pstep 2 "Create GitHub Issue"
+    save_state "github-feature" "$id" 2 "running"
+
+    if confirm "Create GitHub issue from requirements?"; then
+      if [ -f "$CONTEXT_DIR/requirements.md" ]; then
+        issue_title=$(grep -m1 '^# ' "$CONTEXT_DIR/requirements.md" 2>/dev/null | sed 's/^# //' || echo "New feature request")
+      fi
+
+      local issue_url
+      issue_url=$(run_claude_agent "requirements-engineer" \
+        "Format $CONTEXT_DIR/requirements.md as a GitHub issue body and create it using gh issue create. The title should be: feat: $issue_title. Add the label 'feature-request'. Output ONLY the issue URL." 2>&1 | tail -1)
+
+      if [ -n "$issue_url" ]; then
+        success "GitHub issue created: $issue_url"
+        issue_num=$(echo "$issue_url" | grep -oE '[0-9]+$' || echo "")
+      fi
+    fi
+
+    save_state "github-feature" "$id" 2 "done"
+  fi
 
   # --- Step 3: Architecture & Planning ---
-  pstep 3 "Architecture & Planning"
-  save_state "github-feature" "$id" 3 "running"
-  run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/. You are running non-interactively — do NOT ask questions. Write the spec and todo files directly. If unclear, document assumptions in the spec."
-  save_state "github-feature" "$id" 3 "done"
+  if ! should_skip_step 3; then
+    pstep 3 "Architecture & Planning"
+    save_state "github-feature" "$id" 3 "running"
+    run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/. $NI_SUFFIX Write the spec and todo files directly. If unclear, document assumptions in the spec."
+    save_state "github-feature" "$id" 3 "done"
+  fi
 
   # Find the todo file
   local todo_file
-  todo_file=$(find "$CONTEXT_DIR" -name "*-todo.md" -newer "$STATE_FILE" 2>/dev/null | head -1)
-  if [ -z "$todo_file" ]; then
-    todo_file=$(find "$CONTEXT_DIR" -name "*-todo.md" 2>/dev/null | sort -r | head -1)
-  fi
+  todo_file=$(find "$CONTEXT_DIR" -name "*-todo.md" 2>/dev/null | sort -r | head -1)
 
   if [ -z "$todo_file" ]; then
     error "No todo file found in $CONTEXT_DIR. Architect may have failed."
     exit 1
   fi
 
-  wait_for_review "$todo_file"
+  if ! should_skip_step 3; then
+    wait_for_review "$todo_file"
+  fi
 
   # --- Step 4-6: TDD Loop ---
   local total_steps
@@ -807,50 +905,57 @@ pipeline_github_feature() {
   todo_basename=$(basename "$todo_file" .md)
 
   for ((i = 1; i <= total_steps; i++)); do
-    pstep "4.$i" "TDD: Implement Step $i/$total_steps"
-    save_state "github-feature" "$id" "4.$i" "running"
-    run_claude_agent "tdd-developer" "Step $i of $todo_file"
-    save_state "github-feature" "$id" "4.$i" "dev-done"
+    if ! should_skip_step "4.$i"; then
+      pstep "4.$i" "TDD: Implement Step $i/$total_steps"
+      save_state "github-feature" "$id" "4.$i" "running"
+      run_claude_agent "tdd-developer" "Step $i of $todo_file"
+      save_state "github-feature" "$id" "4.$i" "dev-done"
+    fi
 
-    pstep "5.$i" "QA: Test Step $i/$total_steps"
-    run_claude_agent "qa" "Run tests for Step $i of $todo_basename"
-    save_state "github-feature" "$id" "5.$i" "qa-done"
+    if ! should_skip_step "5.$i"; then
+      pstep "5.$i" "QA: Test Step $i/$total_steps"
+      run_claude_agent "qa" "Run tests for Step $i of $todo_basename"
+      save_state "github-feature" "$id" "5.$i" "qa-done"
+    fi
 
-    pstep "6.$i" "Review: Step $i/$total_steps"
-    run_claude_agent "reviewer" "Review Step $i of $todo_basename"
-    save_state "github-feature" "$id" "6.$i" "review-done"
+    if ! should_skip_step "6.$i"; then
+      pstep "6.$i" "Review: Step $i/$total_steps"
+      run_claude_agent "reviewer" "Review Step $i of $todo_basename"
+      save_state "github-feature" "$id" "6.$i" "review-done"
 
-    run_triage "claude" "$id" "$i"
+      run_triage "claude" "$id" "$i"
+    fi
   done
 
   # --- Step 7: Create Pull Request ---
-  pstep 7 "Create Pull Request"
-  if confirm "Create pull request on GitHub?"; then
-    local branch
-    branch=$(git branch --show-current)
-    local base
-    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
-    git push -u origin "$branch"
+  if ! should_skip_step 7; then
+    pstep 7 "Create Pull Request"
+    if confirm "Create pull request on GitHub?"; then
+      local branch
+      branch=$(git branch --show-current)
+      local base
+      base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+      git push -u origin "$branch"
 
-    local pr_body="## Summary
+      local pr_body="## Summary
 Generated with \`ai-native-workflow run github-feature\`
 
 ## Artifacts
 - Requirements: \`$CONTEXT_DIR/requirements.md\`
 - Todo: \`$todo_file\`"
 
-    # Add issue reference if we have one
-    if [ -n "$issue_num" ]; then
-      pr_body="Closes #$issue_num
+      if [ -n "$issue_num" ]; then
+        pr_body="Closes #$issue_num
 
 $pr_body"
+      fi
+
+      gh pr create \
+        --title "feat: $issue_title" \
+        --body "$pr_body"
+
+      success "Pull request created!"
     fi
-
-    gh pr create \
-      --title "feat: $issue_title" \
-      --body "$pr_body"
-
-    success "Pull request created!"
   fi
 
   save_state "github-feature" "$id" 7 "complete"
@@ -886,7 +991,10 @@ pipeline_resume() {
 
   load_state
 
-  info "Resuming pipeline: ${BOLD}$PIPELINE${NC} for ${BOLD}$ID${NC} at step ${BOLD}$CURRENT_STEP${NC}"
+  info "Resuming pipeline: ${BOLD}$PIPELINE${NC} for ${BOLD}$ID${NC} at step ${BOLD}$CURRENT_STEP${NC} (${STATUS})"
+
+  # Export resume step so pipeline functions can skip completed steps
+  export RESUME_FROM_STEP="$CURRENT_STEP"
 
   case "$PIPELINE" in
     "gitlab-feature")
