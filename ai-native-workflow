@@ -249,7 +249,10 @@ run_copilot_agent() {
   header "Running: $agent (Copilot CLI)"
   dim "Prompt: $prompt"
   echo ""
-  copilot --agent="$agent" -p "$prompt"
+  copilot --agent="$agent" \
+    --allow-all-tools \
+    --allow-all-paths \
+    -p "$prompt"
 }
 
 run_claude_agent() {
@@ -258,7 +261,10 @@ run_claude_agent() {
   header "Running: $agent (Claude Code)"
   dim "Prompt: $prompt"
   echo ""
-  claude --agent="$agent" -p "$prompt"
+  claude --agent="$agent" \
+    --permission-mode auto \
+    --allowedTools "Bash(gh:*) Bash(glab:*) Bash(git:*) Bash(jira:*) Read Write Edit Glob Grep" \
+    -p "$prompt"
 }
 
 run_triage() {
@@ -513,7 +519,7 @@ pipeline_gitlab_feature() {
   # --- Step 1: Requirements Engineering ---
   pstep 1 "Requirements Engineering"
   save_state "gitlab-feature" "$jira_id" 1 "running"
-  run_copilot_agent "requirements-engineer" "Analyze Jira ticket $jira_id. Create structured requirements at $CONTEXT_DIR/${jira_id}-requirements.md"
+  run_copilot_agent "requirements-engineer" "Analyze Jira ticket $jira_id. Create structured requirements at $CONTEXT_DIR/${jira_id}-requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
   save_state "gitlab-feature" "$jira_id" 1 "done"
   wait_for_review "$CONTEXT_DIR/${jira_id}-requirements.md"
 
@@ -527,7 +533,7 @@ pipeline_gitlab_feature() {
   # --- Step 3: Architecture & Planning ---
   pstep 3 "Architecture & Planning"
   save_state "gitlab-feature" "$jira_id" 3 "running"
-  run_copilot_agent "architect" "Design solution for $jira_id using $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md"
+  run_copilot_agent "architect" "Design solution for $jira_id using $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md. You are running non-interactively — do NOT ask questions. Write the spec and todo files directly. If unclear, document assumptions in the spec."
   save_state "gitlab-feature" "$jira_id" 3 "done"
   wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
 
@@ -720,17 +726,17 @@ pipeline_github_feature() {
   local req_prompt
   if [ -n "$specs_file" ] && [ -f "$specs_file" ]; then
     info "Specs file: ${BOLD}$specs_file${NC}"
-    req_prompt="Read the specs file at $specs_file and create structured requirements at $CONTEXT_DIR/requirements.md"
+    req_prompt="Read the specs file at $specs_file and create structured requirements at $CONTEXT_DIR/requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
   elif [ -f "specs.md" ]; then
     info "Specs file: ${BOLD}specs.md${NC} (auto-detected)"
-    req_prompt="Read the specs file at specs.md and create structured requirements at $CONTEXT_DIR/requirements.md"
+    req_prompt="Read the specs file at specs.md and create structured requirements at $CONTEXT_DIR/requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
   else
     info "No specs file provided. Enter requirements interactively."
     echo ""
     ask "Describe the feature:"
     echo ""
     read -r feature_desc
-    req_prompt="Create structured requirements from this description: $feature_desc. Save to $CONTEXT_DIR/requirements.md"
+    req_prompt="Create structured requirements from this description: $feature_desc. Save to $CONTEXT_DIR/requirements.md. You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
   fi
   echo ""
 
@@ -777,7 +783,7 @@ pipeline_github_feature() {
   # --- Step 3: Architecture & Planning ---
   pstep 3 "Architecture & Planning"
   save_state "github-feature" "$id" 3 "running"
-  run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/"
+  run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/. You are running non-interactively — do NOT ask questions. Write the spec and todo files directly. If unclear, document assumptions in the spec."
   save_state "github-feature" "$id" 3 "done"
 
   # Find the todo file
