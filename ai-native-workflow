@@ -262,8 +262,7 @@ run_claude_agent() {
   dim "Prompt: $prompt"
   echo ""
   claude --agent="$agent" \
-    --permission-mode auto \
-    --allowedTools "Bash Read Write Edit Glob Grep WebSearch WebFetch" \
+    --dangerously-skip-permissions \
     -p "$prompt"
 }
 
