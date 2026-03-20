@@ -263,7 +263,6 @@ run_claude_agent() {
   echo ""
   claude --agent="$agent" \
     --dangerously-skip-permissions \
-    --max \
     -p "$prompt"
 }
 
