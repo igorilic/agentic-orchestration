@@ -263,7 +263,7 @@ run_claude_agent() {
   echo ""
   claude --agent="$agent" \
     --permission-mode auto \
-    --allowedTools "Bash(gh:*) Bash(glab:*) Bash(git:*) Bash(jira:*) Read Write Edit Glob Grep" \
+    --allowedTools "Bash Read Write Edit Glob Grep WebSearch WebFetch" \
     -p "$prompt"
 }
 
