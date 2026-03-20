@@ -317,6 +317,22 @@ count_steps() {
   grep -c '^### Step' "$todo_file" 2>/dev/null || echo "0"
 }
 
+create_feature_branch() {
+  local prefix="$1"  # "feat" or "fix"
+  local id="$2"      # JIRA-ID or feature name
+  local branch="${prefix}/${id}"
+
+  # Sanitize branch name
+  branch=$(echo "$branch" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
+
+  local base
+  base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+
+  info "Creating branch: ${BOLD}$branch${NC} from ${base}"
+  git checkout -b "$branch" 2>/dev/null || git checkout "$branch"
+  echo "$branch"
+}
+
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║              PIPELINE 1: GITLAB FEATURE                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
@@ -332,6 +348,9 @@ pipeline_gitlab_feature() {
   echo ""
 
   mkdir -p "$CONTEXT_DIR"
+
+  # --- Create feature branch ---
+  create_feature_branch "feat" "$jira_id"
 
   # --- Step 1: Requirements Engineering ---
   pstep 1 "Requirements Engineering"
@@ -463,6 +482,7 @@ pipeline_gitlab_incident() {
       ;;
     [Bb]*)
       info "Continuing to fix..."
+      create_feature_branch "fix" "$jira_id"
       ;;
     [Qq]*)
       warn "Pipeline aborted."
@@ -565,6 +585,9 @@ pipeline_github_feature() {
   # --- Derive an ID from timestamp for unique naming ---
   local id
   id="feature-$(date +%Y%m%d-%H%M%S)"
+
+  # --- Create feature branch ---
+  create_feature_branch "feat" "$id"
 
   # --- Step 1: Requirements Engineering ---
   pstep 1 "Requirements Engineering"
