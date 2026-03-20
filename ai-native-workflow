@@ -334,6 +334,164 @@ create_feature_branch() {
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
+# ║              PIPELINE FINISH                                    ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+pipeline_finish() {
+  local pipeline_name="$1"  # e.g. "gitlab-feature"
+  local id="$2"             # e.g. PROJ-123 or feature-20260320-...
+  local tool="$3"           # "copilot" or "claude"
+
+  header "Pipeline Wrap-Up"
+
+  # --- Gather data for summary ---
+  local branch
+  branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+  local base
+  base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+  local commit_count
+  commit_count=$(git rev-list --count "${base}..HEAD" 2>/dev/null || echo "0")
+  local commits
+  commits=$(git log --oneline "${base}..HEAD" 2>/dev/null || echo "(none)")
+  local changed_files
+  changed_files=$(git diff --stat "${base}..HEAD" 2>/dev/null || echo "(none)")
+  local test_files
+  test_files=$(git diff --name-only "${base}..HEAD" 2>/dev/null | grep -iE '(test|spec|_test\.)' || echo "(none)")
+  local timestamp
+  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  local date_short
+  date_short=$(date +%Y-%m-%d)
+
+  # --- Collect pipeline artifacts ---
+  local artifacts=()
+  for f in "$CONTEXT_DIR/${id}"*.md "$CONTEXT_DIR/requirements.md"; do
+    [ -f "$f" ] && artifacts+=("$f")
+  done
+
+  # --- 1. Generate summary file ---
+  local summary_file="$CONTEXT_DIR/${id}-pipeline-summary.md"
+  mkdir -p "$CONTEXT_DIR"
+
+  cat > "$summary_file" << SUMMARY_EOF
+# Pipeline Summary: ${pipeline_name}
+
+## Metadata
+- **ID**: ${id}
+- **Pipeline**: ${pipeline_name}
+- **Branch**: ${branch}
+- **Date**: ${timestamp}
+- **Commits**: ${commit_count}
+
+## Commits
+\`\`\`
+${commits}
+\`\`\`
+
+## Changed Files
+\`\`\`
+${changed_files}
+\`\`\`
+
+## Test Files Touched
+\`\`\`
+${test_files}
+\`\`\`
+
+## Artifacts Produced
+$(for f in "${artifacts[@]}"; do echo "- \`$f\`"; done)
+- \`${summary_file}\` (this file)
+
+## Pipeline Steps Completed
+$(if [[ "$pipeline_name" == *"feature"* ]]; then
+  echo "1. Requirements Engineering"
+  echo "2. Test Planning / GitHub Issue"
+  echo "3. Architecture & Planning"
+  echo "4. TDD Implementation (per step)"
+  echo "5. QA Testing (per step)"
+  echo "6. Code Review (per step)"
+  echo "7. MR/PR Creation"
+elif [[ "$pipeline_name" == *"incident"* ]]; then
+  echo "1. Investigation (Troubleshooter)"
+  echo "2. User Decision Point"
+  echo "3. TDD Fix (per step)"
+  echo "4. QA Verification (per step)"
+  echo "5. Code Review (per step)"
+  echo "6. MR Creation + Jira Update"
+fi)
+SUMMARY_EOF
+
+  success "Summary saved: ${BOLD}$summary_file${NC}"
+
+  # --- 2. Print summary to terminal ---
+  echo ""
+  echo -e "  ${BOLD}Pipeline${NC}:  $pipeline_name"
+  echo -e "  ${BOLD}ID${NC}:        $id"
+  echo -e "  ${BOLD}Branch${NC}:    $branch"
+  echo -e "  ${BOLD}Commits${NC}:   $commit_count"
+  echo -e "  ${BOLD}Artifacts${NC}: ${#artifacts[@]} files"
+  echo ""
+  echo -e "  ${DIM}${commits}${NC}"
+
+  # --- 3. Obsidian session report (if available) ---
+  local obsidian_available=false
+  if command -v claude &>/dev/null && [ "$tool" = "claude" ]; then
+    # Check if obsidian MCP is reachable by looking for the write_session_report tool
+    obsidian_available=true
+  elif command -v copilot &>/dev/null && [ "$tool" = "copilot" ]; then
+    obsidian_available=true
+  fi
+
+  if [ "$obsidian_available" = true ]; then
+    echo ""
+    if confirm "Generate Obsidian session report?"; then
+      pstep "F" "Obsidian Session Report"
+      if [ "$tool" = "claude" ]; then
+        run_claude_agent "reviewer" "Generate a session report for the ${pipeline_name} pipeline run on ${id}. Summary: ${commit_count} commits on branch ${branch}. Read ${summary_file} for full details. Use the mcp__obsidian__write_session_report tool to save the report. Include: what was accomplished, commits, test files, decisions, and next steps."
+      else
+        run_copilot_agent "reviewer" "Generate a session report for the ${pipeline_name} pipeline run on ${id}. Summary: ${commit_count} commits on branch ${branch}. Read ${summary_file} for full details. Save the report to Obsidian if available. Include: what was accomplished, commits, test files, decisions, and next steps."
+      fi
+    fi
+  fi
+
+  # --- 4. Clean up pipeline artifacts (keep only summary) ---
+  echo ""
+  if confirm "Clean up pipeline working files? (keeps summary + code)"; then
+    local cleaned=0
+    for f in "${artifacts[@]}"; do
+      # Don't delete the summary itself
+      if [ "$f" != "$summary_file" ] && [ -f "$f" ]; then
+        rm -f "$f"
+        cleaned=$((cleaned + 1))
+        dim "Removed $(basename "$f")"
+      fi
+    done
+
+    # Remove pipeline state
+    clear_state
+
+    # Commit the cleanup
+    if [ "$cleaned" -gt 0 ]; then
+      git add -A "$CONTEXT_DIR/" 2>/dev/null || true
+      git commit -m "chore(pipeline): clean up ${pipeline_name} artifacts for ${id}
+
+Kept: ${summary_file}
+Removed: ${cleaned} working files (requirements, specs, todos, test plans)" 2>/dev/null || true
+      success "Cleaned $cleaned pipeline files, kept summary"
+    else
+      clear_state
+      success "No working files to clean"
+    fi
+  else
+    clear_state
+    info "Pipeline files preserved in $CONTEXT_DIR/"
+  fi
+
+  header "Pipeline Complete"
+  success "${pipeline_name} for ${id} finished."
+  info "Summary: ${BOLD}$summary_file${NC}"
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
 # ║              PIPELINE 1: GITLAB FEATURE                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -422,10 +580,8 @@ Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
   fi
 
   save_state "gitlab-feature" "$jira_id" 7 "complete"
-  clear_state
 
-  header "Pipeline Complete"
-  success "GitLab feature pipeline for $jira_id finished."
+  pipeline_finish "gitlab-feature" "$jira_id" "copilot"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -475,9 +631,7 @@ pipeline_gitlab_incident() {
         warn "No diagnosis file found. Add findings manually."
       fi
       save_state "gitlab-incident" "$jira_id" "2A" "complete"
-      clear_state
-      header "Pipeline Complete (Document Only)"
-      success "Key findings documented on $jira_id."
+      pipeline_finish "gitlab-incident-doconly" "$jira_id" "copilot"
       return
       ;;
     [Bb]*)
@@ -544,10 +698,8 @@ Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
   fi
 
   save_state "gitlab-incident" "$jira_id" 6 "complete"
-  clear_state
 
-  header "Pipeline Complete"
-  success "GitLab incident pipeline for $jira_id finished."
+  pipeline_finish "gitlab-incident" "$jira_id" "copilot"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -697,10 +849,8 @@ $pr_body"
   fi
 
   save_state "github-feature" "$id" 7 "complete"
-  clear_state
 
-  header "Pipeline Complete"
-  success "GitHub feature pipeline finished."
+  pipeline_finish "github-feature" "$id" "claude"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
