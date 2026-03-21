@@ -964,6 +964,186 @@ $pr_body"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
+# ║              PIPELINE 4: GITHUB ISSUE                           ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+pipeline_github_issue() {
+  local issue_id="$1"
+  require_claude
+  require_gh
+
+  header "Pipeline: GitHub Issue Investigation & Fix"
+  info "Issue: ${BOLD}#${issue_id}${NC}"
+  info "Agents: Claude Code | Platform: GitHub"
+  echo ""
+
+  mkdir -p "$CONTEXT_DIR"
+  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
+  local id="issue-${issue_id}"
+
+  # --- On resume, recover state; otherwise fetch issue and create branch ---
+  if [ -n "${RESUME_FROM_STEP:-}" ] && [ -f "$STATE_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$STATE_FILE"
+    id="$ID"
+    info "Resuming with ID: ${BOLD}$id${NC}"
+    local expected_branch
+    expected_branch=$(echo "fix/$id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
+    git checkout "$expected_branch" 2>/dev/null || true
+  else
+    create_feature_branch "fix" "$id"
+  fi
+
+  # --- Step 1: Fetch issue + sub-issues ---
+  if ! should_skip_step 1; then
+    pstep 1 "Fetch Issue & Sub-Issues"
+    save_state "github-issue" "$id" 1 "running"
+
+    info "Reading issue #${issue_id}..."
+    local issue_body
+    issue_body=$(gh issue view "$issue_id" --json title,body,labels,state,comments,assignees 2>&1)
+
+    # Fetch sub-issues (tasklist items / linked issues)
+    local sub_issues=""
+    # GitHub sub-issues via tasklist
+    local sub_issue_ids
+    sub_issue_ids=$(gh issue view "$issue_id" --json body --jq '.body' 2>/dev/null \
+      | grep -oE '#[0-9]+' | sed 's/#//' | sort -u || true)
+
+    if [ -n "$sub_issue_ids" ]; then
+      info "Found sub-issue references: $(echo "$sub_issue_ids" | tr '\n' ' ')"
+      for sub_id in $sub_issue_ids; do
+        local sub_body
+        sub_body=$(gh issue view "$sub_id" --json title,body,labels,state,comments 2>/dev/null || echo "Could not fetch #$sub_id")
+        sub_issues="${sub_issues}
+
+--- Sub-Issue #${sub_id} ---
+${sub_body}"
+      done
+    fi
+
+    # Also check for sub-issues via GitHub's sub-issue API
+    local api_sub_issues
+    api_sub_issues=$(gh api "repos/{owner}/{repo}/issues/${issue_id}/sub_issues" 2>/dev/null \
+      | jq -r '.[] | "- #\(.number): \(.title) [\(.state)]"' 2>/dev/null || true)
+
+    if [ -n "$api_sub_issues" ]; then
+      info "Found sub-issues via API"
+      for sub_id in $(echo "$api_sub_issues" | grep -oE '#[0-9]+' | sed 's/#//'); do
+        if ! echo "$sub_issues" | grep -q "Sub-Issue #${sub_id}"; then
+          local sub_body
+          sub_body=$(gh issue view "$sub_id" --json title,body,labels,state,comments 2>/dev/null || echo "Could not fetch #$sub_id")
+          sub_issues="${sub_issues}
+
+--- Sub-Issue #${sub_id} ---
+${sub_body}"
+        fi
+      done
+    fi
+
+    # Save all issue context to a file for agents to read
+    cat > "$CONTEXT_DIR/${id}-issue-context.md" << ISSUE_EOF
+# GitHub Issue #${issue_id}
+
+## Main Issue
+${issue_body}
+
+## Sub-Issues
+${sub_issues:-No sub-issues found.}
+ISSUE_EOF
+
+    success "Issue context saved: $CONTEXT_DIR/${id}-issue-context.md"
+    save_state "github-issue" "$id" 1 "done"
+  fi
+
+  # --- Step 2: Troubleshooter investigates ---
+  if ! should_skip_step 2; then
+    pstep 2 "Investigation (Troubleshooter)"
+    save_state "github-issue" "$id" 2 "running"
+    run_claude_agent "troubleshooter" "Investigate GitHub issue #${issue_id}. Read the issue context at $CONTEXT_DIR/${id}-issue-context.md. Scan the codebase to understand the problem. Check git history for recent changes. Create a diagnosis spec at $CONTEXT_DIR/${id}-bugfix.md with: Problem Statement, Root Cause Analysis, Affected Files, Evidence (from code/git), and a recommended fix approach. Also create $CONTEXT_DIR/${id}-todo.md with atomic fix steps (Step 1 must reproduce the bug as a failing test). $NI_SUFFIX"
+    save_state "github-issue" "$id" 2 "done"
+    wait_for_review "$CONTEXT_DIR/${id}-bugfix.md"
+  fi
+
+  # --- Step 3: Architect creates plan ---
+  if ! should_skip_step 3; then
+    pstep 3 "Architecture & Planning"
+    save_state "github-issue" "$id" 3 "running"
+    run_claude_agent "architect" "Review the troubleshooter diagnosis at $CONTEXT_DIR/${id}-bugfix.md and the todo at $CONTEXT_DIR/${id}-todo.md. Refine the plan if needed — ensure each step is atomic, testable, and follows TDD. Update $CONTEXT_DIR/${id}-todo.md with the final plan. Read $CONTEXT_DIR/${id}-issue-context.md for original issue details. $NI_SUFFIX Write files directly. If unclear, document assumptions in the spec."
+    save_state "github-issue" "$id" 3 "done"
+    wait_for_review "$CONTEXT_DIR/${id}-todo.md"
+  fi
+
+  # --- Step 4-6: TDD Loop ---
+  local todo_file="$CONTEXT_DIR/${id}-todo.md"
+  local total_steps
+  total_steps=$(count_steps "$todo_file")
+  info "Todo has $total_steps steps"
+
+  for ((i = 1; i <= total_steps; i++)); do
+    if ! should_skip_step "4.$i"; then
+      pstep "4.$i" "TDD: Implement Step $i/$total_steps"
+      save_state "github-issue" "$id" "4.$i" "running"
+      run_claude_agent "tdd-developer" "Step $i of $todo_file"
+      save_state "github-issue" "$id" "4.$i" "dev-done"
+    fi
+
+    if ! should_skip_step "5.$i"; then
+      pstep "5.$i" "QA: Test Step $i/$total_steps"
+      run_claude_agent "qa" "Run tests for Step $i of ${id}-todo"
+      save_state "github-issue" "$id" "5.$i" "qa-done"
+    fi
+
+    if ! should_skip_step "6.$i"; then
+      pstep "6.$i" "Review: Step $i/$total_steps"
+      run_claude_agent "reviewer" "Review Step $i of ${id}-todo"
+      save_state "github-issue" "$id" "6.$i" "review-done"
+
+      run_triage "claude" "$id" "$i"
+    fi
+  done
+
+  # --- Step 7: Create Pull Request ---
+  if ! should_skip_step 7; then
+    pstep 7 "Create Pull Request"
+    if confirm "Create pull request on GitHub?"; then
+      local branch
+      branch=$(git branch --show-current)
+      local base
+      base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+      git push -u origin "$branch"
+
+      # Extract issue title for PR
+      local issue_title
+      issue_title=$(gh issue view "$issue_id" --json title --jq '.title' 2>/dev/null || echo "Fix issue #$issue_id")
+
+      gh pr create \
+        --title "fix: $issue_title" \
+        --body "$(cat <<PR_EOF
+Closes #${issue_id}
+
+## Summary
+Generated with \`ai-native-workflow run github-issue ${issue_id}\`
+
+## Diagnosis
+See \`$CONTEXT_DIR/${id}-bugfix.md\`
+
+## Artifacts
+- Issue context: \`$CONTEXT_DIR/${id}-issue-context.md\`
+- Diagnosis: \`$CONTEXT_DIR/${id}-bugfix.md\`
+- Todo: \`$CONTEXT_DIR/${id}-todo.md\`
+PR_EOF
+)"
+      success "Pull request created!"
+    fi
+  fi
+
+  save_state "github-issue" "$id" 7 "complete"
+
+  pipeline_finish "github-issue" "$id" "claude"
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
 # ║              PIPELINE STATUS & RESUME                           ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
@@ -1005,6 +1185,9 @@ pipeline_resume() {
       ;;
     "github-feature")
       pipeline_github_feature "$ID"
+      ;;
+    "github-issue")
+      pipeline_github_issue "$ID"
       ;;
     *)
       error "Unknown pipeline: $PIPELINE"
@@ -3306,6 +3489,11 @@ show_help() {
                                 → GitHub issue → architect → tdd-developer
                                 → qa → reviewer → PR
 
+    run github-issue <ID>       GitHub issue investigation & fix pipeline
+                                Issue #ID → troubleshooter (investigate)
+                                → architect (plan) → tdd-developer → qa
+                                → reviewer → PR (Closes #ID)
+
     run status                  Show active pipeline state
     run resume                  Resume pipeline from last checkpoint
 
@@ -3323,6 +3511,7 @@ show_help() {
     ai-native-workflow run gitlab-incident PROJ-456
     ai-native-workflow run github-feature specs.md
     ai-native-workflow run github-feature           # interactive input
+    ai-native-workflow run github-issue 42           # investigate & fix issue #42
     ai-native-workflow run status
     ai-native-workflow run resume
     ai-native-workflow detect ~/code/my-frontend
@@ -3331,6 +3520,7 @@ show_help() {
   PREREQUISITES
     run gitlab-feature:    copilot, glab, jira MCP
     run gitlab-incident:   copilot, glab, az, kubectl
+    run github-issue:      claude, gh
     run github-feature:    claude, gh
 
   WHAT GETS INSTALLED
@@ -3438,6 +3628,13 @@ main() {
         github-feature)
           pipeline_github_feature "${target:-}"
           ;;
+        github-issue)
+          if [ -z "$target" ]; then
+            error "Usage: ai-native-workflow run github-issue <ISSUE-ID>"
+            exit 1
+          fi
+          pipeline_github_issue "$target"
+          ;;
         status)
           pipeline_status
           ;;
@@ -3447,7 +3644,7 @@ main() {
         *)
           error "Unknown run target: $subcommand"
           echo "  Use: run gitlab-feature <ID> | run gitlab-incident <ID> | run github-feature [file]"
-          echo "       run status | run resume"
+          echo "       run github-issue <ID> | run status | run resume"
           exit 1
           ;;
       esac
