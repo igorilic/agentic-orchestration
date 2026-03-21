@@ -243,16 +243,76 @@ wait_for_review() {
   esac
 }
 
+# --- Spinner ---
+SPINNER_PID=""
+
+spinner_start() {
+  local label="${1:-Working}"
+  (
+    local frames=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    local i=0
+    local elapsed=0
+    while true; do
+      local frame="${frames[$((i % ${#frames[@]}))]}"
+      local mins=$((elapsed / 60))
+      local secs=$((elapsed % 60))
+      local time_str
+      if [ "$mins" -gt 0 ]; then
+        time_str="${mins}m ${secs}s"
+      else
+        time_str="${secs}s"
+      fi
+      printf "\r  ${MAGENTA}%s${NC} ${BOLD}%s${NC} ${DIM}(%s)${NC}  " "$frame" "$label" "$time_str"
+      sleep 1
+      elapsed=$((elapsed + 1))
+      i=$((i + 1))
+    done
+  ) &
+  SPINNER_PID=$!
+  # Ensure spinner is cleaned up on script exit
+  trap 'spinner_stop 2>/dev/null' EXIT
+}
+
+spinner_stop() {
+  if [ -n "$SPINNER_PID" ] && kill -0 "$SPINNER_PID" 2>/dev/null; then
+    kill "$SPINNER_PID" 2>/dev/null
+    wait "$SPINNER_PID" 2>/dev/null || true
+    printf "\r%80s\r" ""  # clear the spinner line
+  fi
+  SPINNER_PID=""
+}
+
 run_copilot_agent() {
   local agent="$1"
   local prompt="$2"
   header "Running: $agent (Copilot CLI)"
   dim "Prompt: $prompt"
   echo ""
+
+  local output_file
+  output_file=$(mktemp)
+
+  spinner_start "$agent"
+
   copilot --agent="$agent" \
     --allow-all-tools \
     --allow-all-paths \
-    -p "$prompt"
+    -p "$prompt" > "$output_file" 2>&1
+  local exit_code=$?
+
+  spinner_stop
+
+  # Show output
+  if [ -s "$output_file" ]; then
+    cat "$output_file"
+  fi
+  rm -f "$output_file"
+
+  if [ "$exit_code" -ne 0 ]; then
+    error "Agent $agent failed (exit code $exit_code)"
+    return "$exit_code"
+  fi
+  success "$agent completed"
 }
 
 run_claude_agent() {
@@ -261,9 +321,30 @@ run_claude_agent() {
   header "Running: $agent (Claude Code)"
   dim "Prompt: $prompt"
   echo ""
+
+  local output_file
+  output_file=$(mktemp)
+
+  spinner_start "$agent"
+
   claude --agent="$agent" \
     --dangerously-skip-permissions \
-    -p "$prompt"
+    -p "$prompt" > "$output_file" 2>&1
+  local exit_code=$?
+
+  spinner_stop
+
+  # Show output
+  if [ -s "$output_file" ]; then
+    cat "$output_file"
+  fi
+  rm -f "$output_file"
+
+  if [ "$exit_code" -ne 0 ]; then
+    error "Agent $agent failed (exit code $exit_code)"
+    return "$exit_code"
+  fi
+  success "$agent completed"
 }
 
 run_triage() {
