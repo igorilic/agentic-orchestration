@@ -439,23 +439,43 @@ run_triage() {
   local step_num="$3"
   local max_loops=3
   local loop=0
+  local triage=""
+  local invalid_count=0
 
   while [ "$loop" -lt "$max_loops" ]; do
     echo ""
     ask "Triage findings — [F]ix / [T]ech debt / [I]gnore / [D]one? "
-    read -r triage
+
+    # Read with timeout — if no input in 30s or EOF, auto-done
+    if ! read -r -t 30 triage; then
+      warn "No input (timeout or EOF) — auto-proceeding."
+      break
+    fi
+
+    # Guard against empty input loops
+    if [ -z "$triage" ]; then
+      invalid_count=$((invalid_count + 1))
+      if [ "$invalid_count" -ge 3 ]; then
+        warn "Too many empty inputs — auto-proceeding."
+        break
+      fi
+      warn "Empty input. Use F/T/I/D."
+      continue
+    fi
+    invalid_count=0
+
     case "$triage" in
       [Ff]*)
         loop=$((loop + 1))
         info "Fix loop $loop/$max_loops"
         if [ "$tool" = "copilot" ]; then
-          run_copilot_agent "tdd-developer" "Fix reviewer findings for Step $step_num of ${id}-todo.md"
-          run_copilot_agent "qa" "Run tests after fix for Step $step_num of $id"
-          run_copilot_agent "reviewer" "Re-review Step $step_num of $id after fix (loop $loop/$max_loops)"
+          run_copilot_agent "tdd-developer" "Fix reviewer findings for Step $step_num of ${id}-todo.md" || true
+          run_copilot_agent "qa" "Run tests after fix for Step $step_num of $id" || true
+          run_copilot_agent "reviewer" "Re-review Step $step_num of $id after fix (loop $loop/$max_loops)" || true
         else
-          run_claude_agent "tdd-developer" "Fix reviewer findings for Step $step_num of ${id}-todo.md"
-          run_claude_agent "qa" "Run tests after fix for Step $step_num of $id"
-          run_claude_agent "reviewer" "Re-review Step $step_num of $id after fix (loop $loop/$max_loops)"
+          run_claude_agent "tdd-developer" "Fix reviewer findings for Step $step_num of ${id}-todo.md" || true
+          run_claude_agent "qa" "Run tests after fix for Step $step_num of $id" || true
+          run_claude_agent "reviewer" "Re-review Step $step_num of $id after fix (loop $loop/$max_loops)" || true
         fi
         ;;
       [Tt]*)
@@ -470,6 +490,11 @@ run_triage() {
         break
         ;;
       *)
+        invalid_count=$((invalid_count + 1))
+        if [ "$invalid_count" -ge 3 ]; then
+          warn "Too many invalid inputs — auto-proceeding."
+          break
+        fi
         warn "Invalid choice. Use F/T/I/D."
         ;;
     esac
