@@ -175,9 +175,9 @@ demo_github_feature() {
 
   # Step 4-6: TDD Loop (show 2 of 4 steps)
   for step_num in 1 2; do
-    local step_name
-    [ "$step_num" -eq 1 ] && step_name="User model + migration"
-    [ "$step_num" -eq 2 ] && step_name="Password hashing service"
+    local step_name=""
+    if [ "$step_num" -eq 1 ]; then step_name="User model + migration"; fi
+    if [ "$step_num" -eq 2 ]; then step_name="Password hashing service"; fi
 
     pstep "4.$step_num" "TDD: Step $step_num/4 — $step_name"
     mock_agent "tdd-developer" 3 "
@@ -310,7 +310,7 @@ demo_github_issue() {
     Files: tests/security/sql-injection.test.ts
 
   ${MAGENTA}Step 2${NC}: Parameterize WHERE clause
-    Test: query uses $1, $2 placeholders, not string concat
+    Test: query uses \$1, \$2 placeholders, not string concat
     Files: src/lib/query-builder.ts
 
   ${MAGENTA}Step 3${NC}: Whitelist ORDER BY + sanitize
