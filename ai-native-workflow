@@ -187,12 +187,90 @@ require_gh() {
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
+# ║                     ERROR HANDLING & AUDIT LOG                  ║
+# ╚══════════════════════════════════════════════════════════════════╝
+
+AUDIT_LOG=".context/.pipeline-audit.log"
+
+audit_log() {
+  local level="$1"
+  shift
+  local timestamp
+  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  mkdir -p "$(dirname "$AUDIT_LOG")"
+  echo "[$timestamp] [$level] $*" >> "$AUDIT_LOG"
+}
+
+# Called on ERR or EXIT when a pipeline is active
+pipeline_on_error() {
+  local exit_code=$?
+  local line_no="${BASH_LINENO[0]:-unknown}"
+
+  # Only act if there's an active pipeline
+  [ ! -f "$STATE_FILE" ] && return 0
+  [ "$exit_code" -eq 0 ] && return 0
+
+  # Stop spinner if running
+  spinner_stop 2>/dev/null
+
+  # Load state for context
+  # shellcheck source=/dev/null
+  source "$STATE_FILE" 2>/dev/null || true
+
+  local pipeline="${PIPELINE:-unknown}"
+  local id="${ID:-unknown}"
+  local step="${CURRENT_STEP:-unknown}"
+  local status="${STATUS:-unknown}"
+
+  # Write audit log
+  audit_log "ERROR" "Pipeline=$pipeline ID=$id Step=$step Status=$status ExitCode=$exit_code Line=$line_no"
+  audit_log "ERROR" "Last state: step $step ($status)"
+
+  # Capture recent git state
+  local git_branch
+  git_branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+  local git_status
+  git_status=$(git status --porcelain 2>/dev/null | head -10 || echo "unknown")
+  audit_log "CONTEXT" "Branch=$git_branch"
+  if [ -n "$git_status" ]; then
+    audit_log "CONTEXT" "Uncommitted changes: $git_status"
+  fi
+
+  # Print user-friendly message
+  echo ""
+  error "Pipeline crashed at step ${step} (exit code ${exit_code})"
+  echo ""
+  echo -e "  ${BOLD}Pipeline${NC}:  $pipeline"
+  echo -e "  ${BOLD}ID${NC}:        $id"
+  echo -e "  ${BOLD}Step${NC}:      $step ($status)"
+  echo -e "  ${BOLD}Branch${NC}:    $git_branch"
+  echo -e "  ${BOLD}Exit Code${NC}: $exit_code"
+  echo -e "  ${BOLD}Audit Log${NC}: $AUDIT_LOG"
+  echo ""
+  info "State preserved. To resume: ${BOLD}ai-native-workflow run resume${NC}"
+  info "To see full log: ${BOLD}cat $AUDIT_LOG${NC}"
+}
+
+# Install error trap (only active during pipeline runs)
+enable_pipeline_error_trap() {
+  trap 'pipeline_on_error' ERR
+  # Also catch signals
+  trap 'audit_log "SIGNAL" "Pipeline interrupted (SIGINT)"; pipeline_on_error' INT
+  trap 'audit_log "SIGNAL" "Pipeline terminated (SIGTERM)"; pipeline_on_error' TERM
+}
+
+disable_pipeline_error_trap() {
+  trap - ERR INT TERM
+}
+
+# ╔══════════════════════════════════════════════════════════════════╗
 # ║                     PIPELINE STATE MANAGEMENT                   ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
 save_state() {
   local pipeline="$1" id="$2" current_step="$3" status="$4"
   mkdir -p "$(dirname "$STATE_FILE")"
+  audit_log "STATE" "Pipeline=$pipeline ID=$id Step=$current_step Status=$status"
   cat > "$STATE_FILE" << EOF
 PIPELINE=$pipeline
 ID=$id
@@ -306,12 +384,16 @@ run_copilot_agent() {
   if [ -s "$output_file" ]; then
     cat "$output_file"
   fi
-  rm -f "$output_file"
 
   if [ "$exit_code" -ne 0 ]; then
+    audit_log "AGENT_ERROR" "Agent=$agent ExitCode=$exit_code"
+    audit_log "AGENT_ERROR" "Output (last 20 lines): $(tail -20 "$output_file" 2>/dev/null)"
+    rm -f "$output_file"
     error "Agent $agent failed (exit code $exit_code)"
     return "$exit_code"
   fi
+  rm -f "$output_file"
+  audit_log "AGENT_OK" "Agent=$agent completed"
   success "$agent completed"
 }
 
@@ -338,12 +420,16 @@ run_claude_agent() {
   if [ -s "$output_file" ]; then
     cat "$output_file"
   fi
-  rm -f "$output_file"
 
   if [ "$exit_code" -ne 0 ]; then
+    audit_log "AGENT_ERROR" "Agent=$agent ExitCode=$exit_code"
+    audit_log "AGENT_ERROR" "Output (last 20 lines): $(tail -20 "$output_file" 2>/dev/null)"
+    rm -f "$output_file"
     error "Agent $agent failed (exit code $exit_code)"
     return "$exit_code"
   fi
+  rm -f "$output_file"
+  audit_log "AGENT_OK" "Agent=$agent completed"
   success "$agent completed"
 }
 
@@ -474,6 +560,7 @@ pipeline_finish() {
   local id="$2"             # e.g. PROJ-123 or feature-20260320-...
   local tool="$3"           # "copilot" or "claude"
 
+  disable_pipeline_error_trap
   header "Pipeline Wrap-Up"
 
   # --- Gather data for summary ---
@@ -636,6 +723,7 @@ pipeline_gitlab_feature() {
   info "Jira ticket: ${BOLD}$jira_id${NC}"
   info "Agents: Copilot CLI | Platform: GitLab"
   echo ""
+  enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
   local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
@@ -750,6 +838,7 @@ pipeline_gitlab_incident() {
   info "Jira ticket: ${BOLD}$jira_id${NC}"
   info "Agents: Copilot CLI + Troubleshooter | Platform: GitLab"
   echo ""
+  enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
 
@@ -882,6 +971,7 @@ pipeline_github_feature() {
 
   header "Pipeline: GitHub Feature Development"
   info "Agents: Claude Code | Platform: GitHub"
+  enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
 
@@ -1049,31 +1139,36 @@ $pr_body"
 # ╚══════════════════════════════════════════════════════════════════╝
 
 pipeline_github_issue() {
-  local issue_id="$1"
+  local input_id="$1"
   require_claude
   require_gh
+
+  mkdir -p "$CONTEXT_DIR"
+  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
+  local id issue_id
+
+  # --- On resume, recover state; otherwise set up fresh ---
+  if [ -n "${RESUME_FROM_STEP:-}" ] && [ -f "$STATE_FILE" ]; then
+    # shellcheck source=/dev/null
+    source "$STATE_FILE"
+    id="$ID"
+    # Extract numeric issue ID from pipeline ID (e.g. "issue-42" → "42")
+    issue_id="${id#issue-}"
+    info "Resuming with ID: ${BOLD}$id${NC} (issue #${issue_id})"
+    local expected_branch
+    expected_branch=$(echo "fix/$id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
+    git checkout "$expected_branch" 2>/dev/null || true
+  else
+    issue_id="$input_id"
+    id="issue-${issue_id}"
+    create_feature_branch "fix" "$id"
+  fi
 
   header "Pipeline: GitHub Issue Investigation & Fix"
   info "Issue: ${BOLD}#${issue_id}${NC}"
   info "Agents: Claude Code | Platform: GitHub"
   echo ""
-
-  mkdir -p "$CONTEXT_DIR"
-  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
-  local id="issue-${issue_id}"
-
-  # --- On resume, recover state; otherwise fetch issue and create branch ---
-  if [ -n "${RESUME_FROM_STEP:-}" ] && [ -f "$STATE_FILE" ]; then
-    # shellcheck source=/dev/null
-    source "$STATE_FILE"
-    id="$ID"
-    info "Resuming with ID: ${BOLD}$id${NC}"
-    local expected_branch
-    expected_branch=$(echo "fix/$id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
-    git checkout "$expected_branch" 2>/dev/null || true
-  else
-    create_feature_branch "fix" "$id"
-  fi
+  enable_pipeline_error_trap
 
   # --- Step 1: Fetch issue + sub-issues ---
   if ! should_skip_step 1; then
