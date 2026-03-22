@@ -2,5 +2,6 @@
 .tdd-skip
 .claude/settings.local.json
 .context/.pipeline-state
+.context/.pipeline-audit.log
 node_modules/
 *.env
