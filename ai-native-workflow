@@ -9,8 +9,12 @@
 #   ai-native-workflow run gitlab-feature <ID>   Run GitLab feature pipeline (Copilot + Jira)
 #   ai-native-workflow run gitlab-incident <ID>  Run GitLab incident pipeline (Troubleshooter)
 #   ai-native-workflow run github-feature [file] Run GitHub feature pipeline (Claude Code)
+#   ai-native-workflow run github-issue <ID>     Run GitHub issue fix pipeline (Claude Code)
 #   ai-native-workflow run status                Show active pipeline state
 #   ai-native-workflow run resume                Resume pipeline from last checkpoint
+#
+# Flags:
+#   --allowed-questions [N]  Let agents ask up to N clarifying questions (default: 3)
 #   ai-native-workflow detect [path]             Detect stack without installing
 #   ai-native-workflow status                    Show what's installed
 #   ai-native-workflow uninstall global          Remove global installation
@@ -25,6 +29,11 @@ CLAUDE_DIR="$HOME/.claude"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
 CONTEXT_DIR=".context/specs"
 STATE_FILE=".context/.pipeline-state"
+ALLOWED_QUESTIONS=0   # 0 = disabled; N = max questions per agent run
+LAST_AGENT_OUTPUT=""  # captured after each agent run for question detection
+LAST_AGENT_TOOL=""    # "copilot" or "claude" — set by run_*_agent
+LAST_AGENT_NAME=""    # agent name — set by run_*_agent
+LAST_AGENT_PROMPT=""  # prompt used — set by run_*_agent
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -321,6 +330,14 @@ wait_for_review() {
   esac
 }
 
+build_ni_suffix() {
+  if [ "$ALLOWED_QUESTIONS" -gt 0 ]; then
+    echo "You are running in a pipeline. If you need clarification before you can produce high-quality output, you may ask up to $ALLOWED_QUESTIONS questions. Format EACH question on its own line prefixed with 'QUESTION: '. After listing your questions, STOP — do not guess the answers. For non-critical ambiguities, document them in the Assumptions section."
+  else
+    echo "You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
+  fi
+}
+
 # --- Spinner ---
 SPINNER_PID=""
 
@@ -363,6 +380,9 @@ spinner_stop() {
 run_copilot_agent() {
   local agent="$1"
   local prompt="$2"
+  LAST_AGENT_TOOL="copilot"
+  LAST_AGENT_NAME="$agent"
+  LAST_AGENT_PROMPT="$prompt"
   header "Running: $agent (Copilot CLI)"
   dim "Prompt: $prompt"
   echo ""
@@ -380,9 +400,11 @@ run_copilot_agent() {
 
   spinner_stop
 
-  # Show output
+  # Show output and save for question detection
+  LAST_AGENT_OUTPUT=""
   if [ -s "$output_file" ]; then
     cat "$output_file"
+    LAST_AGENT_OUTPUT=$(cat "$output_file")
   fi
 
   if [ "$exit_code" -ne 0 ]; then
@@ -400,6 +422,9 @@ run_copilot_agent() {
 run_claude_agent() {
   local agent="$1"
   local prompt="$2"
+  LAST_AGENT_TOOL="claude"
+  LAST_AGENT_NAME="$agent"
+  LAST_AGENT_PROMPT="$prompt"
   header "Running: $agent (Claude Code)"
   dim "Prompt: $prompt"
   echo ""
@@ -416,9 +441,11 @@ run_claude_agent() {
 
   spinner_stop
 
-  # Show output
+  # Show output and save for question detection
+  LAST_AGENT_OUTPUT=""
   if [ -s "$output_file" ]; then
     cat "$output_file"
+    LAST_AGENT_OUTPUT=$(cat "$output_file")
   fi
 
   if [ "$exit_code" -ne 0 ]; then
@@ -431,6 +458,59 @@ run_claude_agent() {
   rm -f "$output_file"
   audit_log "AGENT_OK" "Agent=$agent completed"
   success "$agent completed"
+}
+
+# handle_agent_questions — detect QUESTION: lines in LAST_AGENT_OUTPUT,
+# collect answers from user, re-run the agent with answers appended.
+# Reads from globals: ALLOWED_QUESTIONS, LAST_AGENT_OUTPUT, LAST_AGENT_TOOL,
+#                     LAST_AGENT_NAME, LAST_AGENT_PROMPT
+handle_agent_questions() {
+  # Skip if questions not enabled or no output
+  if [ "$ALLOWED_QUESTIONS" -eq 0 ] || [ -z "$LAST_AGENT_OUTPUT" ]; then
+    return 0
+  fi
+
+  # Extract QUESTION: lines from output
+  local questions
+  questions=$(echo "$LAST_AGENT_OUTPUT" | grep -E '^QUESTION: ' || true)
+
+  if [ -z "$questions" ]; then
+    return 0
+  fi
+
+  # Count and display questions
+  local q_count
+  q_count=$(echo "$questions" | wc -l | tr -d ' ')
+  echo ""
+  header "$LAST_AGENT_NAME has $q_count question(s):"
+  echo ""
+
+  local i=1
+  local answers=""
+  while IFS= read -r question; do
+    local q_text="${question#QUESTION: }"
+    echo -e "  ${BOLD}Q${i}:${NC} $q_text"
+    ask "A${i}:"
+    local answer
+    read -r answer
+    answers="${answers}
+Q: ${q_text}
+A: ${answer}"
+    i=$((i + 1))
+  done <<< "$questions"
+
+  echo ""
+  info "Re-running ${BOLD}$LAST_AGENT_NAME${NC} with your answers..."
+
+  # Re-run agent with original prompt + answers
+  local followup_prompt="Continue your previous task. Original instructions: ${LAST_AGENT_PROMPT}
+
+The user answered your clarifying questions:
+${answers}
+
+Use these answers to complete your work. Update any artifacts you already created. Do NOT ask more questions."
+
+  "run_${LAST_AGENT_TOOL}_agent" "$LAST_AGENT_NAME" "$followup_prompt"
 }
 
 run_triage() {
@@ -751,15 +831,28 @@ pipeline_gitlab_feature() {
   enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
-  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
+  local NI_SUFFIX
+  NI_SUFFIX=$(build_ni_suffix)
 
   # --- Create/checkout feature branch ---
-  if [ -n "${RESUME_FROM_STEP:-}" ]; then
-    local expected_branch
-    expected_branch=$(echo "feat/$jira_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
-    git checkout "$expected_branch" 2>/dev/null || true
+  # GitLab convention: feature/PROJ-123 (uppercase ticket ID, "feature" prefix).
+  # Reuse current branch if it already references this jira id, e.g.:
+  #   feature/PROJ-123, feature/PROJ-123-short-desc, feature/PROJ-123_desc,
+  #   fix/PROJ-123, bugfix/PROJ-123, hotfix/PROJ-123, PROJ-123, PROJ-123-desc
+  local jira_id_upper
+  jira_id_upper=$(echo "$jira_id" | tr '[:lower:]' '[:upper:]')
+  local feature_branch="feature/${jira_id_upper}"
+  local current_branch
+  current_branch=$(git branch --show-current 2>/dev/null || echo "")
+  if echo "$current_branch" | grep -qiE "(^|/)${jira_id_upper}([-_].*)?$"; then
+    info "Reusing current branch: ${BOLD}${current_branch}${NC} (matches ${jira_id_upper})"
+  elif [ -n "${RESUME_FROM_STEP:-}" ]; then
+    git checkout "$feature_branch" 2>/dev/null || true
   else
-    create_feature_branch "feat" "$jira_id"
+    local base
+    base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+    info "Creating branch: ${BOLD}${feature_branch}${NC} from ${base}"
+    git checkout -b "$feature_branch" 2>/dev/null || git checkout "$feature_branch"
   fi
 
   # --- Step 1: Requirements Engineering ---
@@ -767,6 +860,7 @@ pipeline_gitlab_feature() {
     pstep 1 "Requirements Engineering"
     save_state "gitlab-feature" "$jira_id" 1 "running"
     run_copilot_agent "requirements-engineer" "Analyze Jira ticket $jira_id. Create structured requirements at $CONTEXT_DIR/${jira_id}-requirements.md. $NI_SUFFIX"
+    handle_agent_questions
     save_state "gitlab-feature" "$jira_id" 1 "done"
     wait_for_review "$CONTEXT_DIR/${jira_id}-requirements.md"
   fi
@@ -785,9 +879,35 @@ pipeline_gitlab_feature() {
     pstep 3 "Architecture & Planning"
     save_state "gitlab-feature" "$jira_id" 3 "running"
     run_copilot_agent "architect" "Design solution for $jira_id using $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md. $NI_SUFFIX Write the spec and todo files directly. If unclear, document assumptions in the spec."
+    handle_agent_questions
     save_state "gitlab-feature" "$jira_id" 3 "done"
     wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
   fi
+
+  # --- Step 3.5: Plan Review Rounds (2 mandatory, up to 3) ---
+  # Reviewer critiques the plan; architect updates it. Repeat 2x; offer optional 3rd round.
+  local plan_rounds="${PLAN_REVIEW_ROUNDS:-2}"
+  if [ "$plan_rounds" -lt 2 ]; then plan_rounds=2; fi
+  if [ "$plan_rounds" -gt 3 ]; then plan_rounds=3; fi
+  for ((r = 1; r <= plan_rounds; r++)); do
+    if ! should_skip_step "3.$r"; then
+      pstep "3.$r" "Plan Review Round $r/$plan_rounds"
+      save_state "gitlab-feature" "$jira_id" "3.$r" "running"
+      local review_file="$CONTEXT_DIR/${jira_id}-plan-review-${r}.md"
+      run_copilot_agent "reviewer" "Review the implementation plan for $jira_id. Read $CONTEXT_DIR/${jira_id}-spec.md and $CONTEXT_DIR/${jira_id}-todo.md against $CONTEXT_DIR/${jira_id}-requirements.md and $CONTEXT_DIR/${jira_id}-testplan.md. Identify gaps, risks, missing steps, ambiguous acceptance criteria, and ordering issues. Write findings to $review_file. $NI_SUFFIX"
+      handle_agent_questions
+      run_copilot_agent "architect" "Update the spec and todo for $jira_id based on review findings in $review_file. Revise $CONTEXT_DIR/${jira_id}-spec.md and $CONTEXT_DIR/${jira_id}-todo.md directly. $NI_SUFFIX"
+      handle_agent_questions
+      save_state "gitlab-feature" "$jira_id" "3.$r" "done"
+      wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
+    fi
+    # After 2 mandatory rounds, optionally do a 3rd
+    if [ "$r" -eq 2 ] && [ "$plan_rounds" -eq 2 ]; then
+      if confirm "Run an optional 3rd plan review round?"; then
+        plan_rounds=3
+      fi
+    fi
+  done
 
   # --- Step 4-6: TDD Loop (per step in todo) ---
   local todo_file="$CONTEXT_DIR/${jira_id}-todo.md"
@@ -866,12 +986,15 @@ pipeline_gitlab_incident() {
   enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
+  local NI_SUFFIX
+  NI_SUFFIX=$(build_ni_suffix)
 
   # --- Step 1: Troubleshoot ---
   if ! should_skip_step 1; then
     pstep 1 "Investigation (Troubleshooter)"
     save_state "gitlab-incident" "$jira_id" 1 "running"
-    run_copilot_agent "troubleshooter" "Investigate Jira incident $jira_id. Check all regions. Produce diagnosis at $CONTEXT_DIR/${jira_id}-bugfix.md"
+    run_copilot_agent "troubleshooter" "Investigate Jira incident $jira_id. Check all regions. Produce diagnosis at $CONTEXT_DIR/${jira_id}-bugfix.md. $NI_SUFFIX"
+    handle_agent_questions
     save_state "gitlab-incident" "$jira_id" 1 "done"
 
     echo ""
@@ -905,7 +1028,21 @@ pipeline_gitlab_incident() {
         ;;
       [Bb]*)
         info "Continuing to fix..."
-        create_feature_branch "fix" "$jira_id"
+        # GitLab convention: fix/PROJ-123 (uppercase ticket ID).
+        # Reuse current branch if it already references this jira id.
+        local jira_id_upper
+        jira_id_upper=$(echo "$jira_id" | tr '[:lower:]' '[:upper:]')
+        local fix_branch="fix/${jira_id_upper}"
+        local current_branch
+        current_branch=$(git branch --show-current 2>/dev/null || echo "")
+        if echo "$current_branch" | grep -qiE "(^|/)${jira_id_upper}([-_].*)?$"; then
+          info "Reusing current branch: ${BOLD}${current_branch}${NC} (matches ${jira_id_upper})"
+        else
+          local base
+          base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
+          info "Creating branch: ${BOLD}${fix_branch}${NC} from ${base}"
+          git checkout -b "$fix_branch" 2>/dev/null || git checkout "$fix_branch"
+        fi
         ;;
       [Qq]*)
         warn "Pipeline aborted."
@@ -918,11 +1055,39 @@ pipeline_gitlab_incident() {
         ;;
     esac
   else
-    # On resume past step 2, ensure we're on the fix branch
-    local expected_branch
-    expected_branch=$(echo "fix/$jira_id" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9\/_-]/-/g')
-    git checkout "$expected_branch" 2>/dev/null || true
+    # On resume past step 2, ensure we're on the fix branch (or a branch that matches the jira id)
+    local jira_id_upper
+    jira_id_upper=$(echo "$jira_id" | tr '[:lower:]' '[:upper:]')
+    local current_branch
+    current_branch=$(git branch --show-current 2>/dev/null || echo "")
+    if ! echo "$current_branch" | grep -qiE "(^|/)${jira_id_upper}([-_].*)?$"; then
+      git checkout "fix/${jira_id_upper}" 2>/dev/null || true
+    fi
   fi
+
+  # --- Step 2.5: Plan Review Rounds (2 mandatory, up to 3) ---
+  # Reviewer critiques the fix plan; troubleshooter updates it. Repeat 2x; offer optional 3rd round.
+  local plan_rounds="${PLAN_REVIEW_ROUNDS:-2}"
+  if [ "$plan_rounds" -lt 2 ]; then plan_rounds=2; fi
+  if [ "$plan_rounds" -gt 3 ]; then plan_rounds=3; fi
+  for ((r = 1; r <= plan_rounds; r++)); do
+    if ! should_skip_step "2.$r"; then
+      pstep "2.$r" "Fix Plan Review Round $r/$plan_rounds"
+      save_state "gitlab-incident" "$jira_id" "2.$r" "running"
+      local review_file="$CONTEXT_DIR/${jira_id}-plan-review-${r}.md"
+      run_copilot_agent "reviewer" "Review the fix plan for incident $jira_id. Read $CONTEXT_DIR/${jira_id}-bugfix.md and $CONTEXT_DIR/${jira_id}-todo.md. Identify gaps, risks, missing regression tests, root-cause coverage, and ordering issues. Write findings to $review_file. $NI_SUFFIX"
+      handle_agent_questions
+      run_copilot_agent "troubleshooter" "Update the fix plan for $jira_id based on review findings in $review_file. Revise $CONTEXT_DIR/${jira_id}-bugfix.md and $CONTEXT_DIR/${jira_id}-todo.md directly. $NI_SUFFIX"
+      handle_agent_questions
+      save_state "gitlab-incident" "$jira_id" "2.$r" "done"
+      wait_for_review "$CONTEXT_DIR/${jira_id}-todo.md"
+    fi
+    if [ "$r" -eq 2 ] && [ "$plan_rounds" -eq 2 ]; then
+      if confirm "Run an optional 3rd plan review round?"; then
+        plan_rounds=3
+      fi
+    fi
+  done
 
   # --- Step 3: TDD Fix ---
   local todo_file="$CONTEXT_DIR/${jira_id}-todo.md"
@@ -1003,7 +1168,8 @@ pipeline_github_feature() {
   local id
   local issue_title="New feature request"
   local issue_num=""
-  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
+  local NI_SUFFIX
+  NI_SUFFIX=$(build_ni_suffix)
 
   # --- On resume, recover ID from state; otherwise generate new ---
   if [ -n "${RESUME_FROM_STEP:-}" ] && [ -f "$STATE_FILE" ]; then
@@ -1045,6 +1211,7 @@ pipeline_github_feature() {
     pstep 1 "Requirements Engineering"
     save_state "github-feature" "$id" 1 "running"
     run_claude_agent "requirements-engineer" "${req_prompt:-Continue requirements engineering for $id. Read existing files in $CONTEXT_DIR/ and complete requirements at $CONTEXT_DIR/requirements.md. $NI_SUFFIX}"
+    handle_agent_questions
     save_state "github-feature" "$id" 1 "done"
     wait_for_review "$CONTEXT_DIR/requirements.md"
   fi
@@ -1077,6 +1244,7 @@ pipeline_github_feature() {
     pstep 3 "Architecture & Planning"
     save_state "github-feature" "$id" 3 "running"
     run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/. $NI_SUFFIX Write the spec and todo files directly. If unclear, document assumptions in the spec."
+    handle_agent_questions
     save_state "github-feature" "$id" 3 "done"
   fi
 
@@ -1169,7 +1337,8 @@ pipeline_github_issue() {
   require_gh
 
   mkdir -p "$CONTEXT_DIR"
-  local NI_SUFFIX="You are running non-interactively — do NOT ask questions. Make reasonable assumptions and document them in the Assumptions section. Flag any critical ambiguities in Open Questions."
+  local NI_SUFFIX
+  NI_SUFFIX=$(build_ni_suffix)
   local id issue_id
 
   # --- On resume, recover state; otherwise set up fresh ---
@@ -1262,6 +1431,7 @@ ISSUE_EOF
     pstep 2 "Investigation (Troubleshooter)"
     save_state "github-issue" "$id" 2 "running"
     run_claude_agent "troubleshooter" "Investigate GitHub issue #${issue_id}. Read the issue context at $CONTEXT_DIR/${id}-issue-context.md. Scan the codebase to understand the problem. Check git history for recent changes. Create a diagnosis spec at $CONTEXT_DIR/${id}-bugfix.md with: Problem Statement, Root Cause Analysis, Affected Files, Evidence (from code/git), and a recommended fix approach. Also create $CONTEXT_DIR/${id}-todo.md with atomic fix steps (Step 1 must reproduce the bug as a failing test). $NI_SUFFIX"
+    handle_agent_questions
     save_state "github-issue" "$id" 2 "done"
     wait_for_review "$CONTEXT_DIR/${id}-bugfix.md"
   fi
@@ -1271,6 +1441,7 @@ ISSUE_EOF
     pstep 3 "Architecture & Planning"
     save_state "github-issue" "$id" 3 "running"
     run_claude_agent "architect" "Review the troubleshooter diagnosis at $CONTEXT_DIR/${id}-bugfix.md and the todo at $CONTEXT_DIR/${id}-todo.md. Refine the plan if needed — ensure each step is atomic, testable, and follows TDD. Update $CONTEXT_DIR/${id}-todo.md with the final plan. Read $CONTEXT_DIR/${id}-issue-context.md for original issue details. $NI_SUFFIX Write files directly. If unclear, document assumptions in the spec."
+    handle_agent_questions
     save_state "github-issue" "$id" 3 "done"
     wait_for_review "$CONTEXT_DIR/${id}-todo.md"
   fi
@@ -3698,6 +3869,12 @@ show_help() {
     run status                  Show active pipeline state
     run resume                  Resume pipeline from last checkpoint
 
+  FLAGS (for pipeline commands)
+    --allowed-questions [N]     Let agents ask up to N clarifying questions
+                                (default N=3). Agents pause and prompt for
+                                answers before continuing. Without this flag,
+                                agents make assumptions and document them.
+
   OTHER COMMANDS
     detect [path]               Show detected stacks without installing
     status                      Show installation status + pipeline state
@@ -3713,6 +3890,8 @@ show_help() {
     ai-native-workflow run github-feature specs.md
     ai-native-workflow run github-feature           # interactive input
     ai-native-workflow run github-issue 42           # investigate & fix issue #42
+    ai-native-workflow run github-feature --allowed-questions    # agents can ask 3 Qs
+    ai-native-workflow run gitlab-feature PROJ-123 --allowed-questions 5
     ai-native-workflow run status
     ai-native-workflow run resume
     ai-native-workflow detect ~/code/my-frontend
@@ -3785,9 +3964,31 @@ HELP
 }
 
 main() {
-  local command="${1:-help}"
-  local subcommand="${2:-}"
-  local target="${3:-}"
+  # --- Parse flags (remove from positional args) ---
+  local args=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --allowed-questions=*)
+        ALLOWED_QUESTIONS="${1#*=}"
+        ;;
+      --allowed-questions)
+        if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
+          ALLOWED_QUESTIONS="$2"
+          shift
+        else
+          ALLOWED_QUESTIONS=3  # default: 3 questions
+        fi
+        ;;
+      *)
+        args+=("$1")
+        ;;
+    esac
+    shift
+  done
+
+  local command="${args[0]:-help}"
+  local subcommand="${args[1]:-}"
+  local target="${args[2]:-}"
 
   case "$command" in
     install)
