@@ -27,8 +27,8 @@ to 3 regional clusters: EMEA, APAC, NAM. Key points:
   App naming convention: `<service>-<region>` (e.g., `order-api-emea`)
 - **kubectl**: Use `--context=<context>` to target a specific cluster
   without switching: `kubectl --context=aks-emea-prod get pods -n <ns>`
-- **Azure App Insights**: Separate instance per region.
-  Use the correct `--app` and `--resource-group` per region.
+- **Azure Log Analytics**: Queries go via the Log Analytics workspace.
+  Resolve the workspace GUID first, then use `az monitor log-analytics query`.
 
 ## Workflow
 
@@ -36,15 +36,16 @@ to 3 regional clusters: EMEA, APAC, NAM. Key points:
 Read the Jira ticket. Extract: what's failing, when, severity, affected region(s).
 
 ### Step 2: Determine Scope — Regional or Global?
-Query App Insights in ALL regions for the same error pattern:
+Query Log Analytics for the same error pattern:
 ```bash
-for region in emea apac nam; do
-  echo "=== $region ==="
-  az monitor app-insights query \
-    --app "ai-${region}-prod" --resource-group "rg-${region}-prod" \
-    --analytics-query "exceptions | where timestamp > ago(2h) | summarize count() by type" \
-    --output json
-done
+WORKSPACE=$(az monitor log-analytics workspace show \
+  --resource-group rg-<region>-<workload>-prod \
+  --workspace-name law-<region>-<workload>-prod \
+  --query customerId -o tsv) && \
+az monitor log-analytics query \
+  --workspace "$WORKSPACE" \
+  --analytics-query "AppExceptions | where TimeGenerated > ago(2h) | summarize count() by ExceptionType, AppRoleName" \
+  --output json
 ```
 - Same error in all regions → code bug, investigate one deeply
 - Error in one region only → infrastructure or region-specific config
@@ -63,16 +64,22 @@ kubectl --context=aks-<region>-prod get events -n <ns> --sort-by='.lastTimestamp
 kubectl --context=aks-<region>-prod get pods -n <ns> -l app=<svc> -o wide
 ```
 
-**Azure Application Insights:**
+**Azure Log Analytics (App Insights data):**
 ```bash
-az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
-  --analytics-query "exceptions | where timestamp > ago(2h) | order by timestamp desc | take 20"
+# Resolve workspace GUID (cache for session)
+WORKSPACE=$(az monitor log-analytics workspace show \
+  --resource-group rg-<region>-<workload>-prod \
+  --workspace-name law-<region>-<workload>-prod \
+  --query customerId -o tsv)
 
-az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
-  --analytics-query "requests | where success == false and timestamp > ago(2h) | take 20"
+az monitor log-analytics query --workspace "$WORKSPACE" \
+  --analytics-query "AppExceptions | where TimeGenerated > ago(2h) | order by TimeGenerated desc | take 20" --output json
 
-az monitor app-insights query --app "ai-<region>-prod" --resource-group "rg-<region>-prod" \
-  --analytics-query "dependencies | where success == false and timestamp > ago(2h) | take 20"
+az monitor log-analytics query --workspace "$WORKSPACE" \
+  --analytics-query "AppRequests | where Success == false and TimeGenerated > ago(2h) | take 20" --output json
+
+az monitor log-analytics query --workspace "$WORKSPACE" \
+  --analytics-query "AppDependencies | where Success == false and TimeGenerated > ago(2h) | take 20" --output json
 ```
 
 **Codebase:**
@@ -83,7 +90,7 @@ git log --oneline --since="3 days ago" -- <path>
 ### Step 4: Correlate
 - Match timestamps: deployment → first error → ticket report
 - Compare error patterns across regions
-- Trace from App Insights exception → pod log → source code
+- Trace from Log Analytics exception → pod log → source code
 
 ### Step 5: Diagnose
 Output structured diagnosis with: Issue, Scope, Timeline, Root Cause,
