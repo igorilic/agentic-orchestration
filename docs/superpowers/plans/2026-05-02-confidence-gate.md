@@ -292,7 +292,7 @@ git commit -m "feat(confidence): scaffold scorer with all-green happy path"
 
 ### 3a — NO_AC
 
-- [ ] **Step 1: Write failing test**
+- [x] **Step 1: Write failing test**
 
 Append to `tests/confidence.bats`:
 ```bash
@@ -317,12 +317,12 @@ Append to `tests/confidence.bats`:
 }
 ```
 
-- [ ] **Step 2: Run, verify failure**
+- [x] **Step 2: Run, verify failure**
 
 Run: `bats tests/confidence.bats`
 Expected: 2 new tests fail (band is GREEN with no gates).
 
-- [ ] **Step 3: Implement gate**
+- [x] **Step 3: Implement gate**
 
 In `scripts/confidence.sh`, after the `events="$(jq -s ...)"` block and before the band check, add:
 ```bash
@@ -330,14 +330,14 @@ ac_count="$(jq '[.[] | select(.event=="spec")] | (.[0].ac_items // []) | length'
 [ "$ac_count" -gt 0 ] || gates+=("NO_AC")
 ```
 
-- [ ] **Step 4: Run tests, verify pass**
+- [x] **Step 4: Run tests, verify pass**
 
 Run: `bats tests/confidence.bats`
 Expected: all tests pass.
 
 ### 3b — TEST_FAILED
 
-- [ ] **Step 5: Failing test**
+- [x] **Step 5: Failing test**
 
 ```bash
 @test "TEST_FAILED: any qa event with tests_failed > 0 triggers RED" {
@@ -352,11 +352,11 @@ Expected: all tests pass.
 }
 ```
 
-- [ ] **Step 6: Run, verify failure**
+- [x] **Step 6: Run, verify failure**
 
 Run: `bats tests/confidence.bats`
 
-- [ ] **Step 7: Implement**
+- [x] **Step 7: Implement**
 
 After the NO_AC check:
 ```bash
@@ -364,11 +364,11 @@ failed_total="$(jq '[.[] | select(.event=="qa") | .tests_failed] | add // 0' <<<
 [ "$failed_total" -eq 0 ] || gates+=("TEST_FAILED")
 ```
 
-- [ ] **Step 8: Run, verify pass**
+- [x] **Step 8: Run, verify pass**
 
 ### 3c — BUILD_BROKEN
 
-- [ ] **Step 9: Failing test**
+- [x] **Step 9: Failing test**
 
 ```bash
 @test "BUILD_BROKEN: qa event with build_status != ok triggers RED" {
@@ -382,20 +382,20 @@ failed_total="$(jq '[.[] | select(.event=="qa") | .tests_failed] | add // 0' <<<
 }
 ```
 
-- [ ] **Step 10: Run, verify failure**
+- [x] **Step 10: Run, verify failure**
 
-- [ ] **Step 11: Implement**
+- [x] **Step 11: Implement**
 
 ```bash
 broken="$(jq '[.[] | select(.event=="qa" and .build_status != "ok")] | length' <<<"$events")"
 [ "$broken" -eq 0 ] || gates+=("BUILD_BROKEN")
 ```
 
-- [ ] **Step 12: Run, verify pass**
+- [x] **Step 12: Run, verify pass**
 
 ### 3d — MUST_FIX
 
-- [ ] **Step 13: Failing test**
+- [x] **Step 13: Failing test**
 
 ```bash
 @test "MUST_FIX: any review with non-empty must_fix triggers RED" {
@@ -409,20 +409,20 @@ broken="$(jq '[.[] | select(.event=="qa" and .build_status != "ok")] | length' <
 }
 ```
 
-- [ ] **Step 14: Run, verify failure**
+- [x] **Step 14: Run, verify failure**
 
-- [ ] **Step 15: Implement**
+- [x] **Step 15: Implement**
 
 ```bash
 must_fix_total="$(jq '[.[] | select(.event=="review") | .must_fix | length] | add // 0' <<<"$events")"
 [ "$must_fix_total" -eq 0 ] || gates+=("MUST_FIX")
 ```
 
-- [ ] **Step 16: Run, verify pass**
+- [x] **Step 16: Run, verify pass**
 
 ### 3e — AC_NOT_TESTED
 
-- [ ] **Step 17: Failing test**
+- [x] **Step 17: Failing test**
 
 ```bash
 @test "AC_NOT_TESTED: AC-2 in spec but not in any ac_items_tested triggers RED" {
@@ -436,9 +436,9 @@ must_fix_total="$(jq '[.[] | select(.event=="review") | .must_fix | length] | ad
 }
 ```
 
-- [ ] **Step 18: Run, verify failure**
+- [x] **Step 18: Run, verify failure**
 
-- [ ] **Step 19: Implement**
+- [x] **Step 19: Implement**
 
 ```bash
 spec_acs="$(jq '[.[] | select(.event=="spec")][0].ac_items // [] | map(.id)' <<<"$events")"
@@ -448,11 +448,11 @@ missing_count="$(jq 'length' <<<"$missing_acs")"
 [ "$missing_count" -eq 0 ] || gates+=("AC_NOT_TESTED")
 ```
 
-- [ ] **Step 20: Run, verify pass**
+- [x] **Step 20: Run, verify pass**
 
 ### 3f — TDD_BYPASSED_NO_REASON
 
-- [ ] **Step 21: Failing test**
+- [x] **Step 21: Failing test**
 
 ```bash
 @test "TDD_BYPASSED_NO_REASON: explicit event in log triggers RED" {
@@ -469,18 +469,18 @@ missing_count="$(jq 'length' <<<"$missing_acs")"
 
 **Note for engineer:** The `tdd_bypassed` event is emitted by the CLI driver (Task 12) when a commit lands without test files AND no `.tdd-skip` was active. The reason is empty in that case.
 
-- [ ] **Step 22: Run, verify failure**
+- [x] **Step 22: Run, verify failure**
 
-- [ ] **Step 23: Implement**
+- [x] **Step 23: Implement**
 
 ```bash
 bypass_no_reason="$(jq '[.[] | select(.event=="tdd_bypassed" and ((.reason // "") == ""))] | length' <<<"$events")"
 [ "$bypass_no_reason" -eq 0 ] || gates+=("TDD_BYPASSED_NO_REASON")
 ```
 
-- [ ] **Step 24: Run, verify pass**
+- [x] **Step 24: Run, verify pass**
 
-- [ ] **Step 25: Commit**
+- [x] **Step 25: Commit**
 
 ```bash
 git add scripts/confidence.sh tests/confidence.bats
@@ -788,7 +788,7 @@ git commit -m "test(confidence): verify per-step scope filtering"
 
 We tackle (1)–(4) here; overrides come in Tasks 9–10.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 Create `tests/confidence-gate-hook.bats`:
 ```bash
@@ -881,12 +881,12 @@ run_hook() {
 }
 ```
 
-- [ ] **Step 2: Run, verify failures**
+- [x] **Step 2: Run, verify failures**
 
 Run: `bats tests/confidence-gate-hook.bats`
 Expected: all fail (hook file doesn't exist).
 
-- [ ] **Step 3: Implement hook**
+- [x] **Step 3: Implement hook**
 
 ```bash
 #!/usr/bin/env bash
@@ -954,18 +954,18 @@ case "$BAND" in
 esac
 ```
 
-- [ ] **Step 4: Make executable**
+- [x] **Step 4: Make executable**
 
 ```bash
 chmod +x hooks/confidence-gate.sh
 ```
 
-- [ ] **Step 5: Run tests, verify pass**
+- [x] **Step 5: Run tests, verify pass**
 
 Run: `bats tests/confidence-gate-hook.bats`
 Expected: all 7 tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add hooks/confidence-gate.sh tests/confidence-gate-hook.bats
