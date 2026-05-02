@@ -204,6 +204,8 @@ elif score >= 60:         band = YELLOW
 else:                     band = RED
 ```
 
+**Scope-aware gates.** At `--scope=step`, structural gates (`NO_AC`, `AC_NOT_TESTED`) are suppressed because they assess pipeline-level concerns that don't apply to a single step in isolation. The `ac_coverage` penalty is also suppressed at step scope. Behavioral gates (`TEST_FAILED`, `BUILD_BROKEN`, `MUST_FIX`, `TDD_BYPASSED_NO_REASON`) fire at any scope — they signal real issues caused by the events being scored. The full set of gates and penalties applies at `--scope=aggregate` (the default).
+
 ### Per-step vs aggregate
 
 The same algorithm runs in two scopes:

@@ -38,7 +38,9 @@ penalties_suggestion=0
 # Hard gates — appended in canonical order: NO_AC, TEST_FAILED, BUILD_BROKEN, MUST_FIX, AC_NOT_TESTED, TDD_BYPASSED_NO_REASON
 # --- Hard gates ---
 ac_count="$(jq '[.[] | select(.event=="spec")] | (.[0].ac_items // []) | length' <<<"$events")"
-[ "$ac_count" -gt 0 ] || gates+=("NO_AC")
+if [ "$SCOPE" = "aggregate" ]; then
+  [ "$ac_count" -gt 0 ] || gates+=("NO_AC")
+fi
 
 failed_total="$(jq '[.[] | select(.event=="qa") | .tests_failed] | add // 0' <<<"$events")"
 [ "$failed_total" -eq 0 ] || gates+=("TEST_FAILED")
@@ -53,7 +55,9 @@ spec_acs="$(jq '[.[] | select(.event=="spec")][0].ac_items // [] | map(.id)' <<<
 tested_acs="$(jq '[.[] | select(.event=="qa") | (.ac_items_tested // [])[]] | unique' <<<"$events")"
 missing_acs="$(jq -n --argjson s "$spec_acs" --argjson t "$tested_acs" '$s - $t')"
 missing_count="$(jq 'length' <<<"$missing_acs")"
-[ "$missing_count" -eq 0 ] || gates+=("AC_NOT_TESTED")
+if [ "$SCOPE" = "aggregate" ]; then
+  [ "$missing_count" -eq 0 ] || gates+=("AC_NOT_TESTED")
+fi
 
 bypass_no_reason="$(jq '[.[] | select(.event=="tdd_bypassed" and ((.reason // "") == ""))] | length' <<<"$events")"
 [ "$bypass_no_reason" -eq 0 ] || gates+=("TDD_BYPASSED_NO_REASON")
@@ -73,8 +77,10 @@ td_count="$(jq '[.[] | select(.event=="review") | .tech_debt_deferrals | length]
 penalties_tech_debt=$(( -3 * td_count ))
 
 # AC coverage penalty (the gate already handles 100% missing; this scores partial misses).
-penalties_ac_coverage=$(( -2 * missing_count ))
-[ "$penalties_ac_coverage" -lt -20 ] && penalties_ac_coverage=-20
+if [ "$SCOPE" = "aggregate" ]; then
+  penalties_ac_coverage=$(( -2 * missing_count ))
+  [ "$penalties_ac_coverage" -lt -20 ] && penalties_ac_coverage=-20
+fi
 
 total_diff="$(jq '[.[] | select(.event=="review") | .diff_lines] | add // 0' <<<"$events")"
 if [ "$total_diff" -gt 1000 ]; then
