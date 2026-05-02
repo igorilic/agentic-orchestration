@@ -233,3 +233,63 @@ teardown() {
   # Score: 100 + (-20) = 80 (band would be RED via AC_NOT_TESTED gate, but score is still 80).
   echo "$output" | jq -e '.score == 80'
 }
+
+@test "band: score 80 is GREEN (boundary)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 4 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 80'
+  echo "$output" | jq -e '.band == "GREEN"'
+}
+
+@test "band: score 79 is YELLOW (boundary)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 4 1 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 79'
+  echo "$output" | jq -e '.band == "YELLOW"'
+}
+
+@test "band: score 60 is YELLOW (boundary)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 8 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 60'
+  echo "$output" | jq -e '.band == "YELLOW"'
+}
+
+@test "band: score 59 is RED (boundary)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 8 1 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 59'
+  echo "$output" | jq -e '.band == "RED"'
+}
+
+@test "band: any hard gate forces RED regardless of score" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[]')" \
+    "$(qa_event 1 5 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  # score before gate would be 100, but NO_AC fires
+  echo "$output" | jq -e '.band == "RED"'
+}
