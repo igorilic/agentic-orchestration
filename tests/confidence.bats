@@ -151,6 +151,7 @@ teardown() {
   run scripts/confidence.sh "$TMPLOG"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.score == 97'
+  echo "$output" | jq -e '.penalties.suggestion == -3'
 }
 
 @test "penalty: loops_used 2 is -5, loops_used 3 is -15 cumulative" {
@@ -211,4 +212,24 @@ teardown() {
   run scripts/confidence.sh "$TMPLOG"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.score == 0'
+}
+
+@test "penalty: ac_coverage cap is -20 (does not exceed) when many ACs missing" {
+  # 11 ACs in spec; 0 covered by qa. Without cap, penalty would be -22.
+  spec_acs='[
+    {"id":"AC-1","text":"x"},{"id":"AC-2","text":"x"},{"id":"AC-3","text":"x"},
+    {"id":"AC-4","text":"x"},{"id":"AC-5","text":"x"},{"id":"AC-6","text":"x"},
+    {"id":"AC-7","text":"x"},{"id":"AC-8","text":"x"},{"id":"AC-9","text":"x"},
+    {"id":"AC-10","text":"x"},{"id":"AC-11","text":"x"}
+  ]'
+  make_log "$TMPLOG" \
+    "$(spec_event "$spec_acs")" \
+    "$(qa_event 1 5 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.penalties.ac_coverage == -20'
+  # Score: 100 + (-20) = 80 (band would be RED via AC_NOT_TESTED gate, but score is still 80).
+  echo "$output" | jq -e '.score == 80'
 }
