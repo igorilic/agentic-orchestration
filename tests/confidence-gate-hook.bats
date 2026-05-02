@@ -85,3 +85,43 @@ run_hook() {
   run jq -s '[.[] | select(.event=="verdict" and .scope=="aggregate")] | length' "$LOG"
   [ "$output" = "1" ]
 }
+
+@test "command filter: gh pr create-fork does NOT trigger gate (false positive guard)" {
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  # Despite the log being RED-worthy, this command should bypass the gate entirely.
+  run run_hook "gh pr create-fork"
+  [ "$status" -eq 0 ]
+}
+
+@test "scorer returns unexpected band: fail closed (exit 2)" {
+  STUB_DIR="$(mktemp -d)"
+  cat > "$STUB_DIR/confidence.sh" <<'STUB'
+#!/usr/bin/env bash
+echo '{"band":"WAT","score":0,"gates":[]}'
+STUB
+  chmod +x "$STUB_DIR/confidence.sh"
+
+  mkdir -p "$TESTDIR/hooks-stub" "$TESTDIR/scripts"
+  cp "$BATS_TEST_DIRNAME/../hooks/confidence-gate.sh" "$TESTDIR/hooks-stub/confidence-gate.sh"
+  cp "$STUB_DIR/confidence.sh" "$TESTDIR/scripts/confidence.sh"
+
+  make_log "$LOG" "$(spec_event '[{"id":"AC-1","text":"x"}]')"
+
+  CLAUDE_PROJECT_DIR="$TESTDIR" \
+  CLAUDE_TOOL_INPUT="gh pr create" \
+    bash "$TESTDIR/hooks-stub/confidence-gate.sh"
+  status=$?
+  [ "$status" -eq 2 ]
+}
+
+@test "missing log file: exit 2 with actionable error" {
+  # active-spec is present (set in setup) but the log file was never created.
+  rm -f "$LOG"
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"log not found"* ]] || [[ "$output" == *"$LOG"* ]]
+}
