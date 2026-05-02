@@ -129,7 +129,7 @@ Non-empty `must_fix` triggers `MUST_FIX`.
   "score": 95,
   "band": "GREEN",
   "gates": [],
-  "penalties": {"should_fix": 0, "loops": 0, "tech_debt": 0, "ac_coverage": 0, "diff": 0}
+  "penalties": {"should_fix": 0, "suggestion": 0, "loops": 0, "tech_debt": 0, "ac_coverage": 0, "diff": 0}
 }
 ```
 

@@ -17,7 +17,11 @@ done
 [ -f "$LOG" ] || { echo "log not found: $LOG" >&2; exit 1; }
 
 # Slurp into an array. Strip irrelevant events for scope=step.
-events="$(jq -s '.' "$LOG")"
+if [ -s "$LOG" ]; then
+  events="$(jq -s '.' "$LOG")"
+else
+  events="[]"
+fi
 if [ "$SCOPE" = "step" ] && [ -n "$STEP" ]; then
   events="$(jq --argjson s "$STEP" '[.[] | select((.step // 0) == $s or .event == "spec")]' <<<"$events")"
 fi

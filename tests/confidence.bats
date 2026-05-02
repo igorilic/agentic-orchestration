@@ -30,5 +30,13 @@ teardown() {
     "$(review_event 1 0 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e 'has("score") and has("band") and has("gates") and has("penalties") and has("verdict_text")'
+}
+
+@test "empty log file: does not crash, returns valid JSON" {
+  : > "$TMPLOG"  # zero-byte file
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e 'has("score") and has("band") and has("gates")'
 }
