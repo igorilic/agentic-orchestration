@@ -25,7 +25,7 @@
 set -euo pipefail
 
 VERSION="3.0.0"
-CLAUDE_DIR="$HOME/.claude"
+CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
 CONTEXT_DIR=".context/specs"
 STATE_FILE=".context/.pipeline-state"
