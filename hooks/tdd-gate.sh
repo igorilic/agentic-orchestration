@@ -17,6 +17,15 @@ if [ -f "$PROJECT_DIR/.tdd-skip" ]; then
   exit 0
 fi
 
+# Spike-only commits skip the TDD gate. Commits that touch any path
+# outside spikes/ fall through to the test-files check below.
+STAGED_FILES=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
+NON_SPIKE_FILES=$(echo "$STAGED_FILES" | grep -v '^spikes/' | grep -v '^$' || true)
+if [ -n "$STAGED_FILES" ] && [ -z "$NON_SPIKE_FILES" ]; then
+  echo "🧪 Spike-only commit (spikes/ paths only) — TDD gate skipped." >&2
+  exit 0
+fi
+
 # Check for test files in staged changes
 TEST_PATTERNS='(test|spec|_test\.|\.test\.|\.spec\.|tests/|__tests__/|Tests/|Test\.)'
 TEST_FILES=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null | grep -iE "$TEST_PATTERNS" || true)
