@@ -372,3 +372,28 @@ teardown() {
   echo "$output" | jq -e '.gates | index("MUST_FIX") != null'
   echo "$output" | jq -e '.band == "RED"'
 }
+
+@test "scope=step: BUILD_BROKEN gate STILL fires (behavioral, scope-independent)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 broken '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("BUILD_BROKEN") != null'
+  echo "$output" | jq -e '.band == "RED"'
+}
+
+@test "scope=step: TDD_BYPASSED_NO_REASON gate STILL fires (behavioral, scope-independent)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)" \
+    '{"ts":"2026-05-02T18:00:03Z","event":"tdd_bypassed","reason":"","step":1}'
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("TDD_BYPASSED_NO_REASON") != null'
+  echo "$output" | jq -e '.band == "RED"'
+}
