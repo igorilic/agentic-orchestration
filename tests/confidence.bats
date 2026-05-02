@@ -129,3 +129,86 @@ teardown() {
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("AC_NOT_TESTED") != null'
 }
+
+@test "penalty: should_fix is -5 each" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 2 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 90'
+  echo "$output" | jq -e '.penalties.should_fix == -10'
+}
+
+@test "penalty: suggestion is -1 each" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 3 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 97'
+}
+
+@test "penalty: loops_used 2 is -5, loops_used 3 is -15 cumulative" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"},{"id":"AC-2","text":"y"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(qa_event 2 5 0 ok '["AC-2"]')" \
+    "$(review_event 1 0 0 0 2 0 100)" \
+    "$(review_event 2 0 0 0 3 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 80'
+  echo "$output" | jq -e '.penalties.loops == -20'
+}
+
+@test "penalty: tech_debt_deferrals is -3 each" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 2 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 94'
+}
+
+@test "penalty: diff > 400 lines is -5" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 500)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 95'
+  echo "$output" | jq -e '.penalties.diff == -5'
+}
+
+@test "penalty: diff > 1000 lines is -15 (replaces -5)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 1500)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 85'
+  echo "$output" | jq -e '.penalties.diff == -15'
+}
+
+@test "score floor is 0, never negative" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 30 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 0'
+}

@@ -58,7 +58,33 @@ missing_count="$(jq 'length' <<<"$missing_acs")"
 bypass_no_reason="$(jq '[.[] | select(.event=="tdd_bypassed" and ((.reason // "") == ""))] | length' <<<"$events")"
 [ "$bypass_no_reason" -eq 0 ] || gates+=("TDD_BYPASSED_NO_REASON")
 
-# (Scored penalties added in subsequent tasks.)
+# --- Scored penalties ---
+should_fix_count="$(jq '[.[] | select(.event=="review") | .should_fix | length] | add // 0' <<<"$events")"
+penalties_should_fix=$(( -5 * should_fix_count ))
+
+suggestion_count="$(jq '[.[] | select(.event=="review") | .suggestion | length] | add // 0' <<<"$events")"
+penalties_suggestion=$(( -1 * suggestion_count ))
+
+loops2="$(jq '[.[] | select(.event=="review" and .loops_used >= 2)] | length' <<<"$events")"
+loops3="$(jq '[.[] | select(.event=="review" and .loops_used >= 3)] | length' <<<"$events")"
+penalties_loops=$(( -5 * loops2 + -10 * loops3 ))
+
+td_count="$(jq '[.[] | select(.event=="review") | .tech_debt_deferrals | length] | add // 0' <<<"$events")"
+penalties_tech_debt=$(( -3 * td_count ))
+
+# AC coverage penalty (the gate already handles 100% missing; this scores partial misses).
+penalties_ac_coverage=$(( -2 * missing_count ))
+[ "$penalties_ac_coverage" -lt -20 ] && penalties_ac_coverage=-20
+
+total_diff="$(jq '[.[] | select(.event=="review") | .diff_lines] | add // 0' <<<"$events")"
+if [ "$total_diff" -gt 1000 ]; then
+  penalties_diff=-15
+elif [ "$total_diff" -gt 400 ]; then
+  penalties_diff=-5
+fi
+
+score=$(( score + penalties_should_fix + penalties_suggestion + penalties_loops + penalties_tech_debt + penalties_ac_coverage + penalties_diff ))
+[ "$score" -lt 0 ] && score=0
 
 # Determine band.
 if [ "${#gates[@]}" -gt 0 ]; then
