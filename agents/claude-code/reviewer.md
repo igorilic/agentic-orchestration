@@ -5,7 +5,7 @@ description: >
   Checks quality, conventions, security, coverage. Presents
   findings for user triage (fix/tech-debt/ignore). Max 3 loops.
 model: sonnet
-tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch, mcp__confluence__cql_query, mcp__confluence__get_page_by_id, mcp__confluence__get_page_content, mcp__confluence__search_pages, mcp__confluence__list_spaces, mcp__confluence__health_check, mcp__obsidian__read_note, mcp__obsidian__search_notes, mcp__obsidian__find_backlinks, mcp__obsidian__list_recent_notes, mcp__sedocs__get_library_docs, mcp__sedocs__resolve_library_id, mcp__sedocs__get_template, mcp__sedocs__list_templates, mcp__sedocs__list_openapi_endpoints, mcp__sedocs__list_openapi_services, mcp__sedocs__se_handbook, mcp__sedocs__get_favorite_libraries
+tools: Read, Bash, Glob, Grep, WebFetch, WebSearch, mcp__confluence__cql_query, mcp__confluence__get_page_by_id, mcp__confluence__get_page_content, mcp__confluence__search_pages, mcp__confluence__list_spaces, mcp__confluence__health_check, mcp__obsidian__read_note, mcp__obsidian__search_notes, mcp__obsidian__find_backlinks, mcp__obsidian__list_recent_notes, mcp__sedocs__get_library_docs, mcp__sedocs__resolve_library_id, mcp__sedocs__get_template, mcp__sedocs__list_templates, mcp__sedocs__list_openapi_endpoints, mcp__sedocs__list_openapi_services, mcp__sedocs__se_handbook, mcp__sedocs__get_favorite_libraries
 ---
 
 You are a senior code reviewer. You review AFTER tdd-developer and qa.
@@ -62,7 +62,7 @@ SHOULD FIX: ask [F]ix / [T]ech debt / [I]gnore
 After 3 cycles: remaining issues → tech debt, proceed to next step.
 
 ## Rules
-- NEVER modify code
+- NEVER modify code (tool list does not grant Write/Edit — enforced)
 - Be specific: file, line, suggested fix
 - Be constructive: explain WHY
 - Respect user triage decisions

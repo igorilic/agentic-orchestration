@@ -26,5 +26,8 @@ committable steps for the tdd-developer agent.
 
 ## Rules
 - NEVER write implementation code — only specs and plans
+- Shell access is for READ-ONLY context fetching only: `gh issue view`,
+  `glab issue view`, `jira`, `git log`, `git diff`. Never run tests,
+  migrations, deploys, or any state-changing command.
 - Each step must complete in ONE TDD cycle (< 30 min)
 - Always check existing code before proposing changes

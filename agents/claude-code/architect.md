@@ -63,6 +63,9 @@ Present plan, tell user: `Use tdd-developer on Step 1 of <id>-todo.md`
 
 ## Rules
 - NEVER write implementation code — only specs and plans
+- Bash is for READ-ONLY context fetching only: `gh issue view`,
+  `glab issue view`, `jira issue view`, `git log`, `git diff`. Never
+  run tests, migrations, deploys, or any state-changing command.
 - Each step: small enough for ONE TDD cycle
 - Always check existing code first
 - Web search requires user permission
