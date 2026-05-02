@@ -5,12 +5,13 @@ set -euo pipefail
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 TOOL_INPUT="${CLAUDE_TOOL_INPUT:-}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Filter: only fire on PR/MR creation commands.
-if ! echo "$TOOL_INPUT" | grep -qE '(gh\s+pr\s+create|glab\s+mr\s+create)'; then
+if ! echo "$TOOL_INPUT" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$))'; then
   exit 0
 fi
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 ACTIVE_SPEC_FILE="$PROJECT_DIR/.git/aw/active-spec"
 if [ ! -f "$ACTIVE_SPEC_FILE" ]; then
@@ -59,6 +60,10 @@ case "$BAND" in
     echo "Options:" >&2
     echo "  1. Address the failing gates and retry" >&2
     echo "  2. /override-confidence \"<reason>\" to bypass (logged)" >&2
+    exit 2
+    ;;
+  *)
+    echo "🚫 Confidence gate: unexpected band value '$BAND' — blocking as safety default." >&2
     exit 2
     ;;
 esac

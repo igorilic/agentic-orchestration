@@ -111,10 +111,9 @@ STUB
 
   make_log "$LOG" "$(spec_event '[{"id":"AC-1","text":"x"}]')"
 
-  CLAUDE_PROJECT_DIR="$TESTDIR" \
-  CLAUDE_TOOL_INPUT="gh pr create" \
+  run env CLAUDE_PROJECT_DIR="$TESTDIR" \
+    CLAUDE_TOOL_INPUT="gh pr create" \
     bash "$TESTDIR/hooks-stub/confidence-gate.sh"
-  status=$?
   [ "$status" -eq 2 ]
 }
 
