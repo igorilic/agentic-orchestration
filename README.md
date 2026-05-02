@@ -237,6 +237,7 @@ Edit `~/.claude/skills/clusters/SKILL.md` with your cluster details after instal
 - `kubectl` (for troubleshooter)
 - `az` CLI (for Azure Application Insights queries)
 - `jq` (optional, for merging existing settings.json)
+- `bats-core` (development only — `brew install bats-core` on macOS, `npm i -g bats` elsewhere)
 
 ## License
 
