@@ -2,8 +2,9 @@
 
 An AI-native development CLI with multi-agent pipelines for test-driven development using Claude Code and GitHub Copilot CLI.
 
-Six specialized AI agents collaborate through platform-specific pipelines:
-**requirements-engineer** → **architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents).
+Seven specialized AI agents across two tracks:
+- **Production**: **requirements-engineer** → **architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents).
+- **Exploration**: **explorer** for spikes, prototypes, and API learning under `spikes/` (gitignored, TDD gate skipped).
 
 ## The Problem
 
@@ -61,6 +62,18 @@ ai-native-workflow run github-feature specs.md
   └─ gh pr create           → pull request (Closes #issue)
 ```
 
+### Exploration Track (both Claude Code and Copilot CLI)
+For spikes, prototypes, and API learning. Throwaway code under `spikes/`,
+gitignored, TDD gate skipped automatically.
+```
+/explore <topic>            (or copilot --agent=explorer)
+  │
+  ├─ explorer               → 2-3 approaches with tradeoffs
+  ├─ spikes/<topic>/        → prototype iteratively (gitignored)
+  └─ FINDINGS.md            → recommendation; re-enter /plan to ship
+```
+Use `/brainstorm` first if the idea is too vague to spike yet.
+
 ## Quick Start
 
 ```bash
@@ -103,6 +116,9 @@ ai-native-workflow status
 | `agents/qa.md` | Haiku 4.5 — run affected tests |
 | `agents/reviewer.md` | Sonnet 4.6 — code review + triage |
 | `agents/troubleshooter.md` | Opus 4.6 — incident diagnosis |
+| `agents/explorer.md` | Sonnet 4.6 — spikes/prototypes under `spikes/` |
+| `skills/explore/` | Exploratory mode entry point |
+| `skills/brainstorm/` | One-question-at-a-time spec elicitation |
 
 ### Per-Project (generated based on detected stack)
 

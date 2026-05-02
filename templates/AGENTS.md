@@ -2,6 +2,46 @@
 
 > Cross-tool agent instructions. Read by Claude Code, GitHub Copilot, and other AI agents.
 
+## Two Tracks: Production and Exploration
+
+### Production (`/plan`)
+For tickets, features, bug fixes, anything that ships. Pipeline:
+**requirements-engineer → architect → tdd-developer → qa → reviewer**
+(troubleshooter replaces requirements-engineer + architect for incidents).
+
+### Exploration (`/explore`, `/brainstorm`)
+For spikes, prototypes, API learning, vague ideas. Throwaway code under
+`spikes/<topic>/` (gitignored). The TDD gate skips spike-only commits.
+End with `FINDINGS.md`. To promote findings to production, re-enter
+via `/plan`.
+
+### When to skip both
+Trivial only: typo, single-line config, comment-only, local rename.
+Anything touching logic, types, public APIs, or 2+ files is non-trivial.
+When in doubt, ask.
+
+## Shorthand
+
+- `go` — proceed with the proposed plan as-is
+- `fix` — triage and address the issues just identified
+- `f` / `t` / `i` — per-item triage on a numbered list:
+  - `f` = fix now
+  - `t` = log to tech debt (append to `.context/CURRENT_SPRINT.md`)
+  - `i` = ignore, not a real issue
+- Positional mapping: `f t i f` against a 4-item list maps 1→f, 2→t, 3→i, 4→f.
+
+## Tool Preferences (decision order; negative rules are hard)
+
+- Search content: `rg`. Never `grep` or `find | xargs grep`.
+- Find files: `fd`. Never `find`.
+- JSON: `jq`. Never sed/awk on JSON.
+- CSV/TSV: `python` (csv module) or `mlr`. Never awk on CSV.
+- Multi-step text processing: Python script, not chained sed/awk.
+- Source-code edits: editor tool, never `sed -i`.
+- Python one-offs: `uv run --with <pkg> python ...`. Never `pip install` to system.
+- Git: never `git add -A` / `git add .`; list files. Never `--force`,
+  use `--force-with-lease`. Never amend or rebase commits not yours.
+
 ## Core Rules
 
 ### 1. TDD is Mandatory
