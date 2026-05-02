@@ -1917,6 +1917,15 @@ if [ -f "$PROJECT_DIR/.tdd-skip" ]; then
   exit 0
 fi
 
+# Spike-only commits skip the TDD gate. Commits that touch any path
+# outside spikes/ fall through to the test-files check below.
+STAGED_FILES=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)
+NON_SPIKE_FILES=$(echo "$STAGED_FILES" | grep -v '^spikes/' | grep -v '^$' || true)
+if [ -n "$STAGED_FILES" ] && [ -z "$NON_SPIKE_FILES" ]; then
+  echo "🧪 Spike-only commit (spikes/ paths only) — TDD gate skipped." >&2
+  exit 0
+fi
+
 # Check for test files in staged changes
 TEST_PATTERNS='(test|spec|_test\.|\.test\.|\.spec\.|tests/|__tests__/|Tests/|Test\.)'
 TEST_FILES=$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null | grep -iE "$TEST_PATTERNS" || true)
@@ -2218,6 +2227,116 @@ git push -u origin "$BRANCH"
 Display URL and remind to request reviewers / link ticket.
 SKILL_EOF
   success "/pr skill"
+
+  # --- /explore ---
+  mkdir -p "$CLAUDE_DIR/skills/explore"
+  cat > "$CLAUDE_DIR/skills/explore/SKILL.md" << 'SKILL_EOF'
+---
+name: explore
+description: >
+  Exploratory mode — spike, prototype, brainstorm. Throwaway code
+  under spikes/. Use when the goal is to learn or generate options,
+  NOT to ship. Pairs with the explorer agent.
+  Triggers on: explore, spike, prototype, experiment, sketch, try out.
+disable-model-invocation: true
+---
+
+## /explore <topic>
+
+Exploratory track — first-class alternative to the production pipeline.
+Use when you want to learn, prototype, or compare approaches without
+the spec/todo/test ceremony.
+
+```
+/explore <topic>
+  ↓
+explorer (Sonnet)
+  ↓
+spikes/<topic>/  ← throwaway code (gitignored)
+  ↓
+spikes/<topic>/FINDINGS.md  ← what was learned + recommendation
+  ↓
+hand back to user (re-enter via /plan to promote findings)
+```
+
+### Usage
+
+#### Claude Code (interactive)
+```
+Use the explorer agent to spike <topic>
+```
+
+#### Copilot CLI
+```bash
+copilot --agent=explorer --prompt "Spike <topic>"
+```
+
+### What goes under `spikes/`
+- `spikes/<topic>/` — prototype code, scratch files, anything throwaway
+- `spikes/<topic>/FINDINGS.md` — what was learned, recommendation
+- Path is gitignored by default (add `spikes/` to `.gitignore`)
+
+### Rules
+- Spike-only commits bypass the TDD gate (banner shown)
+- Touching files outside `spikes/` re-engages the gate
+- Findings DO NOT auto-promote to production — re-enter via `/plan`
+
+### When NOT to use
+- You already know the design — go straight to `/plan`
+- You're fixing a bug — use the production pipeline (or troubleshooter)
+- The work needs to ship today — spikes are not shippable
+SKILL_EOF
+  success "/explore skill"
+
+  # --- /brainstorm ---
+  mkdir -p "$CLAUDE_DIR/skills/brainstorm"
+  cat > "$CLAUDE_DIR/skills/brainstorm/SKILL.md" << 'SKILL_EOF'
+---
+name: brainstorm
+description: >
+  Iterative spec elicitation for vague ideas. Asks one question at a
+  time to develop a thorough, step-by-step spec. Use BEFORE /plan when
+  the idea is too fuzzy to hand to the architect. Pairs with explorer
+  if the brainstorm leads to wanting to prototype.
+  Triggers on: brainstorm, fuzzy idea, help me think, vague idea.
+disable-model-invocation: true
+---
+
+## /brainstorm <idea>
+
+Use when you have an idea but not enough clarity to write a spec.
+Brainstorm asks one question at a time to converge on a structured
+spec — then hands off to either `/plan` (to ship) or `/explore` (to
+prototype).
+
+```
+/brainstorm <idea>
+  ↓
+one-question-at-a-time elicitation
+  ↓
+.context/specs/<id>-brainstorm.md  ← captured ideas
+  ↓
+either:
+  → /plan <id>   (production track)
+  → /explore <id> (exploration track)
+```
+
+### Workflow
+1. Restate the idea back in your own words. Confirm.
+2. Ask ONE question at a time. Build context iteratively.
+3. Capture decisions in `.context/specs/<id>-brainstorm.md`.
+4. When the shape is clear, recommend a track:
+   - **Production-ready idea** → `/plan` (spec → todo → TDD)
+   - **Needs prototyping first** → `/explore` (spike under spikes/)
+   - **Still too fuzzy** → keep brainstorming or shelve
+
+### Rules
+- ONE question per turn. No multi-part questions.
+- Don't propose solutions until the problem is clear.
+- Don't write code. Brainstorm is text-only.
+- If the user says "just build it", redirect to `/plan` or `/explore`.
+SKILL_EOF
+  success "/brainstorm skill"
 
   # --- /plan (orchestration) ---
   mkdir -p "$CLAUDE_DIR/skills/plan"
@@ -2537,6 +2656,9 @@ Present plan, tell user: `Use tdd-developer on Step 1 of <id>-todo.md`
 
 ## Rules
 - NEVER write implementation code — only specs and plans
+- Bash is for READ-ONLY context fetching only: `gh issue view`,
+  `glab issue view`, `jira issue view`, `git log`, `git diff`. Never
+  run tests, migrations, deploys, or any state-changing command.
 - Each step: small enough for ONE TDD cycle
 - Always check existing code first
 - Web search requires user permission
@@ -2645,7 +2767,7 @@ description: >
   Checks quality, conventions, security, coverage. Presents
   findings for user triage (fix/tech-debt/ignore). Max 3 loops.
 model: sonnet
-tools: Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch, mcp__confluence__cql_query, mcp__confluence__get_page_by_id, mcp__confluence__get_page_content, mcp__confluence__search_pages, mcp__confluence__list_spaces, mcp__confluence__health_check, mcp__obsidian__read_note, mcp__obsidian__search_notes, mcp__obsidian__find_backlinks, mcp__obsidian__list_recent_notes, mcp__sedocs__get_library_docs, mcp__sedocs__resolve_library_id, mcp__sedocs__get_template, mcp__sedocs__list_templates, mcp__sedocs__list_openapi_endpoints, mcp__sedocs__list_openapi_services, mcp__sedocs__se_handbook, mcp__sedocs__get_favorite_libraries
+tools: Read, Bash, Glob, Grep, WebFetch, WebSearch, mcp__confluence__cql_query, mcp__confluence__get_page_by_id, mcp__confluence__get_page_content, mcp__confluence__search_pages, mcp__confluence__list_spaces, mcp__confluence__health_check, mcp__obsidian__read_note, mcp__obsidian__search_notes, mcp__obsidian__find_backlinks, mcp__obsidian__list_recent_notes, mcp__sedocs__get_library_docs, mcp__sedocs__resolve_library_id, mcp__sedocs__get_template, mcp__sedocs__list_templates, mcp__sedocs__list_openapi_endpoints, mcp__sedocs__list_openapi_services, mcp__sedocs__se_handbook, mcp__sedocs__get_favorite_libraries
 ---
 
 You are a senior code reviewer. You review AFTER tdd-developer and qa.
@@ -2702,7 +2824,7 @@ SHOULD FIX: ask [F]ix / [T]ech debt / [I]gnore
 After 3 cycles: remaining issues → tech debt, proceed to next step.
 
 ## Rules
-- NEVER modify code
+- NEVER modify code (tool list does not grant Write/Edit — enforced)
 - Be specific: file, line, suggested fix
 - Be constructive: explain WHY
 - Respect user triage decisions
@@ -2817,6 +2939,70 @@ Evidence per region table, Fix Plan (todo.md), Prevention.
 - Protect sensitive data — no secrets/tokens/PII
 AGENT_EOF
   success "troubleshooter agent (Opus 4.6)"
+
+  # --- explorer (Sonnet 4.6) ---
+  cat > "$CLAUDE_DIR/agents/explorer.md" << 'AGENT_EOF'
+---
+name: explorer
+description: >
+  Exploratory mode for spikes, prototypes, API learning, and
+  brainstorming. Use when the goal is to learn or generate options,
+  NOT to ship. Writes throwaway code under spikes/ that is gitignored.
+  Triggers on: spike, prototype, explore, brainstorm, try, experiment, sketch.
+model: sonnet
+tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
+---
+
+You are in exploratory mode. The goal is to learn or generate options,
+not to ship production code. Different rules apply than the production
+pipeline (architect → tdd-developer → qa → reviewer).
+
+## What's different
+- Skip the spec/todo ceremony. No architect handoff needed.
+- Write code under `spikes/<topic>/` (gitignored). It is throwaway.
+- Tests are optional. Generate options, then test the chosen one.
+- Multiple approaches are encouraged — show alternatives, not one answer.
+- Be opinionated. Take risks the architect agent wouldn't.
+
+## What's the same
+- Honest about uncertainty. Mark guesses as guesses.
+- No silent destructive actions outside `spikes/`.
+- Don't touch production code without exiting explore mode first.
+
+## Workflow
+
+### 1. Restate the goal
+Restate the goal in one sentence. Ask if that's right before generating
+options.
+
+### 2. Propose options
+Propose 2–3 distinct approaches with rough tradeoffs. Don't optimize
+prematurely — surface the design space.
+
+### 3. Prototype
+On user pick, prototype under `spikes/<topic>/`. Iterate fast. Use
+the smallest possible code to learn the answer.
+
+### 4. Capture findings
+When done, write `spikes/<topic>/FINDINGS.md` with:
+- What was learned
+- What worked, what didn't
+- Recommendation for production work (e.g., "promote approach 2 via
+  /plan with these adjustments")
+
+### 5. Hand back
+Hand back to the user. Do NOT auto-promote findings to production —
+that requires re-entering via `/plan` or the production pipeline.
+
+## Rules
+- Never modify files outside `spikes/` without explicit instruction
+- Never run destructive commands (db migrations, deploys) in explore mode
+- If exploration reveals the work is actually production-ready, STOP
+  and recommend exiting to `/plan` rather than slipping it through
+- Spike-only commits are allowed by the TDD gate; production-path
+  commits still require tests
+AGENT_EOF
+  success "explorer agent (Sonnet 4.6)"
 }
 
 install_copilot_agents() {
@@ -2914,6 +3100,9 @@ committable steps for the tdd-developer agent.
 
 ## Rules
 - NEVER write implementation code — only specs and plans
+- Shell access is for READ-ONLY context fetching only: `gh issue view`,
+  `glab issue view`, `jira`, `git log`, `git diff`. Never run tests,
+  migrations, deploys, or any state-changing command.
 - Each step must complete in ONE TDD cycle (< 30 min)
 - Always check existing code before proposing changes
 AGENT_EOF
@@ -3067,6 +3256,53 @@ You are a senior SRE and troubleshooter. Investigate production issues.
 - Protect sensitive data in output
 AGENT_EOF
   success "troubleshooter.agent.md"
+
+  # --- explorer (Sonnet) ---
+  cat > "$COPILOT_DIR/agents/explorer.agent.md" << 'AGENT_EOF'
+---
+name: explorer
+description: >
+  Exploratory mode for spikes, prototypes, API learning, and
+  brainstorming. Use when the goal is to learn or generate options,
+  NOT to ship. Writes throwaway code under spikes/ that is gitignored.
+  Triggers on: spike, prototype, explore, brainstorm, try, experiment, sketch.
+model: claude-sonnet-4.6
+---
+
+You are in exploratory mode. The goal is to learn or generate options,
+not to ship production code. Different rules apply than the production
+pipeline (architect → tdd-developer → qa → reviewer).
+
+## What's different
+- Skip the spec/todo ceremony. No architect handoff needed.
+- Write code under `spikes/<topic>/` (gitignored). It is throwaway.
+- Tests are optional. Generate options, then test the chosen one.
+- Multiple approaches are encouraged — show alternatives, not one answer.
+- Be opinionated. Take risks the architect agent wouldn't.
+
+## What's the same
+- Honest about uncertainty. Mark guesses as guesses.
+- No silent destructive actions outside `spikes/`.
+- Don't touch production code without exiting explore mode first.
+
+## Workflow
+1. Restate the goal in one sentence. Ask if that's right.
+2. Propose 2–3 distinct approaches with rough tradeoffs.
+3. On user pick, prototype under `spikes/<topic>/`. Iterate fast.
+4. Write `spikes/<topic>/FINDINGS.md` with what was learned, what
+   worked, what didn't, and a production recommendation.
+5. Hand back to user — do NOT auto-promote to production. Exit to
+   the production pipeline (`copilot --agent=architect ...`) for that.
+
+## Rules
+- Never modify files outside `spikes/` without explicit instruction
+- Never run destructive commands (db migrations, deploys) in explore mode
+- If exploration reveals the work is actually production-ready, STOP
+  and recommend re-entering via the production pipeline
+- Spike-only commits are allowed by the TDD gate; production-path
+  commits still require tests
+AGENT_EOF
+  success "explorer.agent.md"
 
   info "Copilot CLI agents installed to: $COPILOT_DIR/agents/"
   dim "Use: copilot --agent=architect --prompt \"...\""
@@ -3225,6 +3461,46 @@ install_project_agents_md() {
 # AGENTS.md
 
 > Cross-tool agent instructions. Read by Claude Code, GitHub Copilot, and other AI agents.
+
+## Two Tracks: Production and Exploration
+
+### Production (\`/plan\`)
+For tickets, features, bug fixes, anything that ships. Pipeline:
+**requirements-engineer → architect → tdd-developer → qa → reviewer**
+(troubleshooter replaces requirements-engineer + architect for incidents).
+
+### Exploration (\`/explore\`, \`/brainstorm\`)
+For spikes, prototypes, API learning, vague ideas. Throwaway code under
+\`spikes/<topic>/\` (gitignored). The TDD gate skips spike-only commits.
+End with \`FINDINGS.md\`. To promote findings to production, re-enter
+via \`/plan\`.
+
+### When to skip both
+Trivial only: typo, single-line config, comment-only, local rename.
+Anything touching logic, types, public APIs, or 2+ files is non-trivial.
+When in doubt, ask.
+
+## Shorthand
+
+- \`go\` — proceed with the proposed plan as-is
+- \`fix\` — triage and address the issues just identified
+- \`f\` / \`t\` / \`i\` — per-item triage on a numbered list:
+  - \`f\` = fix now
+  - \`t\` = log to tech debt (append to \`.context/CURRENT_SPRINT.md\`)
+  - \`i\` = ignore, not a real issue
+- Positional mapping: \`f t i f\` against a 4-item list maps 1→f, 2→t, 3→i, 4→f.
+
+## Tool Preferences (decision order; negative rules are hard)
+
+- Search content: \`rg\`. Never \`grep\` or \`find | xargs grep\`.
+- Find files: \`fd\`. Never \`find\`.
+- JSON: \`jq\`. Never sed/awk on JSON.
+- CSV/TSV: \`python\` (csv module) or \`mlr\`. Never awk on CSV.
+- Multi-step text processing: Python script, not chained sed/awk.
+- Source-code edits: editor tool, never \`sed -i\`.
+- Python one-offs: \`uv run --with <pkg> python ...\`. Never \`pip install\` to system.
+- Git: never \`git add -A\` / \`git add .\`; list files. Never \`--force\`,
+  use \`--force-with-lease\`. Never amend or rebase commits not yours.
 
 ## Core Rules
 
@@ -3632,6 +3908,8 @@ show_status() {
   check_file "$CLAUDE_DIR/skills/session-report/SKILL.md" "skills/session-report"
   check_file "$CLAUDE_DIR/skills/adr/SKILL.md" "skills/adr"
   check_file "$CLAUDE_DIR/skills/pr/SKILL.md" "skills/pr"
+  check_file "$CLAUDE_DIR/skills/explore/SKILL.md" "skills/explore"
+  check_file "$CLAUDE_DIR/skills/brainstorm/SKILL.md" "skills/brainstorm"
   check_file "$CLAUDE_DIR/skills/plan/SKILL.md" "skills/plan (orchestration)"
   check_file "$CLAUDE_DIR/skills/clusters/SKILL.md" "skills/clusters (multi-region)"
   check_file "$CLAUDE_DIR/skills/pipeline-gitlab-feature/SKILL.md" "skills/pipeline-gitlab-feature"
@@ -3643,6 +3921,7 @@ show_status() {
   check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Haiku)"
   check_file "$CLAUDE_DIR/agents/reviewer.md" "agents/reviewer (Sonnet)"
   check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
+  check_file "$CLAUDE_DIR/agents/explorer.md" "agents/explorer (Sonnet)"
 
   local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ]; then
@@ -3654,6 +3933,7 @@ show_status() {
     check_file "$COPILOT_DIR/agents/qa.agent.md" "agents/qa"
     check_file "$COPILOT_DIR/agents/reviewer.agent.md" "agents/reviewer"
     check_file "$COPILOT_DIR/agents/troubleshooter.agent.md" "agents/troubleshooter"
+    check_file "$COPILOT_DIR/agents/explorer.agent.md" "agents/explorer"
   fi
 
   echo ""
