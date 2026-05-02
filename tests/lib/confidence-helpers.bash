@@ -25,12 +25,11 @@ qa_event() {
 
 review_event() {
   local step="$1" must="${2:-0}" should="${3:-0}" sugg="${4:-0}" loops="${5:-1}" td="${6:-0}" diff="${7:-100}"
+  local must_arr should_arr sugg_arr td_arr
+  must_arr=$(  [ "$must"   -eq 0 ] && echo '[]' || seq 1 "$must"   | jq -Rcn '[inputs | {file:"f.go",line:1,msg:"x"}]')
+  should_arr=$([ "$should" -eq 0 ] && echo '[]' || seq 1 "$should" | jq -Rcn '[inputs | {file:"f.go",line:1,msg:"x"}]')
+  sugg_arr=$(  [ "$sugg"   -eq 0 ] && echo '[]' || seq 1 "$sugg"   | jq -Rcn '[inputs | {file:"f.go",line:1,msg:"x"}]')
+  td_arr=$(    [ "$td"     -eq 0 ] && echo '[]' || seq 1 "$td"     | jq -Rcn '[inputs | {item:"x"}]')
   printf '{"ts":"2026-05-02T18:00:02Z","event":"review","step":%s,"must_fix":%s,"should_fix":%s,"suggestion":%s,"loops_used":%s,"tech_debt_deferrals":%s,"diff_lines":%s}' \
-    "$step" \
-    "$(seq 1 "$must" | jq -Rn '[inputs | {file:"f.go",line:1,msg:"x"}]')" \
-    "$(seq 1 "$should" | jq -Rn '[inputs | {file:"f.go",line:1,msg:"x"}]')" \
-    "$(seq 1 "$sugg" | jq -Rn '[inputs | {file:"f.go",line:1,msg:"x"}]')" \
-    "$loops" \
-    "$(seq 1 "$td" | jq -Rn '[inputs | {item:"x"}]')" \
-    "$diff"
+    "$step" "$must_arr" "$should_arr" "$sugg_arr" "$loops" "$td_arr" "$diff"
 }

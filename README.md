@@ -236,7 +236,7 @@ Edit `~/.claude/skills/clusters/SKILL.md` with your cluster details after instal
 - `glab` CLI (for GitLab pipelines and `/pr` skill)
 - `kubectl` (for troubleshooter)
 - `az` CLI (for Azure Application Insights queries)
-- `jq` (optional, for merging existing settings.json)
+- `jq` (required for tests; also used to merge existing settings.json)
 - `bats-core` (development only — `brew install bats-core` on macOS, `npm i -g bats` elsewhere)
 
 ## License
