@@ -293,3 +293,82 @@ teardown() {
   # score before gate would be 100, but NO_AC fires
   echo "$output" | jq -e '.band == "RED"'
 }
+
+@test "scope=step: only events for that step are considered" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"},{"id":"AC-2","text":"y"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(qa_event 2 5 0 ok '["AC-2"]')" \
+    "$(review_event 1 0 0 0 1 0 100)" \
+    "$(review_event 2 0 4 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 100'
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=2
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.score == 80'
+}
+
+@test "scope=aggregate (default): all events considered" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"},{"id":"AC-2","text":"y"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(qa_event 2 5 0 ok '["AC-2"]')" \
+    "$(review_event 1 0 2 0 1 0 100)" \
+    "$(review_event 2 0 2 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  # 4 should-fix total = -20 = score 80
+  echo "$output" | jq -e '.score == 80'
+}
+
+@test "scope=step: NO_AC gate does NOT fire even with empty spec" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[]')" \
+    "$(qa_event 1 5 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("NO_AC") == null'
+  echo "$output" | jq -e '.band != "RED"'
+}
+
+@test "scope=step: AC_NOT_TESTED does NOT fire when spec has more ACs than this step covers" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"},{"id":"AC-2","text":"y"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("AC_NOT_TESTED") == null'
+  echo "$output" | jq -e '.score == 100'
+}
+
+@test "scope=step: TEST_FAILED gate STILL fires (behavioral, scope-independent)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("TEST_FAILED") != null'
+  echo "$output" | jq -e '.band == "RED"'
+}
+
+@test "scope=step: MUST_FIX gate STILL fires (behavioral, scope-independent)" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 1 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG" --scope=step --step=1
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("MUST_FIX") != null'
+  echo "$output" | jq -e '.band == "RED"'
+}
