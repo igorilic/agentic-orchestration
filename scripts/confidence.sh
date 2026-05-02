@@ -35,6 +35,7 @@ penalties_ac_coverage=0
 penalties_diff=0
 penalties_suggestion=0
 
+# Hard gates — appended in canonical order: NO_AC, TEST_FAILED, BUILD_BROKEN, MUST_FIX, AC_NOT_TESTED, TDD_BYPASSED_NO_REASON
 # --- Hard gates ---
 ac_count="$(jq '[.[] | select(.event=="spec")] | (.[0].ac_items // []) | length' <<<"$events")"
 [ "$ac_count" -gt 0 ] || gates+=("NO_AC")
@@ -49,7 +50,7 @@ must_fix_total="$(jq '[.[] | select(.event=="review") | .must_fix | length] | ad
 [ "$must_fix_total" -eq 0 ] || gates+=("MUST_FIX")
 
 spec_acs="$(jq '[.[] | select(.event=="spec")][0].ac_items // [] | map(.id)' <<<"$events")"
-tested_acs="$(jq '[.[] | select(.event=="qa") | .ac_items_tested[]] | unique' <<<"$events")"
+tested_acs="$(jq '[.[] | select(.event=="qa") | (.ac_items_tested // [])[]] | unique' <<<"$events")"
 missing_acs="$(jq -n --argjson s "$spec_acs" --argjson t "$tested_acs" '$s - $t')"
 missing_count="$(jq 'length' <<<"$missing_acs")"
 [ "$missing_count" -eq 0 ] || gates+=("AC_NOT_TESTED")

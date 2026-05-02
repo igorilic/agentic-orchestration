@@ -47,6 +47,7 @@ teardown() {
     "$(review_event 1 0 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.band == "RED"'
   echo "$output" | jq -e '.gates | index("NO_AC") != null'
 }
@@ -58,6 +59,7 @@ teardown() {
     "$(review_event 1 0 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("NO_AC") != null'
 }
 
@@ -69,6 +71,7 @@ teardown() {
     "$(review_event 1 0 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("TEST_FAILED") != null'
 }
 
@@ -79,6 +82,7 @@ teardown() {
     "$(review_event 1 0 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("BUILD_BROKEN") != null'
 }
 
@@ -89,6 +93,7 @@ teardown() {
     "$(review_event 1 1 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("MUST_FIX") != null'
 }
 
@@ -99,6 +104,7 @@ teardown() {
     "$(review_event 1 0 0 0 1 0 100)"
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("AC_NOT_TESTED") != null'
 }
 
@@ -110,5 +116,16 @@ teardown() {
     '{"ts":"2026-05-02T18:00:03Z","event":"tdd_bypassed","reason":""}'
 
   run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
   echo "$output" | jq -e '.gates | index("TDD_BYPASSED_NO_REASON") != null'
+}
+
+@test "AC_NOT_TESTED: handles qa event with missing ac_items_tested field" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    '{"ts":"2026-05-02T18:00:01Z","event":"qa","step":1,"tests_passed":5,"tests_failed":0,"build_status":"ok"}'
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("AC_NOT_TESTED") != null'
 }
