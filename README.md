@@ -93,6 +93,20 @@ ai-native-workflow run github-feature specs.md
 ai-native-workflow status
 ```
 
+### Sandboxed installs
+
+`install global` writes to `~/.claude/` and `~/.copilot/` by default, and
+auto-backs up `CLAUDE.md` and `settings.json` as `<file>.bak.<timestamp>`
+before overwriting. To install into a sandbox instead — useful for
+testing changes without touching your real config — set `CLAUDE_HOME`
+and/or `COPILOT_HOME`:
+
+```bash
+CLAUDE_HOME=/tmp/aw-sandbox \
+COPILOT_HOME=/tmp/aw-sandbox-copilot \
+  ai-native-workflow install global
+```
+
 ## What Gets Installed
 
 ### Global (`~/.claude/` + `~/.copilot/`)
