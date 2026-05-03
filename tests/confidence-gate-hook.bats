@@ -203,6 +203,43 @@ STUB
   [[ "$output" == *"MUST_FIX"* ]]
 }
 
+@test "skip-tdd active + only NO_AC: auto-bypass, exit 0, trigger=skip-tdd-auto" {
+  printf 'TDD bypass active\nReason: docs-only change\nBranch: x\nTime: x\n' > .tdd-skip
+  make_log "$LOG" \
+    "$(spec_event '[]')" \
+    "$(qa_event 1 5 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 0 ]
+
+  run jq -s '[.[] | select(.event=="override" and .trigger=="skip-tdd-auto")] | length' "$LOG"
+  [ "$output" = "1" ]
+}
+
+@test "skip-tdd active + MUST_FIX: still blocks (exit 2)" {
+  printf 'TDD bypass active\nReason: docs-only change\nBranch: x\nTime: x\n' > .tdd-skip
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 1 0 0 1 0 100)"
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"behavioral"* ]] || [[ "$output" == *"MUST_FIX"* ]]
+}
+
+@test "skip-tdd active + mixed (NO_AC + TEST_FAILED): blocks (exit 2)" {
+  printf 'TDD bypass active\nReason: docs-only change\nBranch: x\nTime: x\n' > .tdd-skip
+  make_log "$LOG" \
+    "$(spec_event '[]')" \
+    "$(qa_event 1 5 1 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+}
+
 @test "override is one-shot: second run on same log without marker exits 2" {
   make_log "$LOG" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
