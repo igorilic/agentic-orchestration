@@ -1458,7 +1458,7 @@ git commit -m "feat(confidence): instruct architect/qa/reviewer agents to emit e
 
 The CLI is a single bash script. Search for the pipeline runner functions (`run_github_feature`, `run_gitlab_feature`, etc.). Add the integration there.
 
-- [ ] **Step 1: Read existing pipeline runner**
+- [x] **Step 1: Read existing pipeline runner**
 
 Read `ai-native-workflow` and locate functions:
 - The function that handles `run github-feature` / `run gitlab-feature`
@@ -1466,7 +1466,7 @@ Read `ai-native-workflow` and locate functions:
 
 Document where each integration point goes inline before writing tests. (No code change in this step — orientation only.)
 
-- [ ] **Step 2: Write integration test for active-spec write**
+- [x] **Step 2: Write integration test for active-spec write**
 
 Create `tests/cli-confidence.bats`:
 ```bash
@@ -1494,9 +1494,9 @@ teardown() {
 
 The `AW_DRY_RUN=1` environment is a new flag we'll add — when set, the CLI sets up state but doesn't actually call agents. Search for any existing dry-run handling first; reuse if present.
 
-- [ ] **Step 3: Run, verify failure**
+- [x] **Step 3: Run, verify failure**
 
-- [ ] **Step 4: Implement active-spec write**
+- [x] **Step 4: Implement active-spec write**
 
 In `ai-native-workflow`, locate the pipeline-start path. Add at the top:
 ```bash
@@ -1512,9 +1512,9 @@ write_active_spec "$SPEC_ID"
 
 If `AW_DRY_RUN=1`, return after writing active-spec (skip agent invocations).
 
-- [ ] **Step 5: Run, verify pass**
+- [x] **Step 5: Run, verify pass**
 
-- [ ] **Step 6: Add per-step verdict invocation**
+- [x] **Step 6: Add per-step verdict invocation**
 
 After each step's `qa` and `reviewer` invocations finish, add:
 ```bash
@@ -1551,7 +1551,7 @@ emit_step_verdict() {
 
 Call `emit_step_verdict "$SPEC_ID" "$STEP_NUMBER"` after each step.
 
-- [ ] **Step 7: Add PR body confidence section injection**
+- [x] **Step 7: Add PR body confidence section injection**
 
 In the PR/MR creation function:
 ```bash
@@ -1580,7 +1580,7 @@ EOF
 
 Pipe through this when invoking `gh pr create --body` / `glab mr create --description`.
 
-- [ ] **Step 8: Test end-to-end**
+- [x] **Step 8: Test end-to-end**
 
 Add to `tests/cli-confidence.bats`:
 ```bash
@@ -1602,7 +1602,7 @@ Add to `tests/cli-confidence.bats`:
 
 If sourcing the CLI is impractical (because of side effects on source), refactor `build_pr_body` and `emit_step_verdict` into a helper file `scripts/confidence-cli.sh` that the CLI sources. Tests source the same helper.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add ai-native-workflow scripts/confidence-cli.sh tests/cli-confidence.bats
