@@ -1156,7 +1156,7 @@ git commit -m "feat(confidence): add /override-confidence skill for one-shot byp
 
 **Background:** When the hook fires RED and `.git/aw/override-<spec-id>` exists, consume it (read, log, delete) and exit 0.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 Append to `tests/confidence-gate-hook.bats`:
 ```bash
@@ -1178,12 +1178,12 @@ Append to `tests/confidence-gate-hook.bats`:
 }
 ```
 
-- [ ] **Step 2: Run, verify failure**
+- [x] **Step 2: Run, verify failure**
 
 Run: `bats tests/confidence-gate-hook.bats`
 Expected: new test fails (still exits 2 because override logic not implemented).
 
-- [ ] **Step 3: Implement override consumption**
+- [x] **Step 3: Implement override consumption**
 
 In `hooks/confidence-gate.sh`, replace the `RED)` case with:
 ```bash
@@ -1211,12 +1211,12 @@ In `hooks/confidence-gate.sh`, replace the `RED)` case with:
     ;;
 ```
 
-- [ ] **Step 4: Run tests, verify pass**
+- [x] **Step 4: Run tests, verify pass**
 
 Run: `bats tests/confidence-gate-hook.bats`
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add hooks/confidence-gate.sh tests/confidence-gate-hook.bats
