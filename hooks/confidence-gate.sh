@@ -57,7 +57,12 @@ case "$BAND" in
   RED)
     OVERRIDE_FILE="$PROJECT_DIR/.git/aw/override-${SPEC_ID}"
     if [ -f "$OVERRIDE_FILE" ]; then
-      OVERRIDE_REASON="$(jq -r '.reason' "$OVERRIDE_FILE")"
+      OVERRIDE_REASON="$(jq -r '.reason // empty' "$OVERRIDE_FILE" 2>/dev/null || echo)"
+      if [ -z "$OVERRIDE_REASON" ] || [ "$OVERRIDE_REASON" = "null" ]; then
+        echo "🚫 Confidence gate: override marker at $OVERRIDE_FILE is malformed or missing reason. Deleting and blocking." >&2
+        rm -f "$OVERRIDE_FILE"
+        exit 2
+      fi
       jq -n \
         --arg ts "$TS" \
         --arg reason "$OVERRIDE_REASON" \
