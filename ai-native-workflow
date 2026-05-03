@@ -841,6 +841,7 @@ pipeline_gitlab_feature() {
   enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
+  write_active_spec "$jira_id"
   local NI_SUFFIX
   NI_SUFFIX=$(build_ni_suffix)
 
@@ -944,6 +945,7 @@ pipeline_gitlab_feature() {
       run_copilot_agent "reviewer" "Review Step $i of $jira_id"
       save_state "gitlab-feature" "$jira_id" "6.$i" "review-done"
 
+      emit_step_verdict "$jira_id" "$i" || true
       run_triage "copilot" "$jira_id" "$i"
     fi
   done
@@ -957,11 +959,8 @@ pipeline_gitlab_feature() {
       local base
       base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
       git push -u origin "$branch"
-      glab mr create \
-        --source-branch "$branch" \
-        --target-branch "$base" \
-        --title "feat: $jira_id" \
-        --description "Closes $jira_id
+
+      local mr_base_desc="Closes $jira_id
 
 ## Pipeline
 Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
@@ -971,6 +970,15 @@ Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
 - Test Plan: \`$CONTEXT_DIR/${jira_id}-testplan.md\`
 - Spec: \`$CONTEXT_DIR/${jira_id}-spec.md\`
 - Todo: \`$CONTEXT_DIR/${jira_id}-todo.md\`"
+
+      local mr_desc
+      mr_desc="$(build_pr_body "$jira_id" "$mr_base_desc")"
+
+      glab mr create \
+        --source-branch "$branch" \
+        --target-branch "$base" \
+        --title "feat: $jira_id" \
+        --description "$mr_desc"
       success "Merge request created!"
     fi
   fi
@@ -996,6 +1004,7 @@ pipeline_gitlab_incident() {
   enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
+  write_active_spec "$jira_id"
   local NI_SUFFIX
   NI_SUFFIX=$(build_ni_suffix)
 
@@ -1124,6 +1133,7 @@ pipeline_gitlab_incident() {
       run_copilot_agent "reviewer" "Review Step $i of $jira_id bugfix"
       save_state "gitlab-incident" "$jira_id" "5.$i" "review-done"
 
+      emit_step_verdict "$jira_id" "$i" || true
       run_triage "copilot" "$jira_id" "$i"
     fi
   done
@@ -1137,17 +1147,23 @@ pipeline_gitlab_incident() {
       local base
       base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
       git push -u origin "$branch"
-      glab mr create \
-        --source-branch "$branch" \
-        --target-branch "$base" \
-        --title "fix: $jira_id" \
-        --description "Fixes $jira_id
+
+      local mr_base_desc="Fixes $jira_id
 
 ## Root Cause
 See \`$CONTEXT_DIR/${jira_id}-bugfix.md\`
 
 ## Pipeline
 Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
+
+      local mr_desc
+      mr_desc="$(build_pr_body "$jira_id" "$mr_base_desc")"
+
+      glab mr create \
+        --source-branch "$branch" \
+        --target-branch "$base" \
+        --title "fix: $jira_id" \
+        --description "$mr_desc"
       success "Merge request created!"
 
       # Update Jira status
@@ -1225,6 +1241,8 @@ pipeline_github_feature() {
     # --- Create feature branch ---
     create_feature_branch "feat" "$id"
   fi
+
+  write_active_spec "$id"
 
   # --- Step 1: Requirements Engineering ---
   if ! should_skip_step 1; then
@@ -1307,6 +1325,7 @@ pipeline_github_feature() {
       run_claude_agent "reviewer" "Review Step $i of $todo_basename"
       save_state "github-feature" "$id" "6.$i" "review-done"
 
+      emit_step_verdict "$id" "$i" || true
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -1333,6 +1352,8 @@ Generated with \`ai-native-workflow run github-feature\`
 
 $pr_body"
       fi
+
+      pr_body="$(build_pr_body "$id" "$pr_body")"
 
       gh pr create \
         --title "feat: $issue_title" \
@@ -1377,6 +1398,8 @@ pipeline_github_issue() {
     id="issue-${issue_id}"
     create_feature_branch "fix" "$id"
   fi
+
+  write_active_spec "$id"
 
   header "Pipeline: GitHub Issue Investigation & Fix"
   info "Issue: ${BOLD}#${issue_id}${NC}"
@@ -1491,6 +1514,7 @@ ISSUE_EOF
       run_claude_agent "reviewer" "Review Step $i of ${id}-todo"
       save_state "github-issue" "$id" "6.$i" "review-done"
 
+      emit_step_verdict "$id" "$i" || true
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -1509,9 +1533,8 @@ ISSUE_EOF
       local issue_title
       issue_title=$(gh issue view "$issue_id" --json title --jq '.title' 2>/dev/null || echo "Fix issue #$issue_id")
 
-      gh pr create \
-        --title "fix: $issue_title" \
-        --body "$(cat <<PR_EOF
+      local pr_base_body
+      pr_base_body="$(cat <<PR_EOF
 Closes #${issue_id}
 
 ## Summary
@@ -1526,6 +1549,10 @@ See \`$CONTEXT_DIR/${id}-bugfix.md\`
 - Todo: \`$CONTEXT_DIR/${id}-todo.md\`
 PR_EOF
 )"
+
+      gh pr create \
+        --title "fix: $issue_title" \
+        --body "$(build_pr_body "$id" "$pr_base_body")"
       success "Pull request created!"
     fi
   fi
