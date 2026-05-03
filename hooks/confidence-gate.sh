@@ -55,6 +55,31 @@ case "$BAND" in
     exit 0
     ;;
   RED)
+    SKIP_TDD_FILE="$PROJECT_DIR/.tdd-skip"
+    if [ -f "$SKIP_TDD_FILE" ]; then
+      # Classify gates.
+      STRUCTURAL_GATES='["NO_AC","AC_NOT_TESTED"]'
+      ALL_STRUCTURAL="$(jq -n --argjson g "$GATES" --argjson s "$STRUCTURAL_GATES" \
+        '($g | length) > 0 and ($g - $s | length) == 0')"
+
+      if [ "$ALL_STRUCTURAL" = "true" ]; then
+        SKIP_REASON="$(grep '^Reason:' "$SKIP_TDD_FILE" | sed 's/^Reason: *//')"
+        jq -n \
+          --arg ts "$TS" \
+          --arg reason "${SKIP_REASON:-skip-tdd active}" \
+          --argjson gates "$GATES" \
+          '{ts:$ts, event:"override", trigger:"skip-tdd-auto", reason:$reason, gates_bypassed:$gates}' \
+          >> "$LOG"
+        echo "⚠ Confidence: RED ($SCORE/100) — auto-bypassed by /skip-tdd (structural gates only)" >&2
+        exit 0
+      else
+        echo "🚫 Confidence: RED ($SCORE/100) — gates: $GATES" >&2
+        echo "" >&2
+        echo "/skip-tdd does not bypass behavioral gates. Use /override-confidence \"<reason>\"." >&2
+        exit 2
+      fi
+    fi
+
     OVERRIDE_FILE="$PROJECT_DIR/.git/aw/override-${SPEC_ID}"
     if [ -f "$OVERRIDE_FILE" ]; then
       OVERRIDE_REASON="$(jq -r '.reason // empty' "$OVERRIDE_FILE" 2>/dev/null || echo)"
