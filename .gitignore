@@ -5,3 +5,6 @@
 .context/.pipeline-audit.log
 node_modules/
 *.env
+
+# Exploration track — throwaway prototype code per /explore skill
+spikes/
