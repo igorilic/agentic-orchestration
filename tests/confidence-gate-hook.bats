@@ -124,3 +124,20 @@ STUB
   [ "$status" -eq 2 ]
   [[ "$output" == *"log not found"* ]] || [[ "$output" == *"$LOG"* ]]
 }
+
+@test "RED with override marker: proceeds, marker deleted, override event logged" {
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  echo '{"reason":"valid reason text here that is long enough","branch":"x","ts":"2026-05-02T00:00:00Z"}' \
+    > .git/aw/override-PROJ-1
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 0 ]
+  [ ! -f ".git/aw/override-PROJ-1" ]
+
+  # override event was appended
+  run jq -s '[.[] | select(.event=="override" and .trigger=="manual")] | length' "$LOG"
+  [ "$output" = "1" ]
+}
