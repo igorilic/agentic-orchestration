@@ -1235,7 +1235,7 @@ git commit -m "feat(confidence): consume /override-confidence marker in hook"
 
 The `.tdd-skip` file lives in repo root (per `skills/skip-tdd/SKILL.md`). Format is plain text with `Reason: <text>` line.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```bash
 @test "skip-tdd active + only NO_AC: auto-bypass, exit 0, trigger=skip-tdd-auto" {
@@ -1276,9 +1276,9 @@ The `.tdd-skip` file lives in repo root (per `skills/skip-tdd/SKILL.md`). Format
 }
 ```
 
-- [ ] **Step 2: Run, verify failures**
+- [x] **Step 2: Run, verify failures**
 
-- [ ] **Step 3: Implement structural-only auto-bypass**
+- [x] **Step 3: Implement structural-only auto-bypass**
 
 In `hooks/confidence-gate.sh`, in the `RED)` case, BEFORE the existing manual-override check:
 ```bash
@@ -1311,9 +1311,9 @@ In `hooks/confidence-gate.sh`, in the `RED)` case, BEFORE the existing manual-ov
     # ... existing OVERRIDE_FILE check follows
 ```
 
-- [ ] **Step 4: Run tests, verify all pass**
+- [x] **Step 4: Run tests, verify all pass**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add hooks/confidence-gate.sh tests/confidence-gate-hook.bats

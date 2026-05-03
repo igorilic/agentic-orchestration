@@ -62,6 +62,8 @@ Add to `.context/CURRENT_SPRINT.md` as In Progress.
 Present plan, tell user: `Use tdd-developer on Step 1 of <id>-todo.md`
 
 ### 6. Emit Confidence Event
+Substitute `<id>` with the actual spec id you just used (e.g. `PROJ-123`).
+
 After writing the spec, append a `spec` event to the confidence log:
 
 ```bash

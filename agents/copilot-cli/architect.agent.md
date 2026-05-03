@@ -23,7 +23,7 @@ committable steps for the tdd-developer agent.
    Each step: what to TEST, what to IMPLEMENT, affected files
 6. Update `.context/CURRENT_SPRINT.md`
 7. Hand off: `copilot --agent=tdd-developer --prompt "Step 1 of <id>-todo.md"`
-8. Emit confidence event — after writing the spec, append a `spec` event to the confidence log:
+8. Emit confidence event — substitute `<id>` with the actual spec id you just used (e.g. `PROJ-123`). After writing the spec, append a `spec` event to the confidence log:
 
 ```bash
 LOG=".context/specs/<id>-confidence.jsonl"
