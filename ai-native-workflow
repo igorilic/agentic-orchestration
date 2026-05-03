@@ -83,11 +83,18 @@ write_file() {
 # is always the directory containing the real script file.
 _anw_resolve_source() {
   local src="${BASH_SOURCE[0]}"
+  local _resolved
   if command -v realpath >/dev/null 2>&1; then
-    realpath "$src"; return
+    if _resolved="$(realpath "$src" 2>/dev/null)"; then
+      echo "$_resolved"
+      return 0
+    fi
   fi
   if command -v greadlink >/dev/null 2>&1; then
-    greadlink -f "$src"; return
+    if _resolved="$(greadlink -f "$src" 2>/dev/null)"; then
+      echo "$_resolved"
+      return 0
+    fi
   fi
   local _guard=0
   while [ -L "$src" ]; do
@@ -100,12 +107,12 @@ _anw_resolve_source() {
     target="$(readlink "$src")"
     case "$target" in
       /*) src="$target" ;;
-      *)  src="$(cd "$(dirname "$src")" && pwd)/$target" ;;
+      *)  src="$(cd "$(dirname "$src")" && pwd -P)/$target" ;;
     esac
   done
   echo "$src"
 }
-_ANW_SCRIPT_DIR="$(cd "$(dirname "$(_anw_resolve_source)")" && pwd)"
+_ANW_SCRIPT_DIR="$(cd "$(dirname "$(_anw_resolve_source)")" && pwd -P)"
 unset -f _anw_resolve_source
 if [ -f "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" ]; then
   # shellcheck source=scripts/confidence-cli.sh
