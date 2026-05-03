@@ -9,6 +9,7 @@ For the full technical specification, see [PAPER.md](../PAPER.md).
 │  ENFORCEMENT LAYER (Hooks — Deterministic)                 │
 │  SessionStart → load context, detect stack                 │
 │  PreToolUse   → TDD gate (blocks commits without tests)   │
+│  PreToolUse   → Confidence gate (blocks PR/MR on RED)     │
 │  Notification → macOS native alerts                        │
 ├────────────────────────────────────────────────────────────┤
 │  WORKFLOW LAYER (Skills — Probabilistic)                   │
@@ -49,17 +50,23 @@ Jira Ticket
   ├─ 3. architect (Opus 4.6)
   │     Requirements + test plan → spec.md + todo.md
   │     → User approves plan
+  │     → emits spec event to <id>-confidence.jsonl
   │
   ├─ 4. tdd-developer (Sonnet 4.6) — per step
   │     RED → GREEN → REFACTOR → commit
   │
   ├─ 5. qa (Haiku 4.5) — test execution
   │     Run affected tests → pass/fail
+  │     → emits qa event
   │
   ├─ 6. reviewer (Sonnet 4.6) — MR review
   │     Review → triage → max 3 fix loops
+  │     → emits review event
+  │     → confidence per-step verdict (pauses on YELLOW/RED)
   │
-  └─ 7. glab mr create → merge request
+  ├─ 7. confidence (aggregate verdict — hook enforces RED at MR step)
+  │
+  └─ 8. glab mr create → merge request (body includes ## Confidence section)
 ```
 
 **Platform**: GitLab + Copilot CLI + Jira
@@ -83,10 +90,15 @@ Jira Incident Ticket
   │     Step 2+: implement fix
   │
   ├─ 4. qa (Haiku 4.5) → verify fix
+  │     → emits qa event
   │
   ├─ 5. reviewer (Sonnet 4.6) → review MR
+  │     → emits review event
+  │     → confidence per-step verdict (pauses on YELLOW/RED)
   │
-  └─ 6. glab mr create + update Jira
+  ├─ 6. confidence (aggregate verdict — hook enforces RED at MR step)
+  │
+  └─ 7. glab mr create + update Jira (body includes ## Confidence section)
 ```
 
 **Platform**: GitLab + Copilot CLI + Jira + Azure
@@ -107,16 +119,22 @@ specs.md / User Input
   ├─ 3. architect (Opus 4.6)
   │     Requirements → spec.md + todo.md
   │     → User approves plan
+  │     → emits spec event to <id>-confidence.jsonl
   │
   ├─ 4. tdd-developer (Sonnet 4.6) — per step
   │     RED → GREEN → REFACTOR → commit
   │
   ├─ 5. qa (Haiku 4.5) → run affected tests
+  │     → emits qa event
   │
   ├─ 6. reviewer (Sonnet 4.6) — PR review
   │     Review → triage → max 3 fix loops
+  │     → emits review event
+  │     → confidence per-step verdict (pauses on YELLOW/RED)
   │
-  └─ 7. gh pr create → pull request (Closes #issue)
+  ├─ 7. confidence (aggregate verdict — hook enforces RED at PR step)
+  │
+  └─ 8. gh pr create → pull request (Closes #issue; body includes ## Confidence section)
 ```
 
 **Platform**: GitHub + Claude Code
@@ -131,6 +149,7 @@ specs.md / User Input
   │     Reads codebase → creates spec.md + todo.md
   │     Each step: what to test, what to implement, which files
   │     → User approves the plan
+  │     → emits spec event to <id>-confidence.jsonl
   │
   ├─ 2. tdd-developer (Sonnet 4.6) — per step
   │     RED: writes failing tests → commits
@@ -140,11 +159,14 @@ specs.md / User Input
   ├─ 3. qa (Haiku 4.5)
   │     Runs only affected unit + integration tests
   │     Reports pass/fail with exact errors
+  │     → emits qa event
   │
   ├─ 4. reviewer (Sonnet 4.6)
   │     Reviews against checklist
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
   │     → User triages: [F]ix / [T]ech debt / [I]gnore
+  │     → emits review event
+  │     → confidence per-step verdict (pauses on YELLOW/RED)
   │
   └─ 5. Fix loop (max 3) → then next step
 ```
