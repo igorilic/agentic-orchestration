@@ -34,6 +34,8 @@ LAST_AGENT_OUTPUT=""  # captured after each agent run for question detection
 LAST_AGENT_TOOL=""    # "copilot" or "claude" — set by run_*_agent
 LAST_AGENT_NAME=""    # agent name — set by run_*_agent
 LAST_AGENT_PROMPT=""  # prompt used — set by run_*_agent
+AW_DRY_RUN="${AW_DRY_RUN:-0}"   # set to 1 to skip agent invocations (testing / dry-run)
+AW_SPEC_ID="${AW_SPEC_ID:-}"    # override spec id (used with AW_DRY_RUN)
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -74,6 +76,14 @@ write_file() {
     success "$description"
   fi
 }
+
+# Source confidence CLI helpers if available (provides write_active_spec,
+# emit_step_verdict, build_pr_body).
+_ANW_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" ]; then
+  # shellcheck source=scripts/confidence-cli.sh
+  source "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh"
+fi
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                     STACK DETECTION                             ║
@@ -1156,6 +1166,16 @@ Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
 
 pipeline_github_feature() {
   local specs_file="${1:-}"
+
+  # In dry-run mode, skip tool availability checks and agent invocations.
+  # Write the active-spec marker and return immediately.
+  if [ "${AW_DRY_RUN:-0}" = "1" ]; then
+    mkdir -p "$CONTEXT_DIR" .git/aw
+    local dry_spec_id="${AW_SPEC_ID:-dry-run}"
+    write_active_spec "$dry_spec_id"
+    return 0
+  fi
+
   require_claude
   require_gh
 
