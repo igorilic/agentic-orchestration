@@ -130,14 +130,101 @@ STUB
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 1 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
-  echo '{"reason":"valid reason text here that is long enough","branch":"x","ts":"2026-05-02T00:00:00Z"}' \
+  echo '{"reason":"valid reason text here that is long enough","branch":"x","ts":"2026-05-02T00:00:00Z","user":"u"}' \
     > .git/aw/override-PROJ-1
 
   run run_hook "gh pr create"
   [ "$status" -eq 0 ]
+  hook_output="$output"
   [ ! -f ".git/aw/override-PROJ-1" ]
 
-  # override event was appended
+  # stderr message: override was consumed
+  [[ "$hook_output" == *"override"* ]]
+
+  # one override event in log
   run jq -s '[.[] | select(.event=="override" and .trigger=="manual")] | length' "$LOG"
   [ "$output" = "1" ]
+
+  # reason passed through
+  run jq -rs '[.[] | select(.event=="override")] | .[0].reason' "$LOG"
+  [ "$output" = "valid reason text here that is long enough" ]
+
+  # gates captured
+  run jq -rs '[.[] | select(.event=="override")] | .[0].gates_bypassed | join(",")' "$LOG"
+  [[ "$output" == *"TEST_FAILED"* ]]
+}
+
+@test "RED with malformed override marker: blocks (exit 2), marker deleted, no override event" {
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  # Marker exists but is empty
+  : > .git/aw/override-PROJ-1
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+  [ ! -f ".git/aw/override-PROJ-1" ]
+  [[ "$output" == *"malformed"* ]] || [[ "$output" == *"missing reason"* ]]
+
+  # No override event was logged (only the verdict event)
+  run jq -s '[.[] | select(.event=="override")] | length' "$LOG"
+  [ "$output" = "0" ]
+}
+
+@test "RED with override marker missing .reason field: blocks (exit 2)" {
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  # Valid JSON but no .reason
+  echo '{"branch":"x","ts":"2026-05-02T00:00:00Z","user":"u"}' > .git/aw/override-PROJ-1
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+  [ ! -f ".git/aw/override-PROJ-1" ]
+}
+
+@test "RED with multiple gates + override: gates_bypassed captures all firing gates" {
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 1 0 0 1 0 100)"
+  # TEST_FAILED + MUST_FIX both fire
+  echo '{"reason":"emergency hotfix delivery, audit follows","branch":"x","ts":"2026-05-02T00:00:00Z","user":"u"}' \
+    > .git/aw/override-PROJ-1
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 0 ]
+
+  # gates_bypassed contains both
+  run jq -rs '[.[] | select(.event=="override")] | .[0].gates_bypassed | join(",")' "$LOG"
+  [[ "$output" == *"TEST_FAILED"* ]]
+  [[ "$output" == *"MUST_FIX"* ]]
+}
+
+@test "override is one-shot: second run on same log without marker exits 2" {
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  echo '{"reason":"valid reason text here that is long enough","branch":"x","ts":"2026-05-02T00:00:00Z","user":"u"}' \
+    > .git/aw/override-PROJ-1
+
+  # First run: marker present, override consumed
+  run run_hook "gh pr create"
+  [ "$status" -eq 0 ]
+  [ ! -f ".git/aw/override-PROJ-1" ]
+
+  # Second run: no marker, RED still fires, hook blocks
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+
+  # Only one override event in the log (not two)
+  run jq -s '[.[] | select(.event=="override")] | length' "$LOG"
+  [ "$output" = "1" ]
+
+  # Two verdict events though (one per run)
+  run jq -s '[.[] | select(.event=="verdict" and .scope=="aggregate")] | length' "$LOG"
+  [ "$output" = "2" ]
 }
