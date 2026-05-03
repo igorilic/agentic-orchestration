@@ -1619,12 +1619,12 @@ git commit -m "feat(confidence): integrate scorer into ai-native-workflow pipeli
 
 **Background:** Add a second PreToolUse hook entry. The existing tdd-gate hook already matches `Bash`; both can coexist as separate entries in the same hook list.
 
-- [ ] **Step 1: Read current settings.json**
+- [x] **Step 1: Read current settings.json**
 
 Run: `cat config/settings.json`
 Confirm the structure: `hooks.PreToolUse[0].matcher == "Bash"`, `hooks.PreToolUse[0].hooks` is an array.
 
-- [ ] **Step 2: Add confidence-gate hook entry**
+- [x] **Step 2: Add confidence-gate hook entry**
 
 Modify `config/settings.json`:
 ```json
@@ -1653,13 +1653,13 @@ Modify `config/settings.json`:
 }
 ```
 
-- [ ] **Step 3: Update installer to copy confidence-gate.sh**
+- [x] **Step 3: Update installer to copy confidence-gate.sh**
 
 Search `ai-native-workflow` for where `tdd-gate.sh` is copied to `~/.claude/hooks/`. Add `confidence-gate.sh` to the same copy step. Likewise copy `scripts/confidence.sh` to `~/.claude/scripts/`.
 
 The installer should also copy `skills/override-confidence/` to `~/.claude/skills/`.
 
-- [ ] **Step 4: Verify install on a sandbox**
+- [x] **Step 4: Verify install on a sandbox**
 
 Run:
 ```bash
@@ -1671,12 +1671,14 @@ jq '.hooks.PreToolUse[0].hooks | length' /tmp/aw-confidence-test/.claude/setting
 ```
 Expected: all paths exist; hook count is 2.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit** — done
 
 ```bash
 git add config/settings.json ai-native-workflow
 git commit -m "feat(confidence): register hook and copy scorer in installer"
 ```
+
+- [x] **Step 5: Commit** — done (e4c69b2)
 
 ---
 
