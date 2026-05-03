@@ -1770,7 +1770,21 @@ install_global_settings() {
 HOOKS_JSON_EOF
       )
       # Deep merge: existing settings + new hooks
-      jq -s '.[0] * .[1]' "$target" <(echo "$hooks_json") > "${target}.tmp"
+      # Union PreToolUse[0].hooks by .command so user-added hooks are preserved
+      # and duplicates are not created on re-install.
+      local new_temp
+      new_temp="$(mktemp /tmp/aw-hooks-new-XXXXXX.json)"
+      echo "$hooks_json" > "$new_temp"
+      local combined_hooks
+      combined_hooks="$(jq -s '
+        ((.[0].hooks.PreToolUse[0].hooks // []) + (.[1].hooks.PreToolUse[0].hooks // []))
+        | unique_by(.command)
+      ' "$target" "$new_temp")"
+      jq -s --argjson hooks "$combined_hooks" '
+        .[0] * .[1]
+        | .hooks.PreToolUse[0].hooks = $hooks
+      ' "$target" "$new_temp" > "${target}.tmp"
+      rm -f "$new_temp"
       mv "${target}.tmp" "$target"
       success "~/.claude/settings.json (merged hooks into existing)"
     else

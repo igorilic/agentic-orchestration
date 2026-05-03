@@ -66,3 +66,44 @@ teardown() {
   cmd="$(jq -r '.hooks.PreToolUse[0].hooks[1].command' "$SANDBOX/settings.json")"
   [[ "$cmd" == *"confidence-gate.sh"* ]]
 }
+
+@test "install: merge preserves user-added PreToolUse hooks" {
+  # Pre-populate sandbox with an existing settings.json that has a custom hook
+  mkdir -p "$SANDBOX"
+  cat > "$SANDBOX/settings.json" <<'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "bash ~/.claude/hooks/tdd-gate.sh", "timeout": 10},
+          {"type": "command", "command": "bash ~/.claude/hooks/my-custom-hook.sh", "timeout": 5}
+        ]
+      }
+    ]
+  }
+}
+EOF
+
+  # Run install
+  CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
+
+  # Collect all hook commands from the merged settings.json
+  output="$(jq -r '.hooks.PreToolUse[0].hooks[].command' "$SANDBOX/settings.json")"
+
+  # Assert: user's custom hook is still present
+  [[ "$output" == *"my-custom-hook.sh"* ]]
+
+  # Assert: both expected hooks are present
+  [[ "$output" == *"tdd-gate.sh"* ]]
+  [[ "$output" == *"confidence-gate.sh"* ]]
+
+  # Assert: tdd-gate appears exactly once (deduplication worked)
+  count="$(echo "$output" | grep -c 'tdd-gate.sh' || true)"
+  [ "$count" -eq 1 ]
+
+  # Assert: total hook count is 3 (tdd, confidence, custom)
+  total="$(jq '.hooks.PreToolUse[0].hooks | length' "$SANDBOX/settings.json")"
+  [ "$total" = "3" ]
+}
