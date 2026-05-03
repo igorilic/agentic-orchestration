@@ -8,10 +8,12 @@ INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
   SANDBOX="$(mktemp -d /tmp/aw-confidence-install-XXXXXX)"
+  LINKDIR=""
 }
 
 teardown() {
   rm -rf "$SANDBOX"
+  if [ -n "$LINKDIR" ]; then rm -rf "$LINKDIR"; fi
 }
 
 # Note: CLAUDE_HOME is the target .claude directory itself (not its parent).
@@ -142,4 +144,19 @@ EOF
   # User's UserPromptSubmit hook must still be present
   run jq -r '.hooks.PreToolUse[] | select(.matcher=="UserPromptSubmit") | .hooks[].command' "$SANDBOX/settings.json"
   [[ "$output" == *"my-prompt-hook.sh"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# BREW-1 Step 2: install global survives symlink invocation (brew layout)
+# ---------------------------------------------------------------------------
+
+@test "install: install global succeeds when invoked via a symlink (brew layout)" {
+  LINKDIR="$(mktemp -d /tmp/aw-brew-link-XXXXXX)"
+  ln -s "$INSTALLER" "$LINKDIR/ai-native-workflow"
+
+  CLAUDE_HOME="$SANDBOX" "$LINKDIR/ai-native-workflow" install global >/dev/null 2>&1
+  [ "$?" -eq 0 ]
+
+  [ -f "$SANDBOX/hooks/confidence-gate.sh" ]
+  [ -f "$SANDBOX/scripts/confidence-cli.sh" ]
 }

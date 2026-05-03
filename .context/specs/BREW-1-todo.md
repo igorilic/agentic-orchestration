@@ -139,9 +139,9 @@ test that exercises it through a symlink, replicating the brew layout.
   - [x] Implementation applied (helper function + internal subcommand)
   - [x] All 99 pre-existing tests still pass
   - [x] AC-1, AC-2, AC-3, AC-4 covered
-- [ ] Step 2 — Integration smoke through symlink
-  - [ ] Test added (`install: install global succeeds when invoked via a symlink`)
-  - [ ] Test passes against fixed CLI
-  - [ ] AC-5 confirmed (full bats suite green)
-- [ ] AC-6 satisfied: `tests/script-dir.bats` exists and covers AC-1..AC-3
+- [x] Step 2 — Integration smoke through symlink
+  - [x] Test added (`install: install global succeeds when invoked via a symlink`)
+  - [x] Test passes against fixed CLI
+  - [x] AC-5 confirmed (full bats suite green)
+- [x] AC-6 satisfied: `tests/script-dir.bats` exists and covers AC-1..AC-3
 - [ ] Spec marked **Done** in `.context/CURRENT_SPRINT.md`
