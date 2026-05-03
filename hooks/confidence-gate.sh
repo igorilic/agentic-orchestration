@@ -55,6 +55,20 @@ case "$BAND" in
     exit 0
     ;;
   RED)
+    OVERRIDE_FILE="$PROJECT_DIR/.git/aw/override-${SPEC_ID}"
+    if [ -f "$OVERRIDE_FILE" ]; then
+      OVERRIDE_REASON="$(jq -r '.reason' "$OVERRIDE_FILE")"
+      jq -n \
+        --arg ts "$TS" \
+        --arg reason "$OVERRIDE_REASON" \
+        --argjson gates "$GATES" \
+        '{ts:$ts, event:"override", trigger:"manual", reason:$reason, gates_bypassed:$gates}' \
+        >> "$LOG"
+      rm -f "$OVERRIDE_FILE"
+      echo "⚠ Confidence: RED ($SCORE/100) — override consumed: \"$OVERRIDE_REASON\"" >&2
+      exit 0
+    fi
+
     echo "🚫 Confidence: RED ($SCORE/100) — gates: $GATES" >&2
     echo "" >&2
     echo "Options:" >&2
