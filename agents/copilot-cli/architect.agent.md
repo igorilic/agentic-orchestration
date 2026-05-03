@@ -23,6 +23,23 @@ committable steps for the tdd-developer agent.
    Each step: what to TEST, what to IMPLEMENT, affected files
 6. Update `.context/CURRENT_SPRINT.md`
 7. Hand off: `copilot --agent=tdd-developer --prompt "Step 1 of <id>-todo.md"`
+8. Emit confidence event — substitute `<id>` with the actual spec id you just used (e.g. `PROJ-123`). After writing the spec, append a `spec` event to the confidence log:
+
+```bash
+LOG=".context/specs/<id>-confidence.jsonl"
+mkdir -p "$(dirname "$LOG")"
+
+# Build ac_items JSON from spec's AC section.
+AC_JSON='[{"id":"AC-1","text":"..."},{"id":"AC-2","text":"..."}]'  # extracted from spec
+
+jq -n \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --arg path ".context/specs/<id>-spec.md" \
+  --argjson ac "$AC_JSON" \
+  '{ts:$ts, event:"spec", spec_path:$path, ac_items:$ac}' \
+  >> "$LOG"
+```
+Each AC item must have `id` (e.g. AC-1) and `text` (the criterion).
 
 ## Rules
 - NEVER write implementation code — only specs and plans

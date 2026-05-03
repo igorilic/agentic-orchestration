@@ -213,6 +213,49 @@ copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
 # The gate allows the next commit, then re-enables
 ```
 
+## Confidence Gate
+
+After every pipeline run, a deterministic confidence verdict is computed
+from the events that `architect`, `qa`, and `reviewer` write to
+`.context/specs/<id>-confidence.jsonl`. The verdict surfaces both as a
+0–100 score and as a band (GREEN / YELLOW / RED).
+
+**The hook (`hooks/confidence-gate.sh`) blocks `gh pr create` /
+`glab mr create` on RED.** It also surfaces YELLOW as a non-blocking
+warning, and writes a `## Confidence` section into the PR/MR body.
+
+### Hard gates (any one → RED)
+- `NO_AC` — no acceptance criteria in spec
+- `TEST_FAILED` — any test failed
+- `BUILD_BROKEN` — build/typecheck broken
+- `MUST_FIX` — reviewer flagged an unresolved must-fix item
+- `AC_NOT_TESTED` — an AC item has no corresponding test
+- `TDD_BYPASSED_NO_REASON` — TDD gate bypassed without `/skip-tdd`
+
+### Scored penalties
+Score starts at 100; subtractions: −5 per should-fix, −1 per suggestion,
+−5 per step that needed a 2nd review loop, −10 more for a 3rd, −3 per
+tech-debt deferral, −2 per missing AC (cap −20), −5 if diff > 400 lines
+(−15 if > 1000).
+
+### Bands
+- `GREEN` ≥ 80 — proceed
+- `YELLOW` 60–79 — pause and prompt during pipeline; informational at PR
+- `RED` < 60 or any hard gate — block PR
+
+### Bypass
+- `/override-confidence "<reason>"` — explicit one-shot bypass; reason
+  must be ≥12 chars and not boilerplate.
+- `/skip-tdd "<reason>"` — auto-bypasses **structural** gates only
+  (`NO_AC`, `AC_NOT_TESTED`). Behavioral gates (test/build/must-fix)
+  still block.
+
+### Audit trail
+The full event history per spec lives in
+`.context/specs/<id>-confidence.jsonl` and is committed to the repo.
+Every verdict, every override, every gate fire is auditable in git
+history.
+
 ## Multi-Cluster Troubleshooting
 
 The troubleshooter agent works across 3 regional Kubernetes clusters (EMEA, APAC, NAM):
@@ -236,7 +279,8 @@ Edit `~/.claude/skills/clusters/SKILL.md` with your cluster details after instal
 - `glab` CLI (for GitLab pipelines and `/pr` skill)
 - `kubectl` (for troubleshooter)
 - `az` CLI (for Azure Application Insights queries)
-- `jq` (optional, for merging existing settings.json)
+- `jq` (required for tests; also used to merge existing settings.json)
+- `bats-core` (development only — `brew install bats-core` on macOS, `npm i -g bats` elsewhere)
 
 ## License
 

@@ -61,6 +61,45 @@ SHOULD FIX: ask [F]ix / [T]ech debt / [I]gnore
 ### Loop Limit (3 max)
 After 3 cycles: remaining issues → tech debt, proceed to next step.
 
+### 7. Emit Confidence Event
+After your final review pass for THIS step (clean or after fix loops), append a `review` event to the spec's confidence log. Emit once per step — do NOT emit per fix-loop iteration.
+
+**Determine these values from your review state:**
+- `SPEC_ID` — the spec id from your input context (e.g. `PROJ-123`). Substitute it for `<id>` in the LOG path.
+- `STEP` — the step number from `<id>-todo.md` you just reviewed (integer).
+- `LOOPS_USED` — number of fix loops that fired for this step. **0 if your first pass was clean** (no findings or only SUGGESTIONs the user ignored). 1 if one fix loop ran. 2 if two. 3 if three. Do not default to 1.
+- Findings JSON arrays — built from your categorized review:
+  - `MUST_FIX_JSON` — `[{file, line, msg}, ...]` (or `[]`)
+  - `SHOULD_FIX_JSON` — same shape
+  - `SUGGESTION_JSON` — same shape
+  - `TECH_DEBT_JSON` — `[{item: "<one-line description>"}, ...]` for items you logged to `.context/CURRENT_SPRINT.md` or `TODO.md` during triage
+
+**`DIFF_LINES`:** count of changed lines (additions + deletions). Use a robust extraction:
+```bash
+DIFF_LINES=$(git diff --shortstat HEAD~1..HEAD | grep -oE '[0-9]+' | paste -sd+ - | bc)
+DIFF_LINES=${DIFF_LINES:-0}
+```
+This sums all numeric tokens in the shortstat (files changed, insertions, deletions). Slightly over-counts by the file count but the rough churn signal is what matters at the 400/1000 thresholds.
+
+**Then emit:**
+```bash
+SPEC_ID="..."   # e.g. PROJ-123
+LOG=".context/specs/${SPEC_ID}-confidence.jsonl"
+mkdir -p "$(dirname "$LOG")"
+
+jq -n \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson step "$STEP" \
+  --argjson must "$MUST_FIX_JSON" \
+  --argjson should "$SHOULD_FIX_JSON" \
+  --argjson sugg "$SUGGESTION_JSON" \
+  --argjson loops "$LOOPS_USED" \
+  --argjson td "$TECH_DEBT_JSON" \
+  --argjson diff "$DIFF_LINES" \
+  '{ts:$ts, event:"review", step:$step, must_fix:$must, should_fix:$should, suggestion:$sugg, loops_used:$loops, tech_debt_deferrals:$td, diff_lines:$diff}' \
+  >> "$LOG"
+```
+
 ## Rules
 - NEVER modify code (tool list does not grant Write/Edit — enforced)
 - Be specific: file, line, suggested fix

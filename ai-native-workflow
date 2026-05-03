@@ -34,6 +34,8 @@ LAST_AGENT_OUTPUT=""  # captured after each agent run for question detection
 LAST_AGENT_TOOL=""    # "copilot" or "claude" — set by run_*_agent
 LAST_AGENT_NAME=""    # agent name — set by run_*_agent
 LAST_AGENT_PROMPT=""  # prompt used — set by run_*_agent
+AW_DRY_RUN="${AW_DRY_RUN:-0}"   # set to 1 to skip agent invocations (testing / dry-run)
+AW_SPEC_ID="${AW_SPEC_ID:-}"    # override spec id (used with AW_DRY_RUN)
 
 # --- Colors ---
 RED='\033[0;31m'
@@ -74,6 +76,14 @@ write_file() {
     success "$description"
   fi
 }
+
+# Source confidence CLI helpers if available (provides write_active_spec,
+# emit_step_verdict, build_pr_body).
+_ANW_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" ]; then
+  # shellcheck source=scripts/confidence-cli.sh
+  source "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh"
+fi
 
 # ╔══════════════════════════════════════════════════════════════════╗
 # ║                     STACK DETECTION                             ║
@@ -831,6 +841,7 @@ pipeline_gitlab_feature() {
   enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
+  write_active_spec "$jira_id"
   local NI_SUFFIX
   NI_SUFFIX=$(build_ni_suffix)
 
@@ -934,6 +945,7 @@ pipeline_gitlab_feature() {
       run_copilot_agent "reviewer" "Review Step $i of $jira_id"
       save_state "gitlab-feature" "$jira_id" "6.$i" "review-done"
 
+      emit_step_verdict "$jira_id" "$i"
       run_triage "copilot" "$jira_id" "$i"
     fi
   done
@@ -947,11 +959,8 @@ pipeline_gitlab_feature() {
       local base
       base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
       git push -u origin "$branch"
-      glab mr create \
-        --source-branch "$branch" \
-        --target-branch "$base" \
-        --title "feat: $jira_id" \
-        --description "Closes $jira_id
+
+      local mr_base_desc="Closes $jira_id
 
 ## Pipeline
 Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
@@ -961,6 +970,15 @@ Generated with \`ai-native-workflow run gitlab-feature $jira_id\`
 - Test Plan: \`$CONTEXT_DIR/${jira_id}-testplan.md\`
 - Spec: \`$CONTEXT_DIR/${jira_id}-spec.md\`
 - Todo: \`$CONTEXT_DIR/${jira_id}-todo.md\`"
+
+      local mr_desc
+      mr_desc="$(build_pr_body "$jira_id" "$mr_base_desc")"
+
+      glab mr create \
+        --source-branch "$branch" \
+        --target-branch "$base" \
+        --title "feat: $jira_id" \
+        --description "$mr_desc"
       success "Merge request created!"
     fi
   fi
@@ -986,6 +1004,7 @@ pipeline_gitlab_incident() {
   enable_pipeline_error_trap
 
   mkdir -p "$CONTEXT_DIR"
+  write_active_spec "$jira_id"
   local NI_SUFFIX
   NI_SUFFIX=$(build_ni_suffix)
 
@@ -1114,6 +1133,7 @@ pipeline_gitlab_incident() {
       run_copilot_agent "reviewer" "Review Step $i of $jira_id bugfix"
       save_state "gitlab-incident" "$jira_id" "5.$i" "review-done"
 
+      emit_step_verdict "$jira_id" "$i"
       run_triage "copilot" "$jira_id" "$i"
     fi
   done
@@ -1127,17 +1147,23 @@ pipeline_gitlab_incident() {
       local base
       base=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@' || echo "main")
       git push -u origin "$branch"
-      glab mr create \
-        --source-branch "$branch" \
-        --target-branch "$base" \
-        --title "fix: $jira_id" \
-        --description "Fixes $jira_id
+
+      local mr_base_desc="Fixes $jira_id
 
 ## Root Cause
 See \`$CONTEXT_DIR/${jira_id}-bugfix.md\`
 
 ## Pipeline
 Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
+
+      local mr_desc
+      mr_desc="$(build_pr_body "$jira_id" "$mr_base_desc")"
+
+      glab mr create \
+        --source-branch "$branch" \
+        --target-branch "$base" \
+        --title "fix: $jira_id" \
+        --description "$mr_desc"
       success "Merge request created!"
 
       # Update Jira status
@@ -1156,6 +1182,16 @@ Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
 
 pipeline_github_feature() {
   local specs_file="${1:-}"
+
+  # In dry-run mode, skip tool availability checks and agent invocations.
+  # Write the active-spec marker and return immediately.
+  if [ "${AW_DRY_RUN:-0}" = "1" ]; then
+    mkdir -p "$CONTEXT_DIR" .git/aw
+    local dry_spec_id="${AW_SPEC_ID:-dry-run}"
+    write_active_spec "$dry_spec_id"
+    return 0
+  fi
+
   require_claude
   require_gh
 
@@ -1205,6 +1241,8 @@ pipeline_github_feature() {
     # --- Create feature branch ---
     create_feature_branch "feat" "$id"
   fi
+
+  write_active_spec "$id"
 
   # --- Step 1: Requirements Engineering ---
   if ! should_skip_step 1; then
@@ -1287,6 +1325,7 @@ pipeline_github_feature() {
       run_claude_agent "reviewer" "Review Step $i of $todo_basename"
       save_state "github-feature" "$id" "6.$i" "review-done"
 
+      emit_step_verdict "$id" "$i"
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -1313,6 +1352,8 @@ Generated with \`ai-native-workflow run github-feature\`
 
 $pr_body"
       fi
+
+      pr_body="$(build_pr_body "$id" "$pr_body")"
 
       gh pr create \
         --title "feat: $issue_title" \
@@ -1357,6 +1398,8 @@ pipeline_github_issue() {
     id="issue-${issue_id}"
     create_feature_branch "fix" "$id"
   fi
+
+  write_active_spec "$id"
 
   header "Pipeline: GitHub Issue Investigation & Fix"
   info "Issue: ${BOLD}#${issue_id}${NC}"
@@ -1471,6 +1514,7 @@ ISSUE_EOF
       run_claude_agent "reviewer" "Review Step $i of ${id}-todo"
       save_state "github-issue" "$id" "6.$i" "review-done"
 
+      emit_step_verdict "$id" "$i"
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -1489,9 +1533,8 @@ ISSUE_EOF
       local issue_title
       issue_title=$(gh issue view "$issue_id" --json title --jq '.title' 2>/dev/null || echo "Fix issue #$issue_id")
 
-      gh pr create \
-        --title "fix: $issue_title" \
-        --body "$(cat <<PR_EOF
+      local pr_base_body
+      pr_base_body="$(cat <<PR_EOF
 Closes #${issue_id}
 
 ## Summary
@@ -1506,6 +1549,10 @@ See \`$CONTEXT_DIR/${id}-bugfix.md\`
 - Todo: \`$CONTEXT_DIR/${id}-todo.md\`
 PR_EOF
 )"
+
+      gh pr create \
+        --title "fix: $issue_title" \
+        --body "$(build_pr_body "$id" "$pr_base_body")"
       success "Pull request created!"
     fi
   fi
@@ -1584,6 +1631,9 @@ install_global() {
 
   # --- Hook scripts ---
   install_global_hooks
+
+  # --- Scripts ---
+  install_global_scripts
 
   # --- Skills ---
   install_global_skills
@@ -1695,6 +1745,11 @@ install_global_settings() {
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }
@@ -1715,7 +1770,27 @@ install_global_settings() {
 HOOKS_JSON_EOF
       )
       # Deep merge: existing settings + new hooks
-      jq -s '.[0] * .[1]' "$target" <(echo "$hooks_json") > "${target}.tmp"
+      # Union PreToolUse entries by matcher, and within each matcher union hooks
+      # by .command, so user matchers and hooks are preserved on re-install.
+      # Only PreToolUse is merged this way; SessionStart and Notification are
+      # overwritten by the deep merge (.[0] * .[1]) which is safe since users
+      # rarely customise those hook types.
+      local new_temp
+      new_temp="$(mktemp /tmp/aw-hooks-new-XXXXXX.json)"
+      echo "$hooks_json" > "$new_temp"
+      jq -s '
+        . as [$existing, $new] |
+        $existing * $new |
+        .hooks.PreToolUse = (
+          (($existing.hooks.PreToolUse // []) + ($new.hooks.PreToolUse // []))
+          | group_by(.matcher)
+          | map({
+              matcher: .[0].matcher,
+              hooks: (map(.hooks) | add | unique_by(.command))
+            })
+        )
+      ' "$target" "$new_temp" > "${target}.tmp"
+      rm -f "$new_temp"
       mv "${target}.tmp" "$target"
       success "~/.claude/settings.json (merged hooks into existing)"
     else
@@ -1745,6 +1820,11 @@ HOOKS_JSON_EOF
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }
@@ -1791,6 +1871,11 @@ HOOKS_MERGE_EOF
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }
@@ -1947,6 +2032,25 @@ exit 0
 TDD_GATE_EOF
   chmod +x "$CLAUDE_DIR/hooks/tdd-gate.sh"
   success "~/.claude/hooks/tdd-gate.sh"
+
+  # --- confidence-gate.sh ---
+  cp "$_ANW_SCRIPT_DIR/hooks/confidence-gate.sh" "$CLAUDE_DIR/hooks/confidence-gate.sh"
+  chmod +x "$CLAUDE_DIR/hooks/confidence-gate.sh"
+  success "~/.claude/hooks/confidence-gate.sh"
+}
+
+install_global_scripts() {
+  header "Installing scripts"
+
+  mkdir -p "$CLAUDE_DIR/scripts"
+
+  cp "$_ANW_SCRIPT_DIR/scripts/confidence.sh" "$CLAUDE_DIR/scripts/confidence.sh"
+  chmod +x "$CLAUDE_DIR/scripts/confidence.sh"
+  success "~/.claude/scripts/confidence.sh"
+
+  cp "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" "$CLAUDE_DIR/scripts/confidence-cli.sh"
+  chmod +x "$CLAUDE_DIR/scripts/confidence-cli.sh"
+  success "~/.claude/scripts/confidence-cli.sh"
 }
 
 install_global_skills() {
@@ -2108,6 +2212,14 @@ After the commit, delete `.tdd-skip` to re-enable the gate.
 - `refactoring with existing coverage`
 SKILL_EOF
   success "/skip-tdd skill"
+
+  # --- /override-confidence ---
+  mkdir -p "$CLAUDE_DIR/skills/override-confidence"
+  cp "$_ANW_SCRIPT_DIR/skills/override-confidence/SKILL.md" \
+     "$CLAUDE_DIR/skills/override-confidence/SKILL.md"
+  cp "$_ANW_SCRIPT_DIR/skills/override-confidence/skill.bash" \
+     "$CLAUDE_DIR/skills/override-confidence/skill.bash"
+  success "/override-confidence skill"
 
   # --- /session-report ---
   mkdir -p "$CLAUDE_DIR/skills/session-report"
@@ -3902,9 +4014,13 @@ show_status() {
   check_file "$CLAUDE_DIR/settings.json" "settings.json (hooks)"
   check_file "$CLAUDE_DIR/hooks/session-start.sh" "hooks/session-start.sh"
   check_file "$CLAUDE_DIR/hooks/tdd-gate.sh" "hooks/tdd-gate.sh"
+  check_file "$CLAUDE_DIR/hooks/confidence-gate.sh" "hooks/confidence-gate.sh"
+  check_file "$CLAUDE_DIR/scripts/confidence.sh" "scripts/confidence.sh"
+  check_file "$CLAUDE_DIR/scripts/confidence-cli.sh" "scripts/confidence-cli.sh"
   check_file "$CLAUDE_DIR/skills/tdd/SKILL.md" "skills/tdd"
   check_file "$CLAUDE_DIR/skills/ticket/SKILL.md" "skills/ticket"
   check_file "$CLAUDE_DIR/skills/skip-tdd/SKILL.md" "skills/skip-tdd"
+  check_file "$CLAUDE_DIR/skills/override-confidence/SKILL.md" "skills/override-confidence"
   check_file "$CLAUDE_DIR/skills/session-report/SKILL.md" "skills/session-report"
   check_file "$CLAUDE_DIR/skills/adr/SKILL.md" "skills/adr"
   check_file "$CLAUDE_DIR/skills/pr/SKILL.md" "skills/pr"
@@ -4033,9 +4149,13 @@ uninstall_global() {
   local items=(
     "$CLAUDE_DIR/hooks/session-start.sh"
     "$CLAUDE_DIR/hooks/tdd-gate.sh"
+    "$CLAUDE_DIR/hooks/confidence-gate.sh"
+    "$CLAUDE_DIR/scripts/confidence.sh"
+    "$CLAUDE_DIR/scripts/confidence-cli.sh"
     "$CLAUDE_DIR/skills/tdd"
     "$CLAUDE_DIR/skills/ticket"
     "$CLAUDE_DIR/skills/skip-tdd"
+    "$CLAUDE_DIR/skills/override-confidence"
     "$CLAUDE_DIR/skills/session-report"
     "$CLAUDE_DIR/skills/adr"
     "$CLAUDE_DIR/skills/pr"
@@ -4187,12 +4307,16 @@ show_help() {
 
     Global (~/.claude/):
       CLAUDE.md                 Personal defaults + pipeline reference
-      settings.json             SessionStart + TDD gate hooks
+      settings.json             SessionStart + TDD gate + confidence gate hooks
       hooks/session-start.sh    Auto-loads context + detects stack
       hooks/tdd-gate.sh         Blocks commits without tests
+      hooks/confidence-gate.sh  Blocks PR/MR on RED confidence verdict
+      scripts/confidence.sh     Confidence scorer (deterministic)
+      scripts/confidence-cli.sh Confidence CLI helpers for pipeline
       skills/tdd/               /tdd — RED → GREEN → REFACTOR
       skills/ticket/            /ticket — Jira issue → spec + tests
       skills/skip-tdd/          /skip-tdd — Bypass TDD with reason
+      skills/override-confidence/ /override-confidence — Bypass confidence gate
       skills/session-report/    /session-report — Obsidian notes
       skills/adr/               /adr — Architecture Decision Records
       skills/pr/                /pr — Create PR/MR (gh/glab)
