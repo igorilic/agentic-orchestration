@@ -155,8 +155,10 @@ EOF
   ln -s "$INSTALLER" "$LINKDIR/ai-native-workflow"
 
   CLAUDE_HOME="$SANDBOX" "$LINKDIR/ai-native-workflow" install global >/dev/null 2>&1
-  [ "$?" -eq 0 ]
 
   [ -f "$SANDBOX/hooks/confidence-gate.sh" ]
   [ -f "$SANDBOX/scripts/confidence-cli.sh" ]
+  [ -f "$SANDBOX/scripts/confidence.sh" ]
+  [ -f "$SANDBOX/skills/override-confidence/SKILL.md" ]
+  [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
 }
