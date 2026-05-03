@@ -154,7 +154,8 @@ EOF
   LINKDIR="$(mktemp -d /tmp/aw-brew-link-XXXXXX)"
   ln -s "$INSTALLER" "$LINKDIR/ai-native-workflow"
 
-  CLAUDE_HOME="$SANDBOX" "$LINKDIR/ai-native-workflow" install global >/dev/null 2>&1
+  run env CLAUDE_HOME="$SANDBOX" "$LINKDIR/ai-native-workflow" install global
+  [ "$status" -eq 0 ]
 
   [ -f "$SANDBOX/hooks/confidence-gate.sh" ]
   [ -f "$SANDBOX/scripts/confidence-cli.sh" ]

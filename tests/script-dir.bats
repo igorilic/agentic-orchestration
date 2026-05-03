@@ -73,3 +73,38 @@ teardown() {
   [ "$status" -eq 0 ]
   [ "$output" = "$REAL_SCRIPT_DIR" ]
 }
+
+# Fix 2 regression: resolution must return the PHYSICAL path (pwd -P), not
+# the logical path.  On macOS, /tmp is a symlink to /private/tmp, so a script
+# copied into a mktemp dir has a logical path starting with /tmp and a physical
+# path starting with /private/tmp.  The pure-bash fallback and the outer
+# _ANW_SCRIPT_DIR assignment must both use pwd -P.
+# This test exercises the fallback tier by shadowing realpath and greadlink.
+@test "script-dir: pure-bash fallback returns physical path (pwd -P)" {
+  # /tmp -> /private/tmp on macOS; skip if not present
+  if [ ! -L /tmp ]; then
+    skip "/tmp is not a symlink on this OS; cannot exercise pwd -P difference"
+  fi
+
+  mkdir -p "$TMPDIR2/stubs"
+  printf '#!/bin/sh\nexit 127\n' > "$TMPDIR2/stubs/realpath"
+  printf '#!/bin/sh\nexit 127\n' > "$TMPDIR2/stubs/greadlink"
+  chmod +x "$TMPDIR2/stubs/realpath" "$TMPDIR2/stubs/greadlink"
+
+  # Place a copy of the script under a logical /tmp path
+  LOGICAL_DIR="$(mktemp -d /tmp/anw-pwdp-XXXXXX)"
+  PHYSICAL_DIR="$(cd "$LOGICAL_DIR" && pwd -P)"
+
+  # Sanity: paths must differ; if they don't, skip
+  if [ "$LOGICAL_DIR" = "$PHYSICAL_DIR" ]; then
+    rm -rf "$LOGICAL_DIR"
+    skip "mktemp returned an already-physical path; cannot exercise pwd -P difference"
+  fi
+
+  cp "$INSTALLER" "$LOGICAL_DIR/ai-native-workflow"
+  run env PATH="$TMPDIR2/stubs:/usr/bin:/bin" "$LOGICAL_DIR/ai-native-workflow" __print-script-dir
+  rm -rf "$LOGICAL_DIR"
+  [ "$status" -eq 0 ]
+  # Must be the PHYSICAL path, not the logical /tmp/... one
+  [ "$output" = "$PHYSICAL_DIR" ]
+}
