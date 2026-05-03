@@ -42,6 +42,25 @@ teardown() {
   [ -f ".git/aw/active-spec" ]
 }
 
+# Fix 3: write_active_spec validates spec id pattern
+@test "write_active_spec: rejects spec id with path traversal characters" {
+  source "$CLI_HELPER"
+  run bash -c "source $CLI_HELPER && write_active_spec '../../etc/passwd'"
+  [ "$status" -ne 0 ]
+}
+
+@test "write_active_spec: rejects spec id with slashes" {
+  source "$CLI_HELPER"
+  run bash -c "source $CLI_HELPER && write_active_spec 'PROJ/123'"
+  [ "$status" -ne 0 ]
+}
+
+@test "write_active_spec: accepts valid alphanumeric-dot-dash-underscore id" {
+  source "$CLI_HELPER"
+  run bash -c "source $CLI_HELPER && write_active_spec 'PROJ-42.feature_1'"
+  [ "$status" -eq 0 ]
+}
+
 # ---------------------------------------------------------------------------
 # build_pr_body
 # ---------------------------------------------------------------------------
@@ -146,6 +165,50 @@ teardown() {
   result="$(emit_step_verdict "PROJ-1" 1)"
   [[ "$result" == *"confidence"* ]]
   [[ "$result" == *"GREEN"* ]]
+}
+
+# Fix 1: emit_step_verdict must not prompt — purely informational
+@test "emit_step_verdict: does not prompt — runs to completion non-interactively" {
+  # No stdin redirection; if the function tried to prompt, the test would hang.
+  source "$CLI_HELPER"
+
+  mkdir -p .context/specs
+  make_log ".context/specs/SMOKE-confidence.jsonl" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 4 0 1 0 100)"
+
+  run timeout 3 bash -c "source $CLI_HELPER && emit_step_verdict SMOKE 1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"YELLOW"* ]]
+}
+
+# Fix 5: build_pr_body includes failing gate names when RED
+@test "build_pr_body: includes failing gate names when RED" {
+  source "$CLI_HELPER"
+  mkdir -p .context/specs
+  make_log ".context/specs/X-confidence.jsonl" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  result="$(build_pr_body X "Initial body")"
+  [[ "$result" == *"## Confidence"* ]]
+  [[ "$result" == *"RED"* ]]
+  [[ "$result" == *"TEST_FAILED"* ]]
+}
+
+@test "build_pr_body: omits failing-gates line when GREEN" {
+  source "$CLI_HELPER"
+  mkdir -p .context/specs
+  make_log ".context/specs/X-confidence.jsonl" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  result="$(build_pr_body X "Initial body")"
+  [[ "$result" == *"GREEN"* ]]
+  [[ "$result" != *"Failing gates"* ]]
 }
 
 # ---------------------------------------------------------------------------

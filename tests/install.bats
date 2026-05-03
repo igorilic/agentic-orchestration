@@ -107,3 +107,39 @@ EOF
   total="$(jq '.hooks.PreToolUse[0].hooks | length' "$SANDBOX/settings.json")"
   [ "$total" = "3" ]
 }
+
+# ---------------------------------------------------------------------------
+# Fix 4: settings merge preserves multiple user-defined matchers
+# ---------------------------------------------------------------------------
+
+@test "install: merge preserves user's multiple matchers in PreToolUse" {
+  mkdir -p "$SANDBOX"
+  cat > "$SANDBOX/settings.json" <<'EOF'
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "bash ~/.claude/hooks/tdd-gate.sh", "timeout": 10}]
+      },
+      {
+        "matcher": "UserPromptSubmit",
+        "hooks": [{"type": "command", "command": "bash ~/.claude/hooks/my-prompt-hook.sh", "timeout": 5}]
+      }
+    ]
+  }
+}
+EOF
+
+  CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
+  [ "$?" -eq 0 ]
+
+  # Both matchers must be present after merge
+  matchers="$(jq -r '.hooks.PreToolUse[].matcher' "$SANDBOX/settings.json")"
+  [[ "$matchers" == *"Bash"* ]]
+  [[ "$matchers" == *"UserPromptSubmit"* ]]
+
+  # User's UserPromptSubmit hook must still be present
+  run jq -r '.hooks.PreToolUse[] | select(.matcher=="UserPromptSubmit") | .hooks[].command' "$SANDBOX/settings.json"
+  [[ "$output" == *"my-prompt-hook.sh"* ]]
+}

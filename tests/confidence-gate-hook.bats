@@ -286,3 +286,33 @@ STUB
   run jq -rs '[.[] | select(.event=="override")] | .[0].reason' "$LOG"
   [ "$output" = "skip-tdd active" ]
 }
+
+# ---------------------------------------------------------------------------
+# Fix 2: fail-closed when scorer errors
+# ---------------------------------------------------------------------------
+
+@test "scorer crash: hook fails closed (exit 2)" {
+  # Create a malformed log that confidence.sh can't parse
+  echo 'not valid json at all' > "$LOG"
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"scorer"* ]] || [[ "$output" == *"safety"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# Fix 3: SPEC_ID path traversal validation
+# ---------------------------------------------------------------------------
+
+@test "spec id with path traversal: blocked (exit 2)" {
+  echo "../../etc/passwd" > .git/aw/active-spec
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"invalid spec id"* ]]
+}
+
+@test "spec id with slashes: blocked (exit 2)" {
+  echo "PROJ/123" > .git/aw/active-spec
+  run run_hook "gh pr create"
+  [ "$status" -eq 2 ]
+}

@@ -397,3 +397,21 @@ teardown() {
   echo "$output" | jq -e '.gates | index("TDD_BYPASSED_NO_REASON") != null'
   echo "$output" | jq -e '.band == "RED"'
 }
+
+# ---------------------------------------------------------------------------
+# Fix 6: scope validation
+# ---------------------------------------------------------------------------
+
+@test "scope validation: --scope=step without --step exits 2" {
+  make_log "$TMPLOG" "$(spec_event '[{"id":"AC-1","text":"x"}]')"
+  run scripts/confidence.sh "$TMPLOG" --scope=step
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"usage"* ]] || [[ "$output" == *"--step"* ]]
+}
+
+@test "scope validation: unknown scope exits 2" {
+  make_log "$TMPLOG" "$(spec_event '[{"id":"AC-1","text":"x"}]')"
+  run scripts/confidence.sh "$TMPLOG" --scope=quarterly
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"unknown"* ]] || [[ "$output" == *"usage"* ]]
+}
