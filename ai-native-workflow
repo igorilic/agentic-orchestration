@@ -79,7 +79,28 @@ write_file() {
 
 # Source confidence CLI helpers if available (provides write_active_spec,
 # emit_step_verdict, build_pr_body).
-_ANW_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve BASH_SOURCE[0] through any symlink chain so $_ANW_SCRIPT_DIR
+# is always the directory containing the real script file.
+_anw_resolve_source() {
+  local src="${BASH_SOURCE[0]}"
+  if command -v realpath >/dev/null 2>&1; then
+    realpath "$src"; return
+  fi
+  if command -v greadlink >/dev/null 2>&1; then
+    greadlink -f "$src"; return
+  fi
+  while [ -L "$src" ]; do
+    local target
+    target="$(readlink "$src")"
+    case "$target" in
+      /*) src="$target" ;;
+      *)  src="$(cd "$(dirname "$src")" && pwd)/$target" ;;
+    esac
+  done
+  echo "$src"
+}
+_ANW_SCRIPT_DIR="$(cd "$(dirname "$(_anw_resolve_source)")" && pwd)"
+unset -f _anw_resolve_source
 if [ -f "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" ]; then
   # shellcheck source=scripts/confidence-cli.sh
   source "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh"
@@ -4477,6 +4498,10 @@ main() {
       ;;
     version|--version|-v)
       echo "ai-native-workflow v${VERSION}"
+      ;;
+    __print-script-dir)
+      echo "$_ANW_SCRIPT_DIR"
+      exit 0
       ;;
     *)
       error "Unknown command: $command"
