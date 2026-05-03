@@ -89,7 +89,13 @@ _anw_resolve_source() {
   if command -v greadlink >/dev/null 2>&1; then
     greadlink -f "$src"; return
   fi
+  local _guard=0
   while [ -L "$src" ]; do
+    _guard=$((_guard + 1))
+    if [ "$_guard" -gt 100 ]; then
+      echo "anw: symlink cycle detected resolving ${BASH_SOURCE[0]}" >&2
+      exit 1
+    fi
     local target
     target="$(readlink "$src")"
     case "$target" in
