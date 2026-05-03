@@ -26,6 +26,8 @@ source_skill() {
   run jq -r '.reason' ".git/aw/override-PROJ-1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"PERF-42"* ]]
+  run jq -e '.branch and .ts and .user' ".git/aw/override-PROJ-1"
+  [ "$status" -eq 0 ]
 }
 
 @test "override-confidence: rejects empty reason" {
@@ -50,4 +52,25 @@ source_skill() {
   rm .git/aw/active-spec
   run override_confidence "valid reason text here"
   [ "$status" -ne 0 ]
+}
+
+@test "override-confidence: rejects whitespace-only reason" {
+  source_skill
+  run override_confidence "   "
+  [ "$status" -ne 0 ]
+  [ ! -f ".git/aw/override-PROJ-1" ]
+}
+
+@test "override-confidence: rejects 11-char reason (boundary)" {
+  source_skill
+  run override_confidence "short valid"   # exactly 11 chars
+  [ "$status" -ne 0 ]
+  [ ! -f ".git/aw/override-PROJ-1" ]
+}
+
+@test "override-confidence: accepts exactly 12-char reason (boundary)" {
+  source_skill
+  run override_confidence "short valid!"  # exactly 12 chars
+  [ "$status" -eq 0 ]
+  [ -f ".git/aw/override-PROJ-1" ]
 }

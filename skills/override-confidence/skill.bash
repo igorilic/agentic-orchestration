@@ -31,16 +31,18 @@ override_confidence() {
     return 1
   fi
 
-  local spec_id branch ts
+  local spec_id branch ts user
   spec_id="$(cat .git/aw/active-spec)"
   branch="$(git branch --show-current 2>/dev/null || echo unknown)"
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  user="$(git config user.email 2>/dev/null || git config user.name 2>/dev/null || echo unknown)"
 
   jq -n \
     --arg reason "$reason" \
     --arg branch "$branch" \
     --arg ts "$ts" \
-    '{reason:$reason, branch:$branch, ts:$ts}' \
+    --arg user "$user" \
+    '{reason:$reason, branch:$branch, ts:$ts, user:$user}' \
     > ".git/aw/override-${spec_id}"
 
   echo "✅ /override-confidence active for spec $spec_id. Auto-clears after next PR/MR creation." >&2

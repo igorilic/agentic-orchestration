@@ -246,7 +246,7 @@ YELLOW does not block at the hook layer because the YELLOW pause already happens
 A skill mirroring `/skip-tdd`. Behavior:
 
 - Refuses empty reasons or boilerplate (`"."`, `"fix"`, `"override"`, single word, etc.).
-- Writes `.git/aw/override-<spec-id>` containing `{reason, timestamp, user}`.
+- Writes `.git/aw/override-<spec-id>` containing `{reason, branch, ts, user}`.
 - Auto-clears (file deleted) on the next hook fire, success or failure. One-shot.
 - Logs creation to the spec's confidence.jsonl as an `override` event with `trigger=manual`.
 
