@@ -61,6 +61,33 @@ SHOULD FIX: ask [F]ix / [T]ech debt / [I]gnore
 ### Loop Limit (3 max)
 After 3 cycles: remaining issues → tech debt, proceed to next step.
 
+### 7. Emit Confidence Event
+After your final review pass (whether clean or after fix loops), append a `review` event:
+
+```bash
+LOG=".context/specs/<id>-confidence.jsonl"
+
+# Build findings arrays from your categorized review.
+MUST_FIX_JSON='[{"file":"x.go","line":42,"msg":"..."}]'   # or []
+SHOULD_FIX_JSON='[]'
+SUGGESTION_JSON='[]'
+TECH_DEBT_JSON='[]'
+DIFF_LINES=$(git diff --stat HEAD~1..HEAD | tail -1 | awk '{print $4 + $6}')
+
+jq -n \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson step "$STEP" \
+  --argjson must "$MUST_FIX_JSON" \
+  --argjson should "$SHOULD_FIX_JSON" \
+  --argjson sugg "$SUGGESTION_JSON" \
+  --argjson loops "$LOOPS_USED" \
+  --argjson td "$TECH_DEBT_JSON" \
+  --argjson diff "$DIFF_LINES" \
+  '{ts:$ts, event:"review", step:$step, must_fix:$must, should_fix:$should, suggestion:$sugg, loops_used:$loops, tech_debt_deferrals:$td, diff_lines:$diff}' \
+  >> "$LOG"
+```
+`loops_used` is the number of fix-loops that ran for this step (1, 2, or 3).
+
 ## Rules
 - NEVER modify code (tool list does not grant Write/Edit — enforced)
 - Be specific: file, line, suggested fix

@@ -30,6 +30,26 @@ Run scoped tests. Include integration only if relevant.
 Pass: count, time, "Ready for review"
 Fail: each failure with exact error, counts
 
+### 5. Emit Confidence Event
+After running tests, append a `qa` event to the confidence log:
+
+```bash
+LOG=".context/specs/<id>-confidence.jsonl"
+TESTED='["AC-1","AC-3"]'  # AC ids covered by tests run for this step
+
+jq -n \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --argjson step "$STEP" \
+  --argjson passed "$PASSED" \
+  --argjson failed "$FAILED" \
+  --argjson added "$ADDED" \
+  --arg build "$BUILD_STATUS" \
+  --argjson tested "$TESTED" \
+  '{ts:$ts, event:"qa", step:$step, tests_passed:$passed, tests_failed:$failed, tests_added:$added, build_status:$build, ac_items_tested:$tested}' \
+  >> "$LOG"
+```
+Determine which AC ids the tests cover by mapping test names to spec AC numbers.
+
 ## Rules
 - NEVER modify code — only run and report
 - Run MINIMUM tests to verify the change
