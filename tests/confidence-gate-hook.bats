@@ -215,6 +215,10 @@ STUB
 
   run jq -s '[.[] | select(.event=="override" and .trigger=="skip-tdd-auto")] | length' "$LOG"
   [ "$output" = "1" ]
+
+  # AC-6: the skip-tdd reason is reused as the override reason
+  run jq -rs '[.[] | select(.event=="override")] | .[0].reason' "$LOG"
+  [ "$output" = "docs-only change" ]
 }
 
 @test "skip-tdd active + MUST_FIX: still blocks (exit 2)" {
@@ -264,4 +268,21 @@ STUB
   # Two verdict events though (one per run)
   run jq -s '[.[] | select(.event=="verdict" and .scope=="aggregate")] | length' "$LOG"
   [ "$output" = "2" ]
+}
+
+@test "skip-tdd auto-bypass: malformed .tdd-skip (no Reason: line) falls back gracefully" {
+  # marker exists but is empty / has no Reason line
+  printf 'TDD bypass active\nNo reason field here\n' > .tdd-skip
+
+  make_log "$LOG" \
+    "$(spec_event '[]')" \
+    "$(qa_event 1 5 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run run_hook "gh pr create"
+  [ "$status" -eq 0 ]
+
+  # Fallback reason was used; no crash
+  run jq -rs '[.[] | select(.event=="override")] | .[0].reason' "$LOG"
+  [ "$output" = "skip-tdd active" ]
 }

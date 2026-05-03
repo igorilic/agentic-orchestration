@@ -63,7 +63,7 @@ case "$BAND" in
         '($g | length) > 0 and ($g - $s | length) == 0')"
 
       if [ "$ALL_STRUCTURAL" = "true" ]; then
-        SKIP_REASON="$(grep '^Reason:' "$SKIP_TDD_FILE" | sed 's/^Reason: *//')"
+        SKIP_REASON="$(grep -m 1 '^Reason:' "$SKIP_TDD_FILE" | sed 's/^Reason: *//' || true)"
         jq -n \
           --arg ts "$TS" \
           --arg reason "${SKIP_REASON:-skip-tdd active}" \
