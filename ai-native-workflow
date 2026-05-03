@@ -1632,6 +1632,9 @@ install_global() {
   # --- Hook scripts ---
   install_global_hooks
 
+  # --- Scripts ---
+  install_global_scripts
+
   # --- Skills ---
   install_global_skills
 
@@ -1742,6 +1745,11 @@ install_global_settings() {
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }
@@ -1792,6 +1800,11 @@ HOOKS_JSON_EOF
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }
@@ -1838,6 +1851,11 @@ HOOKS_MERGE_EOF
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }
@@ -1994,6 +2012,25 @@ exit 0
 TDD_GATE_EOF
   chmod +x "$CLAUDE_DIR/hooks/tdd-gate.sh"
   success "~/.claude/hooks/tdd-gate.sh"
+
+  # --- confidence-gate.sh ---
+  cp "$_ANW_SCRIPT_DIR/hooks/confidence-gate.sh" "$CLAUDE_DIR/hooks/confidence-gate.sh"
+  chmod +x "$CLAUDE_DIR/hooks/confidence-gate.sh"
+  success "~/.claude/hooks/confidence-gate.sh"
+}
+
+install_global_scripts() {
+  header "Installing scripts"
+
+  mkdir -p "$CLAUDE_DIR/scripts"
+
+  cp "$_ANW_SCRIPT_DIR/scripts/confidence.sh" "$CLAUDE_DIR/scripts/confidence.sh"
+  chmod +x "$CLAUDE_DIR/scripts/confidence.sh"
+  success "~/.claude/scripts/confidence.sh"
+
+  cp "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" "$CLAUDE_DIR/scripts/confidence-cli.sh"
+  chmod +x "$CLAUDE_DIR/scripts/confidence-cli.sh"
+  success "~/.claude/scripts/confidence-cli.sh"
 }
 
 install_global_skills() {
@@ -2155,6 +2192,14 @@ After the commit, delete `.tdd-skip` to re-enable the gate.
 - `refactoring with existing coverage`
 SKILL_EOF
   success "/skip-tdd skill"
+
+  # --- /override-confidence ---
+  mkdir -p "$CLAUDE_DIR/skills/override-confidence"
+  cp "$_ANW_SCRIPT_DIR/skills/override-confidence/SKILL.md" \
+     "$CLAUDE_DIR/skills/override-confidence/SKILL.md"
+  cp "$_ANW_SCRIPT_DIR/skills/override-confidence/skill.bash" \
+     "$CLAUDE_DIR/skills/override-confidence/skill.bash"
+  success "/override-confidence skill"
 
   # --- /session-report ---
   mkdir -p "$CLAUDE_DIR/skills/session-report"
@@ -3949,9 +3994,13 @@ show_status() {
   check_file "$CLAUDE_DIR/settings.json" "settings.json (hooks)"
   check_file "$CLAUDE_DIR/hooks/session-start.sh" "hooks/session-start.sh"
   check_file "$CLAUDE_DIR/hooks/tdd-gate.sh" "hooks/tdd-gate.sh"
+  check_file "$CLAUDE_DIR/hooks/confidence-gate.sh" "hooks/confidence-gate.sh"
+  check_file "$CLAUDE_DIR/scripts/confidence.sh" "scripts/confidence.sh"
+  check_file "$CLAUDE_DIR/scripts/confidence-cli.sh" "scripts/confidence-cli.sh"
   check_file "$CLAUDE_DIR/skills/tdd/SKILL.md" "skills/tdd"
   check_file "$CLAUDE_DIR/skills/ticket/SKILL.md" "skills/ticket"
   check_file "$CLAUDE_DIR/skills/skip-tdd/SKILL.md" "skills/skip-tdd"
+  check_file "$CLAUDE_DIR/skills/override-confidence/SKILL.md" "skills/override-confidence"
   check_file "$CLAUDE_DIR/skills/session-report/SKILL.md" "skills/session-report"
   check_file "$CLAUDE_DIR/skills/adr/SKILL.md" "skills/adr"
   check_file "$CLAUDE_DIR/skills/pr/SKILL.md" "skills/pr"
@@ -4080,9 +4129,13 @@ uninstall_global() {
   local items=(
     "$CLAUDE_DIR/hooks/session-start.sh"
     "$CLAUDE_DIR/hooks/tdd-gate.sh"
+    "$CLAUDE_DIR/hooks/confidence-gate.sh"
+    "$CLAUDE_DIR/scripts/confidence.sh"
+    "$CLAUDE_DIR/scripts/confidence-cli.sh"
     "$CLAUDE_DIR/skills/tdd"
     "$CLAUDE_DIR/skills/ticket"
     "$CLAUDE_DIR/skills/skip-tdd"
+    "$CLAUDE_DIR/skills/override-confidence"
     "$CLAUDE_DIR/skills/session-report"
     "$CLAUDE_DIR/skills/adr"
     "$CLAUDE_DIR/skills/pr"
@@ -4234,12 +4287,16 @@ show_help() {
 
     Global (~/.claude/):
       CLAUDE.md                 Personal defaults + pipeline reference
-      settings.json             SessionStart + TDD gate hooks
+      settings.json             SessionStart + TDD gate + confidence gate hooks
       hooks/session-start.sh    Auto-loads context + detects stack
       hooks/tdd-gate.sh         Blocks commits without tests
+      hooks/confidence-gate.sh  Blocks PR/MR on RED confidence verdict
+      scripts/confidence.sh     Confidence scorer (deterministic)
+      scripts/confidence-cli.sh Confidence CLI helpers for pipeline
       skills/tdd/               /tdd — RED → GREEN → REFACTOR
       skills/ticket/            /ticket — Jira issue → spec + tests
       skills/skip-tdd/          /skip-tdd — Bypass TDD with reason
+      skills/override-confidence/ /override-confidence — Bypass confidence gate
       skills/session-report/    /session-report — Obsidian notes
       skills/adr/               /adr — Architecture Decision Records
       skills/pr/                /pr — Create PR/MR (gh/glab)

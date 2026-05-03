@@ -20,6 +20,11 @@
             "type": "command",
             "command": "bash ~/.claude/hooks/tdd-gate.sh",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/confidence-gate.sh",
+            "timeout": 15
           }
         ]
       }

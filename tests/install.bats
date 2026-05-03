@@ -14,50 +14,55 @@ teardown() {
   rm -rf "$SANDBOX"
 }
 
+# Note: CLAUDE_HOME is the target .claude directory itself (not its parent).
+# The installer sets CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}", so CLAUDE_HOME
+# IS the install root (e.g. /tmp/sandbox maps to /tmp/sandbox/hooks/, not
+# /tmp/sandbox/.claude/hooks/).
+
 @test "install: confidence-gate.sh is copied to hooks/" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/.claude/hooks/confidence-gate.sh" ]
+  [ -f "$SANDBOX/hooks/confidence-gate.sh" ]
 }
 
 @test "install: confidence.sh is copied to scripts/" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/.claude/scripts/confidence.sh" ]
+  [ -f "$SANDBOX/scripts/confidence.sh" ]
 }
 
 @test "install: confidence-cli.sh is copied to scripts/" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/.claude/scripts/confidence-cli.sh" ]
+  [ -f "$SANDBOX/scripts/confidence-cli.sh" ]
 }
 
 @test "install: override-confidence/SKILL.md is copied to skills/" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/.claude/skills/override-confidence/SKILL.md" ]
+  [ -f "$SANDBOX/skills/override-confidence/SKILL.md" ]
 }
 
 @test "install: override-confidence/skill.bash is copied to skills/" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/.claude/skills/override-confidence/skill.bash" ]
+  [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
 }
 
 @test "install: settings.json PreToolUse Bash hooks array has 2 entries (tdd-gate + confidence-gate)" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  count="$(jq '.hooks.PreToolUse[0].hooks | length' "$SANDBOX/.claude/settings.json")"
+  count="$(jq '.hooks.PreToolUse[0].hooks | length' "$SANDBOX/settings.json")"
   [ "$count" = "2" ]
 }
 
 @test "install: tdd-gate.sh is still present (no regression)" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/.claude/hooks/tdd-gate.sh" ]
+  [ -f "$SANDBOX/hooks/tdd-gate.sh" ]
 }
 
 @test "install: settings.json first hook is tdd-gate (order preserved)" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$SANDBOX/.claude/settings.json")"
+  cmd="$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$SANDBOX/settings.json")"
   [[ "$cmd" == *"tdd-gate.sh"* ]]
 }
 
 @test "install: settings.json second hook is confidence-gate" {
   CLAUDE_HOME="$SANDBOX" "$INSTALLER" install global >/dev/null 2>&1
-  cmd="$(jq -r '.hooks.PreToolUse[0].hooks[1].command' "$SANDBOX/.claude/settings.json")"
+  cmd="$(jq -r '.hooks.PreToolUse[0].hooks[1].command' "$SANDBOX/settings.json")"
   [[ "$cmd" == *"confidence-gate.sh"* ]]
 }
