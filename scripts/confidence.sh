@@ -16,6 +16,22 @@ done
 
 [ -f "$LOG" ] || { echo "log not found: $LOG" >&2; exit 1; }
 
+# Validate scope argument.
+case "$SCOPE" in
+  aggregate) ;;
+  step)
+    if [ -z "$STEP" ]; then
+      echo "usage: confidence.sh <log-path> --scope=step --step=N" >&2
+      exit 2
+    fi
+    ;;
+  *)
+    echo "usage: confidence.sh <log-path> [--scope=aggregate|step] [--step=N]" >&2
+    echo "  unknown scope: '$SCOPE'" >&2
+    exit 2
+    ;;
+esac
+
 # Slurp into an array. Strip irrelevant events for scope=step.
 if [ -s "$LOG" ]; then
   events="$(jq -s '.' "$LOG")"

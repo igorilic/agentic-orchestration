@@ -945,7 +945,7 @@ pipeline_gitlab_feature() {
       run_copilot_agent "reviewer" "Review Step $i of $jira_id"
       save_state "gitlab-feature" "$jira_id" "6.$i" "review-done"
 
-      emit_step_verdict "$jira_id" "$i" || true
+      emit_step_verdict "$jira_id" "$i"
       run_triage "copilot" "$jira_id" "$i"
     fi
   done
@@ -1133,7 +1133,7 @@ pipeline_gitlab_incident() {
       run_copilot_agent "reviewer" "Review Step $i of $jira_id bugfix"
       save_state "gitlab-incident" "$jira_id" "5.$i" "review-done"
 
-      emit_step_verdict "$jira_id" "$i" || true
+      emit_step_verdict "$jira_id" "$i"
       run_triage "copilot" "$jira_id" "$i"
     fi
   done
@@ -1325,7 +1325,7 @@ pipeline_github_feature() {
       run_claude_agent "reviewer" "Review Step $i of $todo_basename"
       save_state "github-feature" "$id" "6.$i" "review-done"
 
-      emit_step_verdict "$id" "$i" || true
+      emit_step_verdict "$id" "$i"
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -1514,7 +1514,7 @@ ISSUE_EOF
       run_claude_agent "reviewer" "Review Step $i of ${id}-todo"
       save_state "github-issue" "$id" "6.$i" "review-done"
 
-      emit_step_verdict "$id" "$i" || true
+      emit_step_verdict "$id" "$i"
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -1770,19 +1770,25 @@ install_global_settings() {
 HOOKS_JSON_EOF
       )
       # Deep merge: existing settings + new hooks
-      # Union PreToolUse[0].hooks by .command so user-added hooks are preserved
-      # and duplicates are not created on re-install.
+      # Union PreToolUse entries by matcher, and within each matcher union hooks
+      # by .command, so user matchers and hooks are preserved on re-install.
+      # Only PreToolUse is merged this way; SessionStart and Notification are
+      # overwritten by the deep merge (.[0] * .[1]) which is safe since users
+      # rarely customise those hook types.
       local new_temp
       new_temp="$(mktemp /tmp/aw-hooks-new-XXXXXX.json)"
       echo "$hooks_json" > "$new_temp"
-      local combined_hooks
-      combined_hooks="$(jq -s '
-        ((.[0].hooks.PreToolUse[0].hooks // []) + (.[1].hooks.PreToolUse[0].hooks // []))
-        | unique_by(.command)
-      ' "$target" "$new_temp")"
-      jq -s --argjson hooks "$combined_hooks" '
-        .[0] * .[1]
-        | .hooks.PreToolUse[0].hooks = $hooks
+      jq -s '
+        . as [$existing, $new] |
+        $existing * $new |
+        .hooks.PreToolUse = (
+          (($existing.hooks.PreToolUse // []) + ($new.hooks.PreToolUse // []))
+          | group_by(.matcher)
+          | map({
+              matcher: .[0].matcher,
+              hooks: (map(.hooks) | add | unique_by(.command))
+            })
+        )
       ' "$target" "$new_temp" > "${target}.tmp"
       rm -f "$new_temp"
       mv "${target}.tmp" "$target"

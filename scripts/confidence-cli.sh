@@ -8,8 +8,13 @@ _CONFIDENCE_CLI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # write_active_spec <spec_id>
 # Records the active spec ID so hooks can find it.
+# Rejects spec IDs that don't match [A-Za-z0-9._-]+ to prevent path traversal.
 write_active_spec() {
   local spec_id="$1"
+  if ! echo "$spec_id" | grep -qE '^[A-Za-z0-9._-]+$'; then
+    echo "error: invalid spec id '$spec_id' — must match [A-Za-z0-9._-]+" >&2
+    return 1
+  fi
   mkdir -p .git/aw
   printf '%s\n' "$spec_id" > .git/aw/active-spec
 }
@@ -29,7 +34,27 @@ build_pr_body() {
   penalties_summary="$(jq -r '.penalties | to_entries | map(select(.value != 0)) | map("\(.value) \(.key)") | join(", ")' <<<"$verdict")"
   [ -z "$penalties_summary" ] && penalties_summary="(none)"
 
-  cat <<EOF
+  local gates gates_line
+  gates="$(jq -r '.gates | join(", ")' <<<"$verdict")"
+  gates_line=""
+  if [ "$band" = "RED" ] && [ -n "$gates" ]; then
+    gates_line="Failing gates: $gates"
+  fi
+
+  if [ -n "$gates_line" ]; then
+    cat <<EOF
+$base_body
+
+## Confidence
+**$band: $score/100**
+
+$gates_line
+
+Penalties: $penalties_summary
+Audit: \`.context/specs/${spec_id}-confidence.jsonl\`
+EOF
+  else
+    cat <<EOF
 $base_body
 
 ## Confidence
@@ -38,15 +63,13 @@ $base_body
 Penalties: $penalties_summary
 Audit: \`.context/specs/${spec_id}-confidence.jsonl\`
 EOF
+  fi
 }
 
 # emit_step_verdict <spec_id> <step>
 # Invokes the scorer at scope=step, appends a verdict event to the log,
 # and prints band/score to stdout.
-# If band is not GREEN, prompts [go/fix/abort]:
-#   go    -> return 0
-#   fix   -> return 10 (caller should re-invoke reviewer)
-#   abort -> exit 130
+# Purely informational — does not prompt. run_triage owns the fix/abort flow.
 emit_step_verdict() {
   local spec_id="$1"
   local step="$2"
@@ -68,15 +91,4 @@ emit_step_verdict() {
 
   # Surface to user.
   echo "[step $step] confidence: $band ($score/100)"
-
-  # Prompt only if not GREEN.
-  if [ "$band" != "GREEN" ]; then
-    read -rp "Continue? [go/fix/abort]: " choice
-    case "$choice" in
-      go)    return 0 ;;
-      fix)   return 10 ;;
-      abort) exit 130 ;;
-      *)     echo "unrecognized; aborting" >&2; exit 1 ;;
-    esac
-  fi
 }

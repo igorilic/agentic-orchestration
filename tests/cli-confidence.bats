@@ -176,9 +176,10 @@ teardown() {
   make_log ".context/specs/SMOKE-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
-    "$(review_event 1 0 4 0 1 0 100)"
+    "$(review_event 1 0 5 0 1 0 100)"
 
-  run timeout 3 bash -c "source $CLI_HELPER && emit_step_verdict SMOKE 1"
+  local testdir="$TESTDIR"
+  run timeout 3 bash -c "cd '$testdir' && source '$CLI_HELPER' && emit_step_verdict SMOKE 1"
   [ "$status" -eq 0 ]
   [[ "$output" == *"YELLOW"* ]]
 }

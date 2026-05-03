@@ -21,7 +21,11 @@ if [ ! -f "$ACTIVE_SPEC_FILE" ]; then
   exit 2
 fi
 
-SPEC_ID="$(cat "$ACTIVE_SPEC_FILE")"
+SPEC_ID="$(cat "$ACTIVE_SPEC_FILE" | tr -d '[:space:]')"
+if ! echo "$SPEC_ID" | grep -qE '^[A-Za-z0-9._-]+$'; then
+  echo "🚫 Confidence gate: invalid spec id '$SPEC_ID' — must match [A-Za-z0-9._-]+" >&2
+  exit 2
+fi
 LOG="$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl"
 
 if [ ! -f "$LOG" ]; then
@@ -30,10 +34,19 @@ if [ ! -f "$LOG" ]; then
 fi
 
 # Compute verdict.
-VERDICT_JSON="$("$SCRIPT_DIR/../scripts/confidence.sh" "$LOG")"
-BAND="$(echo "$VERDICT_JSON" | jq -r '.band')"
-SCORE="$(echo "$VERDICT_JSON" | jq -r '.score')"
-GATES="$(echo "$VERDICT_JSON" | jq -c '.gates')"
+VERDICT_JSON="$("$SCRIPT_DIR/../scripts/confidence.sh" "$LOG" 2>&1)" || {
+  echo "🚫 Confidence gate: scorer failed — blocking as safety default." >&2
+  echo "  Scorer output: $VERDICT_JSON" >&2
+  exit 2
+}
+BAND="$(echo "$VERDICT_JSON" | jq -r '.band' 2>/dev/null)" || BAND=""
+SCORE="$(echo "$VERDICT_JSON" | jq -r '.score' 2>/dev/null)" || SCORE=""
+GATES="$(echo "$VERDICT_JSON" | jq -c '.gates' 2>/dev/null)" || GATES="[]"
+
+if [ -z "$BAND" ] || [ -z "$SCORE" ]; then
+  echo "🚫 Confidence gate: scorer output is malformed — blocking as safety default." >&2
+  exit 2
+fi
 
 # Append aggregate verdict to log.
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
