@@ -982,7 +982,7 @@ git commit -m "feat(confidence): add PreToolUse hook for PR/MR creation gating"
 
 **Background:** Mirrors `/skip-tdd`. Writes `.git/aw/override-<spec-id>` with `{reason, ts, branch}`. The hook (Task 9) consumes the marker. Refuses empty/boilerplate reasons.
 
-- [ ] **Step 1: Failing test**
+- [x] **Step 1: Failing test**
 
 Create `tests/override-confidence.bats`:
 ```bash
@@ -1040,12 +1040,12 @@ source_skill() {
 }
 ```
 
-- [ ] **Step 2: Run, verify failures**
+- [x] **Step 2: Run, verify failures**
 
 Run: `bats tests/override-confidence.bats`
 Expected: fail — `skill.bash` doesn't exist.
 
-- [ ] **Step 3: Create the skill bash function**
+- [x] **Step 3: Create the skill bash function**
 
 The skill is markdown that Claude executes. To make it testable, factor the actual bash into a separate file the skill sources.
 
@@ -1100,7 +1100,7 @@ override_confidence() {
 }
 ```
 
-- [ ] **Step 4: Create SKILL.md**
+- [x] **Step 4: Create SKILL.md**
 
 ```markdown
 ---
@@ -1134,12 +1134,12 @@ fire (success or failure). Reason is logged to the spec's confidence.jsonl
 as an `override` event with `trigger: "manual"`.
 ```
 
-- [ ] **Step 5: Run tests, verify pass**
+- [x] **Step 5: Run tests, verify pass**
 
 Run: `bats tests/override-confidence.bats`
 Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add skills/override-confidence/ tests/override-confidence.bats
