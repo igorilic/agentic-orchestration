@@ -153,3 +153,32 @@ JSON
   [ "$(jq -r '.theme' "$SANDBOX/settings.json")" = "dark" ]
   [ "$(jq -r '.beep'  "$SANDBOX/settings.json")" = "false" ]
 }
+
+# ---------------------------------------------------------------------------
+# Step 7: Graceful skip when Copilot CLI absent + closing-banner caveat
+# ---------------------------------------------------------------------------
+
+@test "install global: skips Copilot section when copilot is not on PATH" {
+  EMPTY_BIN="$(mktemp -d /tmp/aw-empty-XXXXXX)"
+  PATH="$EMPTY_BIN:/usr/bin:/bin" \
+    CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" install global >/dev/null 2>&1
+  rm -rf "$EMPTY_BIN"
+  [ ! -d "$SANDBOX/skills" ]
+  [ ! -f "$SANDBOX/copilot-instructions.md" ]
+  [ ! -f "$SANDBOX/settings.json" ]
+}
+
+@test "install global: closing banner mentions hooks-not-globally-installed caveat" {
+  output="$(run_install_global 2>&1)"
+  [[ "$output" == *"Copilot hooks are NOT installed globally"* ]]
+}
+
+@test "install global: closing banner caveat prints even when copilot is absent" {
+  EMPTY_BIN="$(mktemp -d /tmp/aw-empty-XXXXXX)"
+  output="$(PATH="$EMPTY_BIN:/usr/bin:/bin" \
+    CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" install global 2>&1)"
+  rm -rf "$EMPTY_BIN"
+  [[ "$output" == *"Copilot hooks are NOT installed globally"* ]]
+}
