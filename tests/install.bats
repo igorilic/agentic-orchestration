@@ -197,3 +197,17 @@ EOF
   ! grep -qE '^\.context/$' "$SANDBOX_PROJECT/.gitignore"
   rm -rf "$SANDBOX_PROJECT"
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 3: repo-level .gitignore shape guard
+# ---------------------------------------------------------------------------
+
+@test "repo .gitignore: does NOT contain bare .context/" {
+  ! grep -qE '^\.context/$' "$BATS_TEST_DIRNAME/../.gitignore"
+}
+
+@test "repo .gitignore: contains the three runtime entries" {
+  grep -qF '.context/.pipeline-state'    "$BATS_TEST_DIRNAME/../.gitignore"
+  grep -qF '.context/.pipeline-audit.log' "$BATS_TEST_DIRNAME/../.gitignore"
+  grep -qF '.context/specs/*.jsonl'      "$BATS_TEST_DIRNAME/../.gitignore"
+}
