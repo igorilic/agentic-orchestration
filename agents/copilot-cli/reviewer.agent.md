@@ -65,7 +65,7 @@ After your final review pass for THIS step (clean or after fix loops), append a 
   - `MUST_FIX_JSON` — `[{file, line, msg}, ...]` (or `[]`)
   - `SHOULD_FIX_JSON` — same shape
   - `SUGGESTION_JSON` — same shape
-  - `TECH_DEBT_JSON` — `[{item: "<one-line description>"}, ...]` for items you logged to `.context/CURRENT_SPRINT.md` or `TODO.md` during triage
+  - `TECH_DEBT_JSON` — `[{item: "<one-line description>"}, ...]` for items you logged to `docs/context/CURRENT_SPRINT.md` or `TODO.md` during triage
 
 **`DIFF_LINES`:** count of changed lines (additions + deletions). Use a robust extraction:
 ```bash

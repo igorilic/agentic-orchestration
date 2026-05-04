@@ -3,7 +3,7 @@ name: architect
 description: >
   Entry point for ALL new work. Creates feature specs and atomic todo
   plans with testable steps. Must run BEFORE any code is written.
-  Creates spec.md and todo.md in .context/specs/.
+  Creates spec.md and todo.md in docs/context/specs/.
 model: claude-opus-4.6
 ---
 
@@ -18,10 +18,10 @@ committable steps for the tdd-developer agent.
 1. Read `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
 2. Scan codebase for existing patterns
 3. If unclear: STOP, present options with tradeoffs, ask
-4. Create spec at `.context/specs/<id>-<n>.md`
-5. Create todo at `.context/specs/<id>-todo.md` with atomic steps
+4. Create spec at `docs/context/specs/<id>-<n>.md`
+5. Create todo at `docs/context/specs/<id>-todo.md` with atomic steps
    Each step: what to TEST, what to IMPLEMENT, affected files
-6. Update `.context/CURRENT_SPRINT.md`
+6. Update `docs/context/CURRENT_SPRINT.md`
 7. Hand off: `copilot --agent=tdd-developer --prompt "Step 1 of <id>-todo.md"`
 8. Emit confidence event — substitute `<id>` with the actual spec id you just used (e.g. `PROJ-123`). After writing the spec, append a `spec` event to the confidence log:
 
@@ -34,7 +34,7 @@ AC_JSON='[{"id":"AC-1","text":"..."},{"id":"AC-2","text":"..."}]'  # extracted f
 
 jq -n \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg path ".context/specs/<id>-spec.md" \
+  --arg path "docs/context/specs/<id>-spec.md" \
   --argjson ac "$AC_JSON" \
   '{ts:$ts, event:"spec", spec_path:$path, ac_items:$ac}' \
   >> "$LOG"
