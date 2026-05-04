@@ -150,3 +150,55 @@ teardown() {
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   [ "$(jq '.hooks.preToolUse | length' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" -eq 1 ]
 }
+
+# ---------------------------------------------------------------------------
+# Step 11: README stub + idempotency / backup-on-mismatch
+# ---------------------------------------------------------------------------
+
+@test "install project: .github/hooks/README.md exists after install" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ -f "$SANDBOX/.github/hooks/README.md" ]
+}
+
+@test "install project: .github/hooks/README.md mentions TDD gate" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  grep -qi "tdd" "$SANDBOX/.github/hooks/README.md"
+}
+
+@test "install project: .github/hooks/README.md mentions confidence gate" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  grep -qi "confidence" "$SANDBOX/.github/hooks/README.md"
+}
+
+@test "install project: second install produces no changes to dispatcher (idempotent)" {
+  # First install into a temp git repo so git status works
+  git -C "$SANDBOX" init -q
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  git -C "$SANDBOX" add .github/hooks
+  git -C "$SANDBOX" -c user.email="test@test.com" -c user.name="Test" \
+    commit -q -m "first install" --no-verify 2>/dev/null || true
+  # Second install must produce no diff
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  local status
+  status="$(git -C "$SANDBOX" status --porcelain .github/hooks/copilot-cli-dispatcher.sh)"
+  [ -z "$status" ]
+}
+
+@test "install project: hand-edited dispatcher is backed up before overwrite" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  # Hand-edit the dispatcher
+  echo "# MARKER_LINE_FOR_TEST" >> "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+  # Re-install should detect mismatch and backup
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  # A .bak.* file should exist
+  local backups
+  backups="$(ls "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh.bak."* 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$backups" -ge 1 ]
+}
+
+@test "install project: after backup overwrite, dispatcher no longer contains marker line" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  echo "# MARKER_LINE_FOR_TEST" >> "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  ! grep -q "MARKER_LINE_FOR_TEST" "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+}
