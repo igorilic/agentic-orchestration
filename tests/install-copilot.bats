@@ -204,3 +204,31 @@ JSON
   [[ "$output" == *"copilot-instructions.md"* ]]
   [[ "$output" == *"settings.json"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Step 9: Uninstall removes Copilot skills, preserves user files
+# ---------------------------------------------------------------------------
+
+@test "uninstall global: removes ~/.copilot/skills/ tree" {
+  run_install_global
+  [ -d "$SANDBOX/skills" ]
+  CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" uninstall global >/dev/null 2>&1
+  [ ! -d "$SANDBOX/skills" ]
+}
+
+@test "uninstall global: preserves copilot-instructions.md (warns instead)" {
+  run_install_global
+  output="$(CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" uninstall global 2>&1)"
+  [ -f "$SANDBOX/copilot-instructions.md" ]
+  [[ "$output" == *"copilot-instructions.md preserved"* ]] || \
+    [[ "$output" == *"copilot-instructions.md"*"preserved"* ]]
+}
+
+@test "uninstall global: preserves settings.json (warns instead)" {
+  run_install_global
+  CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" uninstall global >/dev/null 2>&1
+  [ -f "$SANDBOX/settings.json" ]
+}
