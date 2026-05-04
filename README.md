@@ -111,6 +111,8 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 
 ### Global (`~/.claude/` + `~/.copilot/`)
 
+#### Claude Code (`~/.claude/`)
+
 | Component | Purpose |
 |-----------|---------|
 | `hooks/session-start.sh` | Auto-loads context + detects stack on session start |
@@ -133,6 +135,27 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 | `agents/explorer.md` | Sonnet 4.6 — spikes/prototypes under `spikes/` |
 | `skills/explore/` | Exploratory mode entry point |
 | `skills/brainstorm/` | One-question-at-a-time spec elicitation |
+
+#### Copilot CLI (`~/.copilot/`)
+
+`install global` writes a symmetric harness for GitHub Copilot CLI alongside
+the Claude Code installation. Copilot CLI must be on `PATH` for the Copilot
+artifacts to be created. If `copilot` is not on PATH, the installer prints a
+brief notice and skips Copilot-side artifacts. The Claude side installs
+normally.
+
+| Component | Purpose |
+|-----------|---------|
+| `~/.copilot/skills/` | All skills from `skills/`, with `claude --agent=` rewritten to `copilot --agent=` in pipeline skills |
+| `~/.copilot/copilot-instructions.md` | Global AI instructions (equivalent of `CLAUDE.md`) |
+| `~/.copilot/settings.json` | Copilot CLI settings (merged additively on re-install to preserve user keys) |
+| `~/.copilot/agents/` | Agent definition files (`.agent.md`) mirroring `~/.claude/agents/` |
+
+> **Hooks asymmetry**: Claude Code hooks (`tdd-gate.sh`, `confidence-gate.sh`,
+> `session-start.sh`) are installed globally and fire on every Claude Code
+> session. GitHub Copilot CLI scopes hooks per-repository. Run
+> `ai-native-workflow install project` in each trusted repository to enable
+> Copilot repo-level hooks (COP-2; not yet shipped).
 
 ### Per-Project (generated based on detected stack)
 
