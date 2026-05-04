@@ -4031,6 +4031,11 @@ install_project_copilot_hooks() {
 
   mkdir -p "$scripts_dir"
   success ".github/hooks/scripts/ (Copilot CLI hook directories)"
+
+  # Vendor confidence scorer so the hook is self-contained (OQ-4).
+  cp "$_ANW_SCRIPT_DIR/scripts/confidence.sh" "$scripts_dir/confidence.sh"
+  chmod 0755 "$scripts_dir/confidence.sh"
+  success ".github/hooks/scripts/confidence.sh (vendored scorer)"
 }
 
 install_project_gitignore() {
