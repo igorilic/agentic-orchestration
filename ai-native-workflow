@@ -4405,6 +4405,16 @@ uninstall_global() {
       success "Removed $(echo "$item" | sed "s|$HOME|~|")"
     fi
   done
+
+  # Remove Copilot CLI skills tree
+  if [ -d "$COPILOT_SKILLS_DIR" ]; then
+    rm -rf "$COPILOT_SKILLS_DIR"
+    success "Removed $(echo "$COPILOT_SKILLS_DIR" | sed "s|$HOME|~|")"
+  fi
+
+  # Don't delete copilot-instructions.md or settings.json — just warn
+  warn "~/.copilot/copilot-instructions.md and ~/.copilot/settings.json preserved"
+
   echo ""
   success "Global uninstall complete"
 }
