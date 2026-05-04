@@ -249,3 +249,20 @@ EOF
     "$BATS_TEST_DIRNAME/../agents/copilot-cli/reviewer.agent.md" \
     "$BATS_TEST_DIRNAME/../agents/copilot-cli/architect.agent.md"
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 8: ai-native-workflow embedded heredocs use docs/context/
+# ---------------------------------------------------------------------------
+
+@test "cli: ai-native-workflow heredocs use docs/context/ for spec/sprint paths (no .context/specs/<id>-...)" {
+  # Spec, todo, requirements, bugfix, brainstorm artifacts in heredocs must reference docs/context/
+  # Confidence jsonl stays under .context/specs/ — matched separately below
+  ! rg -q '\.context/specs/[^*]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+    "$BATS_TEST_DIRNAME/../ai-native-workflow"
+}
+
+@test "cli: ai-native-workflow heredocs use docs/context/ for CURRENT_SPRINT (no .context/CURRENT_SPRINT)" {
+  # All CURRENT_SPRINT references in heredocs must point to docs/context/
+  ! rg -q '\.context/CURRENT_SPRINT' \
+    "$BATS_TEST_DIRNAME/../ai-native-workflow"
+}
