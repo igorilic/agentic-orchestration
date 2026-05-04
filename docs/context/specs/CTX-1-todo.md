@@ -240,7 +240,7 @@ Note: at this point the local `.context/CURRENT_SPRINT.md` and `.context/specs/B
 - [x] Step 5 — Claude Code agent prompts updated (test + impl)
 - [x] Step 6 — Copilot CLI agent prompts updated (test + impl)
 - [x] Step 7 — In-flight BREW-1 files migrated (`/skip-tdd`)
-- [ ] Step 8 — `ai-native-workflow` heredocs updated (test + impl)
+- [x] Step 8 — `ai-native-workflow` heredocs updated (test + impl)
 - [ ] Step 9 — `hooks/session-start.sh` updated (test + impl)
 - [ ] Step 10 — `templates/AGENTS.md` + skills updated (test + impl)
 - [ ] Step 11 — README + ARCHITECTURE updated (test + impl)
