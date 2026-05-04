@@ -1,16 +1,24 @@
 #!/usr/bin/env bats
 # Tests for COP-2: copilot-cli-dispatcher.sh behaviour
-# Steps 4 and 5: trap+filter skeleton and cwd resolution.
+# Steps 4, 5, 8, 9, 10: skeleton + gates.
 
 load 'lib/copilot-payload-helpers'
+load 'lib/confidence-helpers'
 
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
   SANDBOX="$(mktemp -d /tmp/aw-dispatcher-XXXXXX)"
+  # Initialize git repo so git-based gate logic works
+  git -C "$SANDBOX" init -q
+  git -C "$SANDBOX" config user.email "test@example.com"
+  git -C "$SANDBOX" config user.name "Test"
   # Install the dispatcher into the sandbox
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   DISPATCHER="$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+  # Standard directories for confidence gate
+  mkdir -p "$SANDBOX/.git/aw" "$SANDBOX/.context/specs"
+  LOG="$SANDBOX/.context/specs/PROJ-1-confidence.jsonl"
 }
 
 teardown() {
@@ -117,10 +125,240 @@ run_dispatcher_env() {
 }
 
 @test "dispatcher: payload cwd inside git repo -> allow (cwd resolves successfully)" {
-  git -C "$SANDBOX" init -q
   local payload
   payload="$(mk_payload "bash" "git status" "$SANDBOX")"
   run_dispatcher "$payload"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Step 8: TDD gate port
+# ---------------------------------------------------------------------------
+
+@test "tdd-gate: git commit with no test files staged -> deny with TDD GATE and Options" {
+  # Stage a non-test file
+  touch "$SANDBOX/main.go"
+  git -C "$SANDBOX" add main.go
+  local payload
+  payload="$(mk_payload "bash" "git commit -m x" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("TDD")' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("Options")' >/dev/null
+}
+
+@test "tdd-gate: git commit with .tdd-skip present -> allow" {
+  touch "$SANDBOX/main.go"
+  git -C "$SANDBOX" add main.go
+  printf 'TDD bypass active\nReason: docs-only\nBranch: main\nTime: 2026-05-02T00:00:00Z\n' \
+    > "$SANDBOX/.tdd-skip"
+  local payload
+  payload="$(mk_payload "bash" "git commit -m x" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+@test "tdd-gate: git commit --amend -> allow regardless" {
+  local payload
+  payload="$(mk_payload "bash" "git commit --amend --no-edit" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+@test "tdd-gate: git commit with staged test file (foo_test.go) -> allow" {
+  touch "$SANDBOX/foo_test.go"
+  git -C "$SANDBOX" add foo_test.go
+  local payload
+  payload="$(mk_payload "bash" "git commit -m x" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+@test "tdd-gate: git commit with all staged paths under spikes/ -> allow" {
+  mkdir -p "$SANDBOX/spikes"
+  touch "$SANDBOX/spikes/prototype.go"
+  git -C "$SANDBOX" add spikes/prototype.go
+  local payload
+  payload="$(mk_payload "bash" "git commit -m x" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+@test "tdd-gate: git status (not a commit) -> allow" {
+  local payload
+  payload="$(mk_payload "bash" "git status" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Step 9: Confidence gate happy paths
+# ---------------------------------------------------------------------------
+
+@test "confidence-gate: GREEN aggregate + gh pr create -> allow; verdict event appended" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create --title x --body y" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+  # verdict event appended
+  run jq -s '[.[] | select(.event=="verdict" and .scope=="aggregate")] | length' "$LOG"
+  [ "$output" = "1" ]
+}
+
+@test "confidence-gate: RED aggregate (TEST_FAILED) + no bypass + gh pr create -> deny with RED and TEST_FAILED; verdict appended" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create --title x --body y" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("RED")' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("TEST_FAILED")' >/dev/null
+  # verdict event appended
+  run jq -s '[.[] | select(.event=="verdict" and .scope=="aggregate")] | length' "$LOG"
+  [ "$output" = "1" ]
+}
+
+@test "confidence-gate: YELLOW aggregate + gh pr create -> allow with stderr warning" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 8 0 1 0 100)"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  local tmpfile
+  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  printf '%s' "$payload" > "$tmpfile"
+  run bash -c "bash '$DISPATCHER' < '$tmpfile' 2>&1"
+  rm -f "$tmpfile"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null || \
+    { echo "$output" | grep -q '"allow"'; }
+  [[ "$output" == *"YELLOW"* ]]
+}
+
+@test "confidence-gate: missing active-spec pointer -> deny" {
+  # No .git/aw/active-spec written
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("active-spec")' >/dev/null
+}
+
+@test "confidence-gate: glab mr create with RED -> deny (parity)" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  local payload
+  payload="$(mk_payload "bash" "glab mr create --title x" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+}
+
+@test "confidence-gate: git push (not a PR command) -> allow without scorer invocation" {
+  # No active-spec or log: if scorer were invoked this would deny
+  local payload
+  payload="$(mk_payload "bash" "git push origin main" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+# ---------------------------------------------------------------------------
+# Step 10: Confidence gate bypass paths
+# ---------------------------------------------------------------------------
+
+@test "confidence-gate bypass: RED + .tdd-skip + structural-only gates -> allow; auto-bypass event appended" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  # NO_AC fires when spec has no ACs
+  make_log "$LOG" \
+    "$(spec_event '[]')" \
+    "$(qa_event 1 5 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  printf 'TDD bypass active\nReason: docs-only change\nBranch: main\nTime: 2026-05-02T00:00:00Z\n' \
+    > "$SANDBOX/.tdd-skip"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+  # auto-bypass override event appended
+  run jq -s '[.[] | select(.event=="override" and .trigger=="skip-tdd-auto")] | length' "$LOG"
+  [ "$output" = "1" ]
+}
+
+@test "confidence-gate bypass: RED + .tdd-skip + behavioral gate (TEST_FAILED) -> deny; reason mentions override-confidence" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  printf 'TDD bypass active\nReason: docs-only change\nBranch: main\nTime: 2026-05-02T00:00:00Z\n' \
+    > "$SANDBOX/.tdd-skip"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("override-confidence")' >/dev/null
+}
+
+@test "confidence-gate bypass: RED + valid override marker -> allow; marker removed; override event appended" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  echo '{"reason":"emergency release, audit follows","branch":"main","ts":"2026-05-02T00:00:00Z","user":"u"}' \
+    > "$SANDBOX/.git/aw/override-PROJ-1"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+  # Marker removed
+  [ ! -f "$SANDBOX/.git/aw/override-PROJ-1" ]
+  # Override event appended
+  run jq -s '[.[] | select(.event=="override" and .trigger=="manual")] | length' "$LOG"
+  [ "$output" = "1" ]
+}
+
+@test "confidence-gate bypass: RED + malformed override (no reason field) -> deny; marker removed" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  # Malformed: valid JSON but no .reason field
+  echo '{"branch":"main"}' > "$SANDBOX/.git/aw/override-PROJ-1"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  # Marker removed even on malformed
+  [ ! -f "$SANDBOX/.git/aw/override-PROJ-1" ]
 }
