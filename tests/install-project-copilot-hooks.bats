@@ -2,6 +2,9 @@
 # Tests for COP-2: install_project_copilot_hooks()
 # Runs `ai-native-workflow install project` into a sandbox directory.
 
+load 'lib/copilot-payload-helpers'
+load 'lib/confidence-helpers'
+
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
@@ -201,4 +204,76 @@ teardown() {
   echo "# MARKER_LINE_FOR_TEST" >> "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   ! grep -q "MARKER_LINE_FOR_TEST" "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+}
+
+# ---------------------------------------------------------------------------
+# Step 12: End-to-end integration smoke tests
+# ---------------------------------------------------------------------------
+
+# Helper used only by smoke tests: pipe payload JSON into the installed dispatcher.
+_smoke_run_dispatcher() {
+  local sandbox="$1"
+  local payload="$2"
+  local tmpfile
+  tmpfile="$(mktemp /tmp/smoke-payload-XXXXXX.json)"
+  printf '%s' "$payload" > "$tmpfile"
+  run bash -c "cat '$tmpfile' | bash '$sandbox/.github/hooks/copilot-cli-dispatcher.sh' 2>/dev/null"
+  rm -f "$tmpfile"
+}
+
+@test "smoke: git commit payload with no staged test files is denied" {
+  # Needs a real git repo for the TDD gate to read staged files
+  git -C "$SANDBOX" init -q
+  git -C "$SANDBOX" config user.email "smoke@test.com"
+  git -C "$SANDBOX" config user.name "Smoke"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  local payload
+  payload="$(mk_payload "bash" "git commit -m test" "$SANDBOX")"
+  _smoke_run_dispatcher "$SANDBOX" "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  echo "$output" | jq -e '.permissionDecisionReason | test("TDD")' >/dev/null
+}
+
+@test "smoke: non-bash tool payload is allowed immediately" {
+  git -C "$SANDBOX" init -q
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  local payload
+  payload="$(mk_payload "read_file" "cat README.md" "$SANDBOX")"
+  _smoke_run_dispatcher "$SANDBOX" "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+@test "smoke: gh pr create with GREEN confidence log is allowed" {
+  git -C "$SANDBOX" init -q
+  git -C "$SANDBOX" config user.email "smoke@test.com"
+  git -C "$SANDBOX" config user.name "Smoke"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+
+  # Set up active spec pointer
+  mkdir -p "$SANDBOX/.git/aw" "$SANDBOX/.context/specs"
+  echo "SMOKE-1" > "$SANDBOX/.git/aw/active-spec"
+
+  # Confidence log with GREEN aggregate score
+  local log="$SANDBOX/.context/specs/SMOKE-1-confidence.jsonl"
+  make_log "$log" \
+    "$(spec_event '["AC-1"]')" \
+    "$(qa_event 1 5 0 "ok" '["AC-1"]')" \
+    "$(review_event 1 0 0 0)"
+
+  # Mock the vendored scorer to return GREEN
+  mock_confidence_scorer "$SANDBOX" "GREEN" 90 '[]'
+
+  local payload
+  payload="$(mk_payload "bash" "gh pr create --title smoke" "$SANDBOX")"
+  _smoke_run_dispatcher "$SANDBOX" "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "allow"' >/dev/null
+}
+
+@test "smoke: copilot-cli-policy.json registers dispatcher as preToolUse hook" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  local policy="$SANDBOX/.github/hooks/copilot-cli-policy.json"
+  jq -e '.hooks.preToolUse[] | select(.bash == "./copilot-cli-dispatcher.sh")' "$policy" >/dev/null
 }
