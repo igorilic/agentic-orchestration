@@ -244,8 +244,8 @@ Note: at this point the local `.context/CURRENT_SPRINT.md` and `.context/specs/B
 - [ ] Step 9 — `hooks/session-start.sh` updated (test + impl)
 - [ ] Step 10 — `templates/AGENTS.md` + skills updated (test + impl)
 - [x] Step 11 — README + ARCHITECTURE updated (test + impl)
-- [ ] Step 12 — Integration smoke test
-- [ ] Step 13 — Final audit pass + sprint board mark Done
+- [x] Step 12 — Integration smoke test
+- [x] Step 13 — Final audit pass + sprint board mark Done
 
 ## Done definition
 

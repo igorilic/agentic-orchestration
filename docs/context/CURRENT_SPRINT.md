@@ -9,14 +9,11 @@
   - Driver: tdd-developer
   - Unblocks: brew tap rollout (`spikes/brew-packaging/`)
 
+## Done
+
 - **CTX-1** — Split tracked specs from runtime state (option G)
   - Spec: `docs/context/specs/CTX-1-spec.md`
   - Todo: `docs/context/specs/CTX-1-todo.md`
-  - Steps: 13
-  - Driver: tdd-developer (Step 1)
-  - Branch: `feat/context-split`
-  - Source: `spikes/context-sharing/FINDINGS.md` (option G)
-
-## Done
-
-_(none yet in this sprint)_
+  - Steps: 13 / 13 complete
+  - Branch: `feat/context-split` (ready to PR)
+  - All 131 bats tests passing; fresh install produces new `docs/context/` layout
