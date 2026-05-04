@@ -3658,6 +3658,9 @@ install_project() {
   # --- .github/ (copilot instructions) ---
   install_project_copilot "$project_dir" "$stacks"
 
+  # --- .github/hooks/ (Copilot CLI dispatcher + vendored scorer) ---
+  install_project_copilot_hooks "$project_dir"
+
   # --- .gitignore additions ---
   install_project_gitignore "$project_dir"
 
@@ -4181,6 +4184,356 @@ EOF
       success ".github/instructions/swift.instructions.md"
     fi
   fi
+}
+
+install_project_copilot_hooks() {
+  local project_dir="$1"
+  local hooks_dir="$project_dir/.github/hooks"
+  local scripts_dir="$hooks_dir/scripts"
+
+  mkdir -p "$scripts_dir"
+  success ".github/hooks/scripts/ (Copilot CLI hook directories)"
+
+  # Vendor confidence scorer so the hook is self-contained (OQ-4).
+  cp "$_ANW_SCRIPT_DIR/scripts/confidence.sh" "$scripts_dir/confidence.sh"
+  chmod 0755 "$scripts_dir/confidence.sh"
+  success ".github/hooks/scripts/confidence.sh (vendored scorer)"
+
+  # Write the Copilot CLI dispatcher (Steps 4+5).
+  # Step 11: Write to a temp file first so we can cmp with any existing copy.
+  # If content is identical → skip (idempotent). If differs → backup, then overwrite.
+  # Using a quoted heredoc (<<'DISPATCHER_EOF') so all '$' are literal in the
+  # output script — they must be runtime variables, not install-time expansions.
+  local dispatcher="$hooks_dir/copilot-cli-dispatcher.sh"
+  local dispatcher_tmp
+  dispatcher_tmp="$(mktemp /tmp/copilot-dispatcher-XXXXXX.sh)"
+  cat > "$dispatcher_tmp" <<'DISPATCHER_EOF'
+#!/usr/bin/env bash
+# copilot-cli-dispatcher.sh — ai-native-workflow Copilot CLI pre-tool hook
+# Enforces TDD and confidence gates for GitHub Copilot CLI.
+# Contract: read JSON payload from stdin; write permissionDecision JSON to stdout.
+# CRITICAL: Must be fail-closed — crash → deny (via trap ERR below).
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# emit_deny: write deny JSON to stdout, then exit 0.
+# Exit 0 because Copilot reads the decision from stdout JSON, not exit code.
+# No stderr output — bats merges stdout+stderr into $output by default.
+# jq-free fallback: if jq is missing, printf with manual escaping preserves
+# the fail-closed guarantee (ADR-001 invariant).
+# ---------------------------------------------------------------------------
+emit_deny() {
+  local reason="${1:-hook crashed; failing closed}"
+  if command -v jq >/dev/null 2>&1; then
+    jq -nc --arg r "$reason" '{permissionDecision: "deny", permissionDecisionReason: $r}'
+  else
+    # jq-free fallback: minimal JSON via printf with manual escaping
+    local escaped="${reason//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//$'\n'/\\n}"
+    escaped="${escaped//$'\r'/}"
+    escaped="${escaped//$'\t'/\\t}"
+    printf '{"permissionDecision":"deny","permissionDecisionReason":"%s"}\n' "$escaped"
+  fi
+  exit 0
+}
+
+# Fail-closed trap: any unhandled error → deny.
+trap 'emit_deny "Copilot hook crashed unexpectedly"' ERR
+
+# Early jq presence check: deny cleanly if jq is not available.
+command -v jq >/dev/null 2>&1 || emit_deny "jq not found on PATH; cannot enforce gates"
+
+# ---------------------------------------------------------------------------
+# Read the payload exactly once from stdin.
+# jq -e fails (exit 1) on invalid JSON or null — triggers ERR trap → deny.
+# ---------------------------------------------------------------------------
+PAYLOAD="$(cat)"
+# Validate JSON and parse toolName; invalid/empty payload fails here (fail-closed).
+TOOL_NAME="$(echo "$PAYLOAD" | jq -re '.toolName')"
+
+# Filter: if toolName != "bash" allow immediately — no gate applies.
+if [ "$TOOL_NAME" != "bash" ]; then
+  jq -nc '{permissionDecision: "allow"}'
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5: Resolve the project directory.
+# Priority: payload .cwd → git rev-parse --show-toplevel.
+# ---------------------------------------------------------------------------
+PROJECT_DIR="$(echo "$PAYLOAD" | jq -r '.cwd // empty')"
+
+# Walk up via git from the given cwd (or pwd if not provided).
+_candidate="${PROJECT_DIR:-$(pwd)}"
+PROJECT_DIR="$(git -C "$_candidate" rev-parse --show-toplevel 2>/dev/null || true)"
+
+if [ -z "$PROJECT_DIR" ]; then
+  emit_deny "cannot resolve project dir"
+fi
+
+[ "${ANW_DEBUG:-0}" = "1" ] && printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR" >&2
+
+# ---------------------------------------------------------------------------
+# Step 8: TDD gate — port of hooks/tdd-gate.sh (exit-code → emit_deny/allow).
+# Only fires on bash commands that match "git commit".
+# ---------------------------------------------------------------------------
+BASH_CMD="$(echo "$PAYLOAD" | jq -re '.toolArgs | fromjson | .command' 2>/dev/null)" || \
+  emit_deny "could not extract bash command from payload (malformed toolArgs)"
+
+if echo "$BASH_CMD" | grep -qE 'git\s+commit'; then
+  # Allow amend
+  if echo "$BASH_CMD" | grep -qE -- '--amend'; then
+    jq -nc '{permissionDecision: "allow"}'
+    exit 0
+  fi
+
+  # Check bypass file
+  if [ -f "$PROJECT_DIR/.tdd-skip" ]; then
+    jq -nc '{permissionDecision: "allow"}'
+    exit 0
+  fi
+
+  # Spike-only commits skip the TDD gate
+  STAGED_FILES="$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)"
+  NON_SPIKE_FILES="$(echo "$STAGED_FILES" | grep -v '^spikes/' | grep -v '^$' || true)"
+  if [ -n "$STAGED_FILES" ] && [ -z "$NON_SPIKE_FILES" ]; then
+    jq -nc '{permissionDecision: "allow"}'
+    exit 0
+  fi
+
+  # Check for test files in staged changes
+  TEST_PATTERNS='(test|spec|_test\.|\.test\.|\.spec\.|tests/|__tests__/|Tests/|Test\.)'
+  TEST_FILES="$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null | grep -iE "$TEST_PATTERNS" || true)"
+
+  if [ -z "$TEST_FILES" ]; then
+    MSG="$(printf 'TDD gate: No test files in staged changes. Options: 1. Write tests first, stage them, commit together. 2. /skip-tdd '"'"'reason'"'"' to bypass (logged).')"
+    emit_deny "$MSG"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 9+10: Confidence gate — port of hooks/confidence-gate.sh.
+# Only fires on PR/MR creation commands.
+# ---------------------------------------------------------------------------
+SCORER="$PROJECT_DIR/.github/hooks/scripts/confidence.sh"
+
+if echo "$BASH_CMD" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$))'; then
+  ACTIVE_SPEC_FILE="$PROJECT_DIR/.git/aw/active-spec"
+  if [ ! -f "$ACTIVE_SPEC_FILE" ]; then
+    emit_deny "Confidence gate: no .git/aw/active-spec pointer. The pipeline driver writes this file. If you ran agents manually, set it explicitly: echo PROJ-123 > .git/aw/active-spec"
+  fi
+
+  SPEC_ID="$(cat "$ACTIVE_SPEC_FILE" | tr -d '[:space:]')"
+  if ! echo "$SPEC_ID" | grep -qE '^[A-Za-z0-9._-]+$'; then
+    emit_deny "Confidence gate: invalid spec id '$SPEC_ID' — must match [A-Za-z0-9._-]+"
+  fi
+
+  CONF_LOG="$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl"
+  if [ ! -f "$CONF_LOG" ]; then
+    emit_deny "Confidence gate: log not found at $CONF_LOG"
+  fi
+
+  # Run vendored scorer
+  VERDICT_JSON="$("$SCORER" "$CONF_LOG" 2>&1)" || {
+    emit_deny "Confidence gate: scorer failed — blocking as safety default."
+  }
+  BAND="$(echo "$VERDICT_JSON" | jq -r '.band' 2>/dev/null)" || BAND=""
+  SCORE="$(echo "$VERDICT_JSON" | jq -r '.score' 2>/dev/null)" || SCORE=""
+  GATES="$(echo "$VERDICT_JSON" | jq -c '.gates' 2>/dev/null)" || GATES="[]"
+
+  if [ -z "$BAND" ] || [ -z "$SCORE" ]; then
+    emit_deny "Confidence gate: scorer output is malformed — blocking as safety default."
+  fi
+
+  # Append aggregate verdict to log
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n \
+    --arg ts "$TS" \
+    --arg band "$BAND" \
+    --argjson score "$SCORE" \
+    --argjson gates "$GATES" \
+    '{ts:$ts, event:"verdict", scope:"aggregate", band:$band, score:$score, gates:$gates}' \
+    >> "$CONF_LOG"
+
+  case "$BAND" in
+    GREEN)
+      jq -nc '{permissionDecision: "allow"}'
+      exit 0
+      ;;
+    YELLOW)
+      # Include "YELLOW" in permissionDecisionReason so callers can detect the band.
+      jq -nc --arg r "Confidence: YELLOW ($SCORE/100) — proceeding with caution." \
+        '{permissionDecision: "allow", permissionDecisionReason: $r}'
+      exit 0
+      ;;
+    RED)
+      SKIP_TDD_FILE="$PROJECT_DIR/.tdd-skip"
+      if [ -f "$SKIP_TDD_FILE" ]; then
+        STRUCTURAL_GATES='["NO_AC","AC_NOT_TESTED"]'
+        ALL_STRUCTURAL="$(jq -n --argjson g "$GATES" --argjson s "$STRUCTURAL_GATES" \
+          '($g | length) > 0 and ($g - $s | length) == 0')"
+
+        if [ "$ALL_STRUCTURAL" = "true" ]; then
+          SKIP_REASON="$(grep -m 1 '^Reason:' "$SKIP_TDD_FILE" | sed 's/^Reason: *//' || true)"
+          jq -n \
+            --arg ts "$TS" \
+            --arg reason "${SKIP_REASON:-skip-tdd active}" \
+            --argjson gates "$GATES" \
+            '{ts:$ts, event:"override", trigger:"skip-tdd-auto", reason:$reason, gates_bypassed:$gates}' \
+            >> "$CONF_LOG"
+          jq -nc '{permissionDecision: "allow"}'
+          exit 0
+        else
+          MSG="$(printf 'Confidence: RED (%s/100) — gates: %s\n\n/skip-tdd does not bypass behavioral gates. Use /override-confidence "<reason>".' "$SCORE" "$GATES")"
+          emit_deny "$MSG"
+        fi
+      fi
+
+      OVERRIDE_FILE="$PROJECT_DIR/.git/aw/override-${SPEC_ID}"
+      if [ -f "$OVERRIDE_FILE" ]; then
+        if ! OVERRIDE_REASON="$(jq -re '.reason // empty' "$OVERRIDE_FILE" 2>/dev/null)"; then
+          rm -f "$OVERRIDE_FILE"
+          emit_deny "override marker is malformed; deleted"
+        fi
+        if [ -z "$OVERRIDE_REASON" ] || [ "$OVERRIDE_REASON" = "null" ]; then
+          rm -f "$OVERRIDE_FILE"
+          emit_deny "override marker has empty/null reason; deleted"
+        fi
+        jq -n \
+          --arg ts "$TS" \
+          --arg reason "$OVERRIDE_REASON" \
+          --argjson gates "$GATES" \
+          '{ts:$ts, event:"override", trigger:"manual", reason:$reason, gates_bypassed:$gates}' \
+          >> "$CONF_LOG"
+        rm -f "$OVERRIDE_FILE"
+        jq -nc '{permissionDecision: "allow"}'
+        exit 0
+      fi
+
+      emit_deny "$(printf 'Confidence gate: RED (%s/100) — gates: %s. Options: 1. Address the failing gates and retry. 2. /override-confidence "<reason>" to bypass (logged).' "$SCORE" "$GATES")"
+      ;;
+    *)
+      emit_deny "Confidence gate: unexpected band value '$BAND' — blocking as safety default."
+      ;;
+  esac
+fi
+
+# ---------------------------------------------------------------------------
+# Fall-through: no gate applies.
+# ---------------------------------------------------------------------------
+jq -nc '{permissionDecision: "allow"}'
+exit 0
+DISPATCHER_EOF
+
+  # Step 11: idempotency + backup-on-mismatch.
+  if [ -f "$dispatcher" ] && cmp -s "$dispatcher_tmp" "$dispatcher"; then
+    # Content identical — skip overwrite to avoid spurious churn.
+    rm -f "$dispatcher_tmp"
+    dim ".github/hooks/copilot-cli-dispatcher.sh already up to date"
+  else
+    if [ -f "$dispatcher" ]; then
+      cp "$dispatcher" "${dispatcher}${BACKUP_SUFFIX}"
+      dim "Backed up existing copilot-cli-dispatcher.sh"
+    fi
+    mv "$dispatcher_tmp" "$dispatcher"
+    chmod 0755 "$dispatcher"
+    success ".github/hooks/copilot-cli-dispatcher.sh (Copilot CLI dispatcher)"
+  fi
+
+  # Step 11: Write .github/hooks/README.md explaining the hook layer.
+  local readme="$hooks_dir/README.md"
+  if [ ! -f "$readme" ]; then
+    cat > "$readme" <<'README_EOF'
+# .github/hooks — AI-Native Workflow: Copilot CLI Hook Layer
+
+This directory contains the **per-project Copilot CLI hook** for
+[ai-native-workflow](https://github.com/igorIlic/agentic-orchestration).
+
+## Purpose
+
+Two quality gates are enforced at the Copilot CLI `preToolUse` hook:
+
+1. **TDD gate** — blocks `git commit` unless test files are staged.
+2. **Confidence gate** — blocks `gh pr create` / `glab mr create` when the
+   active spec's aggregate confidence score is RED.
+
+These mirror the Claude Code global hooks (`~/.claude/hooks/tdd-gate.sh` and
+`~/.claude/hooks/confidence-gate.sh`) but are **per-project** because Copilot
+CLI does not support user-global hooks — only repository-scoped ones.
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `copilot-cli-dispatcher.sh` | Single entry point; routes to TDD + confidence gates |
+| `scripts/confidence.sh` | Vendored confidence scorer (self-contained copy) |
+| `copilot-cli-policy.json` | Registers this dispatcher as a `preToolUse` hook |
+
+## Bypassing
+
+- **TDD gate**: run `/skip-tdd "reason"` — creates `.tdd-skip`; logged.
+- **Confidence gate (structural-only gates)**: `.tdd-skip` auto-bypasses
+  `NO_AC` and `AC_NOT_TESTED` gates.
+- **Confidence gate (behavioral gates)**: run `/override-confidence "reason"`
+  — creates `.git/aw/override-<spec-id>`; consumed once then deleted.
+
+## Audit Trail
+
+Every confidence gate verdict and bypass is appended to:
+
+```
+.context/specs/<spec-id>-confidence.jsonl
+```
+
+This file is gitignored (runtime state) but retained for local audit.
+
+## Asymmetry vs Claude Code
+
+| | Claude Code | Copilot CLI |
+|---|---|---|
+| Hook scope | Global (`~/.claude/hooks/`) | Per-project (`.github/hooks/`) |
+| TDD gate | `tdd-gate.sh` | `copilot-cli-dispatcher.sh` |
+| Confidence gate | `confidence-gate.sh` | `copilot-cli-dispatcher.sh` |
+| Scorer | `~/.claude/scripts/confidence.sh` | `.github/hooks/scripts/confidence.sh` (vendored) |
+README_EOF
+    success ".github/hooks/README.md (Copilot CLI hook documentation)"
+  else
+    dim ".github/hooks/README.md already exists — skipping"
+  fi
+
+  # Write / merge copilot-cli-policy.json (Steps 6 + 7).
+  local policy="$hooks_dir/copilot-cli-policy.json"
+  local tmp_policy
+  tmp_policy="$(mktemp /tmp/copilot-policy-XXXXXX.json)"
+
+  if ! command -v jq &> /dev/null; then
+    # jq not available — write a static minimal policy without merging.
+    # Any existing user entries will NOT be merged; warn accordingly.
+    warn "jq not found — writing static copilot-cli-policy.json (existing entries not merged). Install jq and re-run to merge."
+    cat > "$tmp_policy" <<'STATIC_POLICY_EOF'
+{"version":1,"hooks":{"preToolUse":[{"type":"command","bash":"./copilot-cli-dispatcher.sh","cwd":".github/hooks","timeoutSec":15,"comment":"ai-native-workflow TDD + confidence gate dispatcher"}]}}
+STATIC_POLICY_EOF
+  else
+    local dispatcher_entry
+    dispatcher_entry="$(jq -nc '{"type":"command","bash":"./copilot-cli-dispatcher.sh","cwd":".github/hooks","timeoutSec":15,"comment":"ai-native-workflow TDD + confidence gate dispatcher"}')"
+
+    if [ ! -f "$policy" ]; then
+      # Fresh install: write a minimal policy with only our dispatcher entry.
+      jq -n --argjson entry "$dispatcher_entry" \
+        '{version:1,hooks:{preToolUse:[$entry]}}' \
+        | jq -e . > "$tmp_policy"
+    else
+      # Merge: append our entry and dedupe by .bash (preserves user entries).
+      jq --argjson entry "$dispatcher_entry" \
+        '.hooks.preToolUse = ((.hooks.preToolUse // []) + [$entry] | unique_by(.bash))' \
+        "$policy" \
+        | jq -e . > "$tmp_policy"
+    fi
+  fi
+
+  mv "$tmp_policy" "$policy"
+  success ".github/hooks/copilot-cli-policy.json (Copilot CLI hook policy)"
 }
 
 install_project_gitignore() {

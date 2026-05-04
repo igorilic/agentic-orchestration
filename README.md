@@ -167,6 +167,10 @@ normally.
 | `.context/` | Architecture, conventions, glossary (installer-seeded) + runtime pipeline state (gitignored) |
 | `.github/copilot-instructions.md` | Copilot repo-wide rules |
 | `.github/instructions/*.instructions.md` | Stack-specific Copilot rules |
+| `.github/hooks/copilot-cli-dispatcher.sh` | **Copilot CLI per-project hook** — enforces TDD + confidence gates (mirrors Claude's global hooks; per-project because Copilot CLI has no user-global hook support) |
+| `.github/hooks/scripts/confidence.sh` | Vendored confidence scorer (self-contained copy; no dependency on `~/.claude/`) |
+| `.github/hooks/copilot-cli-policy.json` | Registers the dispatcher as a `preToolUse` hook; merged idempotently on re-install |
+| `.github/hooks/README.md` | Explains bypass paths (`/skip-tdd`, `/override-confidence`) and audit trail to contributors |
 | `docs/decisions/` | ADR directory |
 
 ## Stack Detection
