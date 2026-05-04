@@ -4057,15 +4057,30 @@ set -euo pipefail
 # emit_deny: write deny JSON to stdout, then exit 0.
 # Exit 0 because Copilot reads the decision from stdout JSON, not exit code.
 # No stderr output — bats merges stdout+stderr into $output by default.
+# jq-free fallback: if jq is missing, printf with manual escaping preserves
+# the fail-closed guarantee (ADR-001 invariant).
 # ---------------------------------------------------------------------------
 emit_deny() {
   local reason="${1:-hook crashed; failing closed}"
-  jq -nc --arg r "$reason" '{permissionDecision: "deny", permissionDecisionReason: $r}'
+  if command -v jq >/dev/null 2>&1; then
+    jq -nc --arg r "$reason" '{permissionDecision: "deny", permissionDecisionReason: $r}'
+  else
+    # jq-free fallback: minimal JSON via printf with manual escaping
+    local escaped="${reason//\\/\\\\}"
+    escaped="${escaped//\"/\\\"}"
+    escaped="${escaped//$'\n'/\\n}"
+    escaped="${escaped//$'\r'/}"
+    escaped="${escaped//$'\t'/\\t}"
+    printf '{"permissionDecision":"deny","permissionDecisionReason":"%s"}\n' "$escaped"
+  fi
   exit 0
 }
 
 # Fail-closed trap: any unhandled error → deny.
 trap 'emit_deny "Copilot hook crashed unexpectedly"' ERR
+
+# Early jq presence check: deny cleanly if jq is not available.
+command -v jq >/dev/null 2>&1 || emit_deny "jq not found on PATH; cannot enforce gates"
 
 # ---------------------------------------------------------------------------
 # Read the payload exactly once from stdin.
@@ -4101,7 +4116,8 @@ fi
 # Step 8: TDD gate — port of hooks/tdd-gate.sh (exit-code → emit_deny/allow).
 # Only fires on bash commands that match "git commit".
 # ---------------------------------------------------------------------------
-BASH_CMD="$(echo "$PAYLOAD" | jq -r '(.toolArgs | fromjson).command // empty' 2>/dev/null || true)"
+BASH_CMD="$(echo "$PAYLOAD" | jq -re '.toolArgs | fromjson | .command' 2>/dev/null)" || \
+  emit_deny "could not extract bash command from payload (malformed toolArgs)"
 
 if echo "$BASH_CMD" | grep -qE 'git\s+commit'; then
   # Allow amend
@@ -4129,7 +4145,7 @@ if echo "$BASH_CMD" | grep -qE 'git\s+commit'; then
   TEST_FILES="$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null | grep -iE "$TEST_PATTERNS" || true)"
 
   if [ -z "$TEST_FILES" ]; then
-    MSG="$(printf 'TDD GATE: No test files staged.\n\nOptions:\n  1. Write tests first, stage them, commit together\n  2. /skip-tdd '"'"'reason'"'"' to bypass (logged)\n\nCommon reasons: '"'"'docs-only'"'"' | '"'"'CI config'"'"' | '"'"'dependency update'"'"' | '"'"'hotfix'"'"'')"
+    MSG="$(printf 'TDD gate: No test files in staged changes. Options: 1. Write tests first, stage them, commit together. 2. /skip-tdd '"'"'reason'"'"' to bypass (logged).')"
     emit_deny "$MSG"
   fi
 fi
@@ -4143,7 +4159,7 @@ SCORER="$PROJECT_DIR/.github/hooks/scripts/confidence.sh"
 if echo "$BASH_CMD" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$))'; then
   ACTIVE_SPEC_FILE="$PROJECT_DIR/.git/aw/active-spec"
   if [ ! -f "$ACTIVE_SPEC_FILE" ]; then
-    emit_deny "Confidence gate: no .git/aw/active-spec pointer."
+    emit_deny "Confidence gate: no .git/aw/active-spec pointer. The pipeline driver writes this file. If you ran agents manually, set it explicitly: echo PROJ-123 > .git/aw/active-spec"
   fi
 
   SPEC_ID="$(cat "$ACTIVE_SPEC_FILE" | tr -d '[:space:]')"
@@ -4214,10 +4230,13 @@ if echo "$BASH_CMD" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$)
 
       OVERRIDE_FILE="$PROJECT_DIR/.git/aw/override-${SPEC_ID}"
       if [ -f "$OVERRIDE_FILE" ]; then
-        OVERRIDE_REASON="$(jq -r '.reason // empty' "$OVERRIDE_FILE" 2>/dev/null || echo)"
+        if ! OVERRIDE_REASON="$(jq -re '.reason // empty' "$OVERRIDE_FILE" 2>/dev/null)"; then
+          rm -f "$OVERRIDE_FILE"
+          emit_deny "override marker is malformed; deleted"
+        fi
         if [ -z "$OVERRIDE_REASON" ] || [ "$OVERRIDE_REASON" = "null" ]; then
           rm -f "$OVERRIDE_FILE"
-          emit_deny "Confidence gate: override marker malformed or missing reason."
+          emit_deny "override marker has empty/null reason; deleted"
         fi
         jq -n \
           --arg ts "$TS" \
@@ -4230,7 +4249,7 @@ if echo "$BASH_CMD" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$)
         exit 0
       fi
 
-      emit_deny "$(printf 'Confidence: RED (%s/100) — gates: %s\n\nOptions:\n  1. Address the failing gates and retry\n  2. /override-confidence "<reason>" to bypass (logged)' "$SCORE" "$GATES")"
+      emit_deny "$(printf 'Confidence gate: RED (%s/100) — gates: %s. Options: 1. Address the failing gates and retry. 2. /override-confidence "<reason>" to bypass (logged).' "$SCORE" "$GATES")"
       ;;
     *)
       emit_deny "Confidence gate: unexpected band value '$BAND' — blocking as safety default."
@@ -4323,23 +4342,32 @@ README_EOF
 
   # Write / merge copilot-cli-policy.json (Steps 6 + 7).
   local policy="$hooks_dir/copilot-cli-policy.json"
-  local dispatcher_entry
-  dispatcher_entry="$(jq -nc '{bash:"./copilot-cli-dispatcher.sh",cwd:".github/hooks",timeoutSec:15}')"
-
   local tmp_policy
   tmp_policy="$(mktemp /tmp/copilot-policy-XXXXXX.json)"
 
-  if [ ! -f "$policy" ]; then
-    # Fresh install: write a minimal policy with only our dispatcher entry.
-    jq -n --argjson entry "$dispatcher_entry" \
-      '{version:1,hooks:{preToolUse:[$entry]}}' \
-      | jq -e . > "$tmp_policy"
+  if ! command -v jq &> /dev/null; then
+    # jq not available — write a static minimal policy without merging.
+    # Any existing user entries will NOT be merged; warn accordingly.
+    warn "jq not found — writing static copilot-cli-policy.json (existing entries not merged). Install jq and re-run to merge."
+    cat > "$tmp_policy" <<'STATIC_POLICY_EOF'
+{"version":1,"hooks":{"preToolUse":[{"type":"command","bash":"./copilot-cli-dispatcher.sh","cwd":".github/hooks","timeoutSec":15,"comment":"ai-native-workflow TDD + confidence gate dispatcher"}]}}
+STATIC_POLICY_EOF
   else
-    # Merge: append our entry and dedupe by .bash (preserves user entries).
-    jq --argjson entry "$dispatcher_entry" \
-      '.hooks.preToolUse = ((.hooks.preToolUse // []) + [$entry] | unique_by(.bash))' \
-      "$policy" \
-      | jq -e . > "$tmp_policy"
+    local dispatcher_entry
+    dispatcher_entry="$(jq -nc '{"type":"command","bash":"./copilot-cli-dispatcher.sh","cwd":".github/hooks","timeoutSec":15,"comment":"ai-native-workflow TDD + confidence gate dispatcher"}')"
+
+    if [ ! -f "$policy" ]; then
+      # Fresh install: write a minimal policy with only our dispatcher entry.
+      jq -n --argjson entry "$dispatcher_entry" \
+        '{version:1,hooks:{preToolUse:[$entry]}}' \
+        | jq -e . > "$tmp_policy"
+    else
+      # Merge: append our entry and dedupe by .bash (preserves user entries).
+      jq --argjson entry "$dispatcher_entry" \
+        '.hooks.preToolUse = ((.hooks.preToolUse // []) + [$entry] | unique_by(.bash))' \
+        "$policy" \
+        | jq -e . > "$tmp_policy"
+    fi
   fi
 
   mv "$tmp_policy" "$policy"

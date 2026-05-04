@@ -117,6 +117,18 @@ teardown() {
   [ "$(jq -r '.hooks.preToolUse[0].timeoutSec' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" -eq 15 ]
 }
 
+@test "install project: copilot-cli-policy.json preToolUse[0].type is command" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq -r '.hooks.preToolUse[0].type' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" = "command" ]
+}
+
+@test "install project: copilot-cli-policy.json preToolUse[0].comment is non-empty" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  local comment
+  comment="$(jq -r '.hooks.preToolUse[0].comment' "$SANDBOX/.github/hooks/copilot-cli-policy.json")"
+  [ -n "$comment" ] && [ "$comment" != "null" ]
+}
+
 # ---------------------------------------------------------------------------
 # Step 7: policy JSON writer — merge path
 # ---------------------------------------------------------------------------

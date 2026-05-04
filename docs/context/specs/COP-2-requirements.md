@@ -172,7 +172,26 @@ For porting `tdd-gate.sh` and `confidence-gate.sh`:
 | `exit 0` (allow)                                | `exit 0` (no stdout JSON)                                                                                   |
 | Stderr messages (visible to Claude UI)          | Stderr messages — Copilot surfaces `permissionDecisionReason` in UI; stderr also captured in audit log      |
 
-## 5. `.github/hooks/copilot-cli-policy.json` — Target Schema
+## Superseded by ADR-001
+
+> **The two-script design described in §5, FR-2, FR-3, and FR-4 below was
+> superseded by ADR-001 before implementation began.** The accepted
+> architecture uses a **single dispatcher script**
+> (`copilot-cli-dispatcher.sh`) as the sole `preToolUse` entry, rather than
+> two separate hook scripts. The reasons are documented in
+> `docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md` (primarily:
+> undocumented Copilot short-circuit ordering, and the fail-closed requirement
+> which needs a single trap point).
+>
+> The sections below are preserved for design history. Do not use them as the
+> source of truth for implementation — use ADR-001 and
+> `docs/context/specs/COP-2-spec.md` instead.
+
+## 5. `.github/hooks/copilot-cli-policy.json` — Target Schema (superseded)
+
+> **Superseded by ADR-001.** The actual policy has one `preToolUse` entry
+> pointing to `copilot-cli-dispatcher.sh`, not the two entries below.
+> See `docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md`.
 
 The installer writes the file below verbatim (with project-aware values
 where noted). The two `preToolUse` entries map 1:1 to the Claude
@@ -212,7 +231,12 @@ The installer should not write `sessionStart`, `userPromptSubmitted`,
 **after** `install_project_copilot()` and **before** `install_project_gitignore()`.
 The new helper takes `$project_dir` as its sole argument.
 
-### FR-2 — Hook script files
+### FR-2 — Hook script files (superseded by ADR-001)
+
+> **Superseded by ADR-001.** The implementation installs a single
+> `copilot-cli-dispatcher.sh` instead of the two separate scripts below.
+> See `docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md`.
+
 The installer MUST create the following files relative to `$project_dir`:
 
 - `.github/hooks/scripts/tdd-gate.sh` — Copilot-flavored TDD gate.
@@ -222,7 +246,13 @@ The installer MUST create the following files relative to `$project_dir`:
 All three must be created with mode `0755` (or `0644` for the JSON).
 Scripts MUST start with `#!/usr/bin/env bash` and include `set -euo pipefail`.
 
-### FR-3 — TDD gate behavior parity
+### FR-3 — TDD gate behavior parity (superseded by ADR-001)
+
+> **Superseded by ADR-001.** TDD gate logic is now embedded directly in
+> `copilot-cli-dispatcher.sh` rather than a separate `tdd-gate.sh` script.
+> The behavioral requirements below still apply — they were ported into the
+> dispatcher. See `docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md`.
+
 `.github/hooks/scripts/tdd-gate.sh` MUST replicate every behavioral branch
 of the Claude `tdd-gate.sh` (lines 2022–2069 of `ai-native-workflow`):
 
@@ -235,7 +265,13 @@ of the Claude `tdd-gate.sh` (lines 2022–2069 of `ai-native-workflow`):
 - Otherwise deny with the same human message text (Options 1 & 2,
   common-reasons line).
 
-### FR-4 — Confidence gate behavior parity
+### FR-4 — Confidence gate behavior parity (superseded by ADR-001)
+
+> **Superseded by ADR-001.** Confidence gate logic is now embedded directly in
+> `copilot-cli-dispatcher.sh` rather than a separate `confidence-gate.sh`
+> script. The behavioral requirements below still apply — they were ported into
+> the dispatcher. See `docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md`.
+
 `.github/hooks/scripts/confidence-gate.sh` MUST replicate every behavioral
 branch of the Claude `confidence-gate.sh` (lines 2074 / source at
 `hooks/confidence-gate.sh`):

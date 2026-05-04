@@ -14,9 +14,9 @@
   - Spec: `docs/context/specs/COP-2-spec.md`
   - Todo: `docs/context/specs/COP-2-todo.md`
   - ADR: `docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md`
-  - Phase: spec + todo plan complete; ready for tdd-developer
-  - Steps: 0 / 12
-  - Driver: tdd-developer (next — Step 1)
+  - Phase: Steps 12/12 done; in PR #5 review/fix-loop
+  - Steps: 12 / 12
+  - Driver: tdd-developer
   - Open questions OQ-1 / OQ-2 / OQ-3 / OQ-4 / OQ-5 / OQ-6: resolved (defaults accepted)
 
 ## Done

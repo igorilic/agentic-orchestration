@@ -362,3 +362,78 @@ run_dispatcher_env() {
   # Marker removed even on malformed
   [ ! -f "$SANDBOX/.git/aw/override-PROJ-1" ]
 }
+
+@test "confidence-gate bypass: RED + completely invalid JSON override -> deny; marker removed" {
+  echo "PROJ-1" > "$SANDBOX/.git/aw/active-spec"
+  make_log "$LOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 5 1 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+  # Completely invalid JSON in override marker
+  printf 'not-json\n' > "$SANDBOX/.git/aw/override-PROJ-1"
+  local payload
+  payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
+  run_dispatcher "$payload"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+  # Marker removed even on malformed JSON
+  [ ! -f "$SANDBOX/.git/aw/override-PROJ-1" ]
+}
+
+# ---------------------------------------------------------------------------
+# Fix 3: jq-free emit_deny regression test
+# ---------------------------------------------------------------------------
+
+@test "dispatcher: emits deny JSON even when jq is unavailable (fail-closed)" {
+  # Simulate jq absence by overriding the bash 'command' builtin in a wrapper
+  # so that 'command -v jq' returns 1. This avoids PATH surgery while reliably
+  # hiding jq from the dispatcher's perspective.
+  local TMPDIR2
+  TMPDIR2="$(mktemp -d /tmp/aw-jq-stub-XXXXXX)"
+
+  # Wrapper script: export a command() override before running the dispatcher.
+  cat > "$TMPDIR2/run.sh" << 'RUNEOF'
+#!/usr/bin/env bash
+command() {
+  if [ "$1" = "-v" ] && [ "$2" = "jq" ]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+export -f command
+bash "$1" < "$2"
+RUNEOF
+  chmod +x "$TMPDIR2/run.sh"
+
+  local payload
+  payload="$(mk_payload bash "git commit -m foo" "$SANDBOX")"
+  local tmpfile
+  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  printf '%s' "$payload" > "$tmpfile"
+
+  run bash "$TMPDIR2/run.sh" "$DISPATCHER" "$tmpfile"
+
+  rm -f "$tmpfile"
+  rm -rf "$TMPDIR2"
+
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -q '"permissionDecision":"deny"'
+  echo "$output" | grep -q 'jq not found'
+}
+
+# ---------------------------------------------------------------------------
+# Fix 4: BASH_CMD extraction fail-closed regression test
+# ---------------------------------------------------------------------------
+
+@test "dispatcher: malformed toolArgs (not JSON string) -> deny fail-closed" {
+  # toolArgs must be a JSON-encoded string; passing a raw number causes fromjson to fail
+  local payload
+  payload='{"toolName":"bash","toolArgs":12345,"cwd":"'"$SANDBOX"'","timestamp":1714694400000}'
+  local tmpfile
+  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  printf '%s' "$payload" > "$tmpfile"
+  run bash -c "cat '$tmpfile' | bash '$DISPATCHER' 2>/dev/null"
+  rm -f "$tmpfile"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
+}

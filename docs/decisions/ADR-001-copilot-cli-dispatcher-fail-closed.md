@@ -45,9 +45,11 @@ dispatcher:
    first, since `git commit` is a more local concern than `gh pr
    create`). This sidesteps the unknown short-circuit semantic — we
    own the ordering.
-5. Emits the same human-readable deny reason via BOTH the JSON
-   `permissionDecisionReason` and `>&2 echo` (belt-and-suspenders for
-   surfacing).
+5. **Deny reasons surface only via `permissionDecisionReason` in the
+   stdout JSON.** Earlier drafts of the ADR specified a belt-and-suspenders
+   pattern with both JSON and stderr; that was removed because bats `run`
+   merges stderr into stdout, and stderr emoji banners broke `jq -e`
+   parsing of `$output` in tests. The JSON reason is sufficient.
 
 The vendored confidence scorer lives at
 `.github/hooks/scripts/confidence.sh`, copied per-project from

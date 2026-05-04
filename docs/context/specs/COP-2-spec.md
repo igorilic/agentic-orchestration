@@ -124,7 +124,9 @@ print allow JSON, exit 0
 emit_deny() {
   local reason="${1:-hook crashed; failing closed}"
   jq -nc --arg r "$reason" '{permissionDecision:"deny", permissionDecisionReason:$r}'
-  printf '🚫 %s\n' "$reason" >&2
+  # Note: no stderr output. bats merges stderr into stdout, and emoji banners
+  # in stderr break jq -e parsing of $output in tests. The JSON reason is
+  # sufficient for Copilot UI surfacing. See ADR-001 §Decision point 5.
   exit 0   # exit 0; Copilot reads decision from stdout JSON
 }
 trap 'emit_deny "Copilot hook crashed unexpectedly"' ERR
@@ -142,7 +144,7 @@ trap 'emit_deny "Copilot hook crashed unexpectedly"' ERR
         "bash": "./copilot-cli-dispatcher.sh",
         "cwd": ".github/hooks",
         "timeoutSec": 15,
-        "comment": "ai-native-workflow: TDD + confidence gates dispatcher (mirrors ~/.claude/hooks/{tdd,confidence}-gate.sh)"
+        "comment": "ai-native-workflow TDD + confidence gate dispatcher"
       }
     ]
   }
