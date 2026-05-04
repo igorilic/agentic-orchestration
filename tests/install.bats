@@ -266,3 +266,35 @@ EOF
   ! rg -q '\.context/CURRENT_SPRINT' \
     "$BATS_TEST_DIRNAME/../ai-native-workflow"
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 9: hooks/session-start.sh reads sprint from docs/context/
+# ---------------------------------------------------------------------------
+
+@test "hooks: session-start reads sprint from docs/context/CURRENT_SPRINT.md" {
+  local proj
+  proj="$(mktemp -d /tmp/aw-session-start-XXXXXX)"
+  mkdir -p "$proj/docs/context"
+  echo "SPRINT_MARKER_XYZ" > "$proj/docs/context/CURRENT_SPRINT.md"
+  output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
+  rm -rf "$proj"
+  echo "$output" | grep -q "SPRINT_MARKER_XYZ"
+}
+
+@test "hooks: session-start does NOT read sprint from old .context/CURRENT_SPRINT.md (hard-cut)" {
+  local proj
+  proj="$(mktemp -d /tmp/aw-session-start-XXXXXX)"
+  mkdir -p "$proj/.context"
+  echo "OLD_SPRINT_MARKER_XYZ" > "$proj/.context/CURRENT_SPRINT.md"
+  output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
+  rm -rf "$proj"
+  ! echo "$output" | grep -q "OLD_SPRINT_MARKER_XYZ"
+}
+
+@test "hooks: session-start.sh source references docs/context/CURRENT_SPRINT.md" {
+  rg -q 'docs/context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
+}
+
+@test "hooks: session-start.sh source does NOT reference .context/CURRENT_SPRINT.md" {
+  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
+}
