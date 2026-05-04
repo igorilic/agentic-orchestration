@@ -4038,10 +4038,14 @@ install_project_copilot_hooks() {
   success ".github/hooks/scripts/confidence.sh (vendored scorer)"
 
   # Write the Copilot CLI dispatcher (Steps 4+5).
+  # Step 11: Write to a temp file first so we can cmp with any existing copy.
+  # If content is identical → skip (idempotent). If differs → backup, then overwrite.
   # Using a quoted heredoc (<<'DISPATCHER_EOF') so all '$' are literal in the
   # output script — they must be runtime variables, not install-time expansions.
   local dispatcher="$hooks_dir/copilot-cli-dispatcher.sh"
-  cat > "$dispatcher" <<'DISPATCHER_EOF'
+  local dispatcher_tmp
+  dispatcher_tmp="$(mktemp /tmp/copilot-dispatcher-XXXXXX.sh)"
+  cat > "$dispatcher_tmp" <<'DISPATCHER_EOF'
 #!/usr/bin/env bash
 # copilot-cli-dispatcher.sh — ai-native-workflow Copilot CLI pre-tool hook
 # Enforces TDD and confidence gates for GitHub Copilot CLI.
@@ -4241,8 +4245,81 @@ jq -nc '{permissionDecision: "allow"}'
 exit 0
 DISPATCHER_EOF
 
-  chmod 0755 "$dispatcher"
-  success ".github/hooks/copilot-cli-dispatcher.sh (Copilot CLI dispatcher)"
+  # Step 11: idempotency + backup-on-mismatch.
+  if [ -f "$dispatcher" ] && cmp -s "$dispatcher_tmp" "$dispatcher"; then
+    # Content identical — skip overwrite to avoid spurious churn.
+    rm -f "$dispatcher_tmp"
+    dim ".github/hooks/copilot-cli-dispatcher.sh already up to date"
+  else
+    if [ -f "$dispatcher" ]; then
+      cp "$dispatcher" "${dispatcher}${BACKUP_SUFFIX}"
+      dim "Backed up existing copilot-cli-dispatcher.sh"
+    fi
+    mv "$dispatcher_tmp" "$dispatcher"
+    chmod 0755 "$dispatcher"
+    success ".github/hooks/copilot-cli-dispatcher.sh (Copilot CLI dispatcher)"
+  fi
+
+  # Step 11: Write .github/hooks/README.md explaining the hook layer.
+  local readme="$hooks_dir/README.md"
+  if [ ! -f "$readme" ]; then
+    cat > "$readme" <<'README_EOF'
+# .github/hooks — AI-Native Workflow: Copilot CLI Hook Layer
+
+This directory contains the **per-project Copilot CLI hook** for
+[ai-native-workflow](https://github.com/igorIlic/agentic-orchestration).
+
+## Purpose
+
+Two quality gates are enforced at the Copilot CLI `preToolUse` hook:
+
+1. **TDD gate** — blocks `git commit` unless test files are staged.
+2. **Confidence gate** — blocks `gh pr create` / `glab mr create` when the
+   active spec's aggregate confidence score is RED.
+
+These mirror the Claude Code global hooks (`~/.claude/hooks/tdd-gate.sh` and
+`~/.claude/hooks/confidence-gate.sh`) but are **per-project** because Copilot
+CLI does not support user-global hooks — only repository-scoped ones.
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `copilot-cli-dispatcher.sh` | Single entry point; routes to TDD + confidence gates |
+| `scripts/confidence.sh` | Vendored confidence scorer (self-contained copy) |
+| `copilot-cli-policy.json` | Registers this dispatcher as a `preToolUse` hook |
+
+## Bypassing
+
+- **TDD gate**: run `/skip-tdd "reason"` — creates `.tdd-skip`; logged.
+- **Confidence gate (structural-only gates)**: `.tdd-skip` auto-bypasses
+  `NO_AC` and `AC_NOT_TESTED` gates.
+- **Confidence gate (behavioral gates)**: run `/override-confidence "reason"`
+  — creates `.git/aw/override-<spec-id>`; consumed once then deleted.
+
+## Audit Trail
+
+Every confidence gate verdict and bypass is appended to:
+
+```
+.context/specs/<spec-id>-confidence.jsonl
+```
+
+This file is gitignored (runtime state) but retained for local audit.
+
+## Asymmetry vs Claude Code
+
+| | Claude Code | Copilot CLI |
+|---|---|---|
+| Hook scope | Global (`~/.claude/hooks/`) | Per-project (`.github/hooks/`) |
+| TDD gate | `tdd-gate.sh` | `copilot-cli-dispatcher.sh` |
+| Confidence gate | `confidence-gate.sh` | `copilot-cli-dispatcher.sh` |
+| Scorer | `~/.claude/scripts/confidence.sh` | `.github/hooks/scripts/confidence.sh` (vendored) |
+README_EOF
+    success ".github/hooks/README.md (Copilot CLI hook documentation)"
+  else
+    dim ".github/hooks/README.md already exists — skipping"
+  fi
 
   # Write / merge copilot-cli-policy.json (Steps 6 + 7).
   local policy="$hooks_dir/copilot-cli-policy.json"
