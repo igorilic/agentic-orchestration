@@ -343,3 +343,38 @@ EOF
   ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
     "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 12: Integration smoke — fresh install produces new layout end-to-end
+# ---------------------------------------------------------------------------
+
+@test "integration smoke: install global then install project produces new docs/context/ layout" {
+  local sandbox_claude sandbox_project
+  sandbox_claude="$(mktemp -d /tmp/aw-smoke-claude-XXXXXX)"
+  sandbox_project="$(mktemp -d /tmp/aw-smoke-project-XXXXXX)"
+
+  # Run global install into sandbox (installs agents, hooks, skills)
+  CLAUDE_HOME="$sandbox_claude" "$INSTALLER" install global >/dev/null 2>&1
+
+  # Run project install into the project sandbox
+  "$INSTALLER" install project "$sandbox_project" >/dev/null 2>&1
+
+  # AC: tracked sprint and specs go to docs/context/
+  [ -f "$sandbox_project/docs/context/CURRENT_SPRINT.md" ]
+  [ -f "$sandbox_project/docs/context/specs/templates/feature-spec.md" ]
+
+  # AC: architecture doc stays in .context/ (per-project artifact, not tracked spec)
+  [ -f "$sandbox_project/.context/ARCHITECTURE.md" ]
+
+  # AC: .gitignore contains runtime-only entries
+  grep -qF '.context/.pipeline-state' "$sandbox_project/.gitignore"
+
+  # AC: .gitignore does NOT contain bare .context/ (legacy blanket ignore gone)
+  ! grep -qE '^\.context/$' "$sandbox_project/.gitignore"
+
+  # AC: globally installed architect.md exists and has no old .context/specs/ tracked paths
+  [ -f "$sandbox_claude/agents/architect.md" ]
+  ! grep -qE '\.context/specs/[^$]*-(spec|todo|requirements)' "$sandbox_claude/agents/architect.md"
+
+  rm -rf "$sandbox_claude" "$sandbox_project"
+}
