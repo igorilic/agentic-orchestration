@@ -1702,6 +1702,10 @@ install_global() {
   info "Copilot CLI → ~/.copilot/agents/"
   info "Run ${BOLD}ai-native-workflow status${NC} to verify"
   info "Start a new Claude Code or Copilot CLI session to activate"
+  echo ""
+  dim "▸ Copilot hooks are NOT installed globally — Copilot CLI scopes"
+  dim "  hooks per-repo. Run \`ai-native-workflow install project\` in"
+  dim "  trusted folders for repo-level hooks (COP-2; not yet shipped)."
 }
 
 install_global_claude_md() {
