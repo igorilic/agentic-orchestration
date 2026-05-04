@@ -182,3 +182,25 @@ JSON
   rm -rf "$EMPTY_BIN"
   [[ "$output" == *"Copilot hooks are NOT installed globally"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# Step 8: Status command surfaces Copilot artifacts
+# ---------------------------------------------------------------------------
+
+@test "status: lists every installed Copilot skill with ✓" {
+  run_install_global
+  output="$(CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" status 2>&1)"
+  for d in "$REPO_ROOT/skills"/*/; do
+    name="$(basename "$d")"
+    [[ "$output" == *"skills/$name"* ]]
+  done
+}
+
+@test "status: lists copilot-instructions.md and settings.json" {
+  run_install_global
+  output="$(CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" status 2>&1)"
+  [[ "$output" == *"copilot-instructions.md"* ]]
+  [[ "$output" == *"settings.json"* ]]
+}
