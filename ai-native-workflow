@@ -26,6 +26,11 @@ set -euo pipefail
 
 VERSION="3.0.0"
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
+COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
+COPILOT_AGENTS_DIR="$COPILOT_DIR/agents"
+COPILOT_SKILLS_DIR="$COPILOT_DIR/skills"
+COPILOT_INSTRUCTIONS_FILE="$COPILOT_DIR/copilot-instructions.md"
+COPILOT_SETTINGS_FILE="$COPILOT_DIR/settings.json"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
 SPEC_DIR="docs/context/specs"
 SPRINT_FILE="docs/context/CURRENT_SPRINT.md"
@@ -3162,10 +3167,9 @@ install_copilot_agents() {
     return
   fi
 
-  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   header "Installing Copilot CLI agents"
 
-  mkdir -p "$COPILOT_DIR/agents"
+  mkdir -p "$COPILOT_AGENTS_DIR"
 
   # --- requirements-engineer (Opus) ---
   cat > "$COPILOT_DIR/agents/requirements-engineer.agent.md" << 'AGENT_EOF'
@@ -4085,7 +4089,6 @@ show_status() {
   check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
   check_file "$CLAUDE_DIR/agents/explorer.md" "agents/explorer (Sonnet)"
 
-  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ]; then
     echo ""
     header "Copilot CLI ($COPILOT_DIR/)"
@@ -4230,7 +4233,6 @@ uninstall_global() {
   warn "Remove hooks config from settings.json manually if needed"
 
   # Copilot CLI agents
-  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   local copilot_agents=(
     "$COPILOT_DIR/agents/requirements-engineer.agent.md"
     "$COPILOT_DIR/agents/architect.agent.md"
