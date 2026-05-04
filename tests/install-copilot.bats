@@ -107,3 +107,49 @@ run_install_global() {
   backups=( "$SANDBOX"/copilot-instructions.md.bak.* )
   [ "${#backups[@]}" -eq 1 ]
 }
+
+# ---------------------------------------------------------------------------
+# Step 5: install_global_copilot_settings — fresh install path
+# ---------------------------------------------------------------------------
+
+@test "install global: settings.json fresh install seeds renderMarkdown/theme/beep" {
+  run_install_global
+  [ -f "$SANDBOX/settings.json" ]
+  [ "$(jq -r '.renderMarkdown' "$SANDBOX/settings.json")" = "true" ]
+  [ "$(jq -r '.theme'          "$SANDBOX/settings.json")" = "auto" ]
+  [ "$(jq -r '.beep'           "$SANDBOX/settings.json")" = "true" ]
+}
+
+@test "install global: settings.json fresh install has no hooks key" {
+  run_install_global
+  ! jq -e '.hooks' "$SANDBOX/settings.json" >/dev/null 2>&1
+}
+
+# ---------------------------------------------------------------------------
+# Step 6: install_global_copilot_settings — merge path preserves user keys
+# ---------------------------------------------------------------------------
+
+@test "install global: settings.json merge preserves user-set model/effortLevel/allowedUrls" {
+  mkdir -p "$SANDBOX"
+  cat > "$SANDBOX/settings.json" <<'JSON'
+{"model": "gpt-5", "effortLevel": "high", "allowedUrls": ["https://example.com"]}
+JSON
+  run_install_global
+  [ "$(jq -r '.model'           "$SANDBOX/settings.json")" = "gpt-5" ]
+  [ "$(jq -r '.effortLevel'     "$SANDBOX/settings.json")" = "high" ]
+  [ "$(jq -r '.allowedUrls[0]'  "$SANDBOX/settings.json")" = "https://example.com" ]
+  # Defaults filled in for missing keys:
+  [ "$(jq -r '.renderMarkdown'  "$SANDBOX/settings.json")" = "true" ]
+  [ "$(jq -r '.theme'           "$SANDBOX/settings.json")" = "auto" ]
+  # And exactly one backup of the pre-merge file:
+  backups=( "$SANDBOX"/settings.json.bak.* )
+  [ "${#backups[@]}" -eq 1 ]
+}
+
+@test "install global: settings.json merge does NOT overwrite existing user value" {
+  mkdir -p "$SANDBOX"
+  echo '{"theme":"dark","beep":false}' > "$SANDBOX/settings.json"
+  run_install_global
+  [ "$(jq -r '.theme' "$SANDBOX/settings.json")" = "dark" ]
+  [ "$(jq -r '.beep'  "$SANDBOX/settings.json")" = "false" ]
+}
