@@ -57,3 +57,30 @@ run_install_global() {
   run_install_global
   [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
 }
+
+# ---------------------------------------------------------------------------
+# Step 3: Pipeline-skill rewrite — claude --agent= → copilot --agent=
+# ---------------------------------------------------------------------------
+
+@test "install global: pipeline-gitlab-feature SKILL.md uses copilot --agent= (not claude)" {
+  run_install_global
+  grep -q 'copilot --agent=' "$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md"
+  ! grep -q 'claude --agent=' "$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md"
+}
+
+@test "install global: pipeline-gitlab-incident SKILL.md uses copilot --agent=" {
+  run_install_global
+  grep -q 'copilot --agent=' "$SANDBOX/skills/pipeline-gitlab-incident/SKILL.md"
+  ! grep -q 'claude --agent=' "$SANDBOX/skills/pipeline-gitlab-incident/SKILL.md"
+}
+
+@test "install global: explore SKILL.md uses copilot --agent= in copilot install path" {
+  run_install_global
+  grep -q 'copilot --agent=' "$SANDBOX/skills/explore/SKILL.md"
+  ! grep -q 'claude --agent=' "$SANDBOX/skills/explore/SKILL.md"
+}
+
+@test "install global: Claude side keeps claude --agent= (rewrite is Copilot-only)" {
+  run_install_global
+  grep -q 'claude --agent=' "$CLAUDE_HOME/skills/pipeline-gitlab-feature/SKILL.md"
+}
