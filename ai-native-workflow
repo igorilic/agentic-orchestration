@@ -3496,6 +3496,9 @@ install_project() {
   # --- .github/ (copilot instructions) ---
   install_project_copilot "$project_dir" "$stacks"
 
+  # --- .github/hooks/ (Copilot CLI dispatcher + vendored scorer) ---
+  install_project_copilot_hooks "$project_dir"
+
   # --- .gitignore additions ---
   install_project_gitignore "$project_dir"
 
@@ -4019,6 +4022,15 @@ EOF
       success ".github/instructions/swift.instructions.md"
     fi
   fi
+}
+
+install_project_copilot_hooks() {
+  local project_dir="$1"
+  local hooks_dir="$project_dir/.github/hooks"
+  local scripts_dir="$hooks_dir/scripts"
+
+  mkdir -p "$scripts_dir"
+  success ".github/hooks/scripts/ (Copilot CLI hook directories)"
 }
 
 install_project_gitignore() {
