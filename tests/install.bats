@@ -211,3 +211,41 @@ EOF
   grep -qF '.context/.pipeline-audit.log' "$BATS_TEST_DIRNAME/../.gitignore"
   grep -qF '.context/specs/*.jsonl'      "$BATS_TEST_DIRNAME/../.gitignore"
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 5: Claude Code agent prompts use docs/context/
+# ---------------------------------------------------------------------------
+
+@test "agents/claude-code: no spec/todo/requirements paths under .context/specs/" {
+  # Spec, todo, requirements, bugfix, brainstorm, testplan artifacts must reference docs/context/
+  # Confidence jsonl stays under .context/specs/ — excluded by the negative lookahead pattern below
+  ! rg -q '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/"
+}
+
+@test "agents/claude-code: confidence jsonl path under .context/specs/ remains" {
+  rg -q '\.context/specs/.*-confidence\.jsonl' \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/qa.md" \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/reviewer.md" \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+}
+
+@test "agents/claude-code: ARCHITECTURE and CONVENTIONS reads stay under .context/" {
+  rg -q '\.context/ARCHITECTURE\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 6: Copilot CLI agent prompts use docs/context/
+# ---------------------------------------------------------------------------
+
+@test "agents/copilot-cli: no spec/todo/requirements paths under .context/specs/" {
+  ! rg -q '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/"
+}
+
+@test "agents/copilot-cli: confidence jsonl path under .context/specs/ remains" {
+  rg -q '\.context/specs/.*-confidence\.jsonl' \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/qa.agent.md" \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/reviewer.agent.md" \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/architect.agent.md"
+}
