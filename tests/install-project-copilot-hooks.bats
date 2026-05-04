@@ -45,3 +45,32 @@ teardown() {
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   cmp -s "$REPO_DIR/scripts/confidence.sh" "$SANDBOX/.github/hooks/scripts/confidence.sh"
 }
+
+# ---------------------------------------------------------------------------
+# Step 4: dispatcher skeleton is created with correct content
+# ---------------------------------------------------------------------------
+
+@test "install project: .github/hooks/copilot-cli-dispatcher.sh exists after install" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ -f "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh" ]
+}
+
+@test "install project: .github/hooks/copilot-cli-dispatcher.sh has mode 0755" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ -x "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh" ]
+}
+
+@test "install project: dispatcher contains trap emit_deny ERR pattern" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  grep -q "trap 'emit_deny" "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+}
+
+@test "install project: dispatcher contains permissionDecisionReason" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  grep -q "permissionDecisionReason" "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+}
+
+@test "install project: dispatcher contains toolName != bash filter" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  grep -q 'toolName != "bash"' "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
+}
