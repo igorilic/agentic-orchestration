@@ -196,6 +196,42 @@ The project uses a deliberate split between tracked spec artifacts and runtime s
 
 The `docs/context/` path is version-controlled so spec reviews happen in pull requests. The `.context/` runtime artifacts are gitignored to prevent churn from pipeline state files.
 
+## Hook Surfaces
+
+The system enforces quality gates through two distinct hook surfaces:
+
+### Claude Code global hooks (`~/.claude/hooks/`)
+
+| Hook | Trigger | Gate |
+|------|---------|------|
+| `session-start.sh` | Session open | Load context, detect stack |
+| `tdd-gate.sh` | `PreToolUse` | Blocks `git commit` without staged test files |
+| `confidence-gate.sh` | `PreToolUse` | Blocks `gh pr create` / `glab mr create` on RED confidence |
+
+These are **user-global** — installed once and apply to all projects opened with Claude Code.
+
+### Copilot CLI per-project hooks (`.github/hooks/`)
+
+| File | Purpose |
+|------|---------|
+| `copilot-cli-dispatcher.sh` | Single `preToolUse` entry point; enforces both TDD + confidence gates |
+| `scripts/confidence.sh` | Vendored scorer copy (self-contained; no dependency on `~/.claude/`) |
+| `copilot-cli-policy.json` | Registers the dispatcher; merged idempotently on `install project` |
+| `README.md` | Explains the hooks, bypass paths, and audit trail to contributors |
+
+These are **per-project** because Copilot CLI does not support user-global hooks — only
+repository-scoped ones registered in `copilot-cli-policy.json`.
+
+**Asymmetry summary**:
+
+| Dimension | Claude Code | Copilot CLI |
+|-----------|-------------|-------------|
+| Scope | Global (`~/.claude/hooks/`) | Per-project (`.github/hooks/`) |
+| TDD gate | `tdd-gate.sh` | `copilot-cli-dispatcher.sh` (combined) |
+| Confidence gate | `confidence-gate.sh` | `copilot-cli-dispatcher.sh` (combined) |
+| Scorer path | `~/.claude/scripts/confidence.sh` | `.github/hooks/scripts/confidence.sh` (vendored) |
+| Hook registration | `~/.claude/settings.json` | `.github/hooks/copilot-cli-policy.json` |
+
 ## Key Design Decisions
 
 - **Hooks for enforcement**: TDD gate is a shell script (exit code 2 = block), not a prompt instruction
@@ -206,3 +242,4 @@ The `docs/context/` path is version-controlled so spec reviews happen in pull re
 - **Pipeline per platform**: GitLab uses Copilot CLI agents, GitHub uses Claude Code subagents
 - **Requirements first**: requirements-engineer runs before architect to ensure clear, testable inputs
 - **Decision points**: Incident pipeline lets user choose between documenting findings or implementing a fix
+- **Copilot hooks are per-project**: Copilot CLI lacks user-global hook support; the dispatcher is vendored into each repo so enforcement is self-contained and portable
