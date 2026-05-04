@@ -2613,6 +2613,14 @@ Run from terminal: `ai-native-workflow run gitlab-feature <JIRA-ID>`
 
 This pipeline uses Copilot CLI agents and requires: copilot, glab, Jira MCP.
 See `ai-native-workflow help` for details.
+
+### Manual agent invocations (Claude Code)
+```bash
+claude --agent=requirements-engineer --prompt "Analyze Jira ticket PROJ-123"
+claude --agent=architect --prompt "Design solution for PROJ-123"
+claude --agent=tdd-developer --prompt "Step 1 of PROJ-123-todo.md"
+claude --agent=reviewer --prompt "Review Step 1 of PROJ-123"
+```
 SKILL_EOF
   success "/pipeline-gitlab-feature skill"
 
@@ -3483,6 +3491,16 @@ install_global_copilot_skills() {
     fi
     cp -R "$skill_src_dir". "$skill_dest_dir/"
     success "$skill_name skill"
+  done
+
+  # Rewrite any claude --agent= references to copilot --agent= in the
+  # installed copies. Uses .tmp suffix for cross-platform sed -i portability
+  # (BSD macOS vs GNU Linux both require an explicit backup extension).
+  for skill_md in "$COPILOT_SKILLS_DIR"/*/SKILL.md; do
+    if grep -q 'claude --agent=' "$skill_md" 2>/dev/null; then
+      sed -i.tmp 's/claude --agent=/copilot --agent=/g' "$skill_md"
+      rm -f "${skill_md}.tmp"
+    fi
   done
 }
 
