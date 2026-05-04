@@ -1692,6 +1692,9 @@ install_global() {
   # --- Copilot CLI global instructions ---
   install_global_copilot_instructions
 
+  # --- Copilot CLI settings ---
+  install_global_copilot_settings
+
   echo ""
   header "Global installation complete"
   echo ""
@@ -3566,6 +3569,41 @@ Detect the active stack from project files and auto-apply conventions:
 - `Package.swift` or `*.xcodeproj` → Swift (XCTest)
 COPILOT_INSTRUCTIONS_EOF
   success "~/.copilot/copilot-instructions.md"
+}
+
+install_global_copilot_settings() {
+  command -v copilot &>/dev/null || return 0
+
+  local fresh_json='{"renderMarkdown": true, "theme": "auto", "beep": true}'
+
+  # Fresh install path — target does not exist yet
+  if [ ! -f "$COPILOT_SETTINGS_FILE" ]; then
+    mkdir -p "$COPILOT_DIR"
+    if command -v jq &>/dev/null; then
+      echo "$fresh_json" | jq '.' > "$COPILOT_SETTINGS_FILE"
+    else
+      echo "$fresh_json" > "$COPILOT_SETTINGS_FILE"
+    fi
+    success "~/.copilot/settings.json (fresh install with beep:true)"
+    return
+  fi
+
+  # Merge path — target already exists; preserve user keys, fill gaps
+  backup_if_exists "$COPILOT_SETTINGS_FILE"
+
+  if ! command -v jq &>/dev/null; then
+    warn "jq not found — leaving ~/.copilot/settings.json untouched"
+    return
+  fi
+
+  # Additive merge: defaults first, existing user keys win.
+  # `$defaults * $existing[0]` means existing values overwrite defaults.
+  echo "$fresh_json" \
+    | jq --slurpfile existing "$COPILOT_SETTINGS_FILE" \
+         '. * $existing[0]' \
+    > "$COPILOT_SETTINGS_FILE.tmp"
+  mv "$COPILOT_SETTINGS_FILE.tmp" "$COPILOT_SETTINGS_FILE"
+  success "~/.copilot/settings.json (merged with existing)"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
