@@ -4102,6 +4102,30 @@ DISPATCHER_EOF
 
   chmod 0755 "$dispatcher"
   success ".github/hooks/copilot-cli-dispatcher.sh (Copilot CLI dispatcher)"
+
+  # Write / merge copilot-cli-policy.json (Steps 6 + 7).
+  local policy="$hooks_dir/copilot-cli-policy.json"
+  local dispatcher_entry
+  dispatcher_entry="$(jq -nc '{bash:"./copilot-cli-dispatcher.sh",cwd:".github/hooks",timeoutSec:15}')"
+
+  local tmp_policy
+  tmp_policy="$(mktemp /tmp/copilot-policy-XXXXXX.json)"
+
+  if [ ! -f "$policy" ]; then
+    # Fresh install: write a minimal policy with only our dispatcher entry.
+    jq -n --argjson entry "$dispatcher_entry" \
+      '{version:1,hooks:{preToolUse:[$entry]}}' \
+      | jq -e . > "$tmp_policy"
+  else
+    # Merge: append our entry and dedupe by .bash (preserves user entries).
+    jq --argjson entry "$dispatcher_entry" \
+      '.hooks.preToolUse = ((.hooks.preToolUse // []) + [$entry] | unique_by(.bash))' \
+      "$policy" \
+      | jq -e . > "$tmp_policy"
+  fi
+
+  mv "$tmp_policy" "$policy"
+  success ".github/hooks/copilot-cli-policy.json (Copilot CLI hook policy)"
 }
 
 install_project_gitignore() {
