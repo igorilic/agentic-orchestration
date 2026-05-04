@@ -328,8 +328,8 @@ Each step:
 - [x] Step 1 — payload helper fixture
 - [x] Step 2 — installer skeleton + dirs
 - [x] Step 3 — vendor confidence.sh
-- [ ] Step 4 — dispatcher skeleton (trap + filter)
-- [ ] Step 5 — cwd resolution
+- [x] Step 4 — dispatcher skeleton (trap + filter)
+- [x] Step 5 — cwd resolution
 - [ ] Step 6 — policy JSON fresh write
 - [ ] Step 7 — policy JSON merge
 - [ ] Step 8 — TDD gate port
