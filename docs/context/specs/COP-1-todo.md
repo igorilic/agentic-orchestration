@@ -591,13 +591,13 @@ append to it.
   - [x] Tests added (skills removed, user files preserved)
   - [x] Implementation: `uninstall_global` edits
   - [x] AC-11 covered
-- [ ] **Step 10** — Documentation
-  - [ ] Tests added (README + ARCHITECTURE asserts)
-  - [ ] Implementation: README + ARCHITECTURE edits
-  - [ ] AC-13 covered
-- [ ] **Step 11** — Integration smoke
-  - [ ] Tests added (idempotency + COPILOT_HOME override)
-  - [ ] AC-7, AC-9 covered
+- [x] **Step 10** — Documentation
+  - [x] Tests added (README + ARCHITECTURE asserts)
+  - [x] Implementation: README + ARCHITECTURE edits
+  - [x] AC-13 covered
+- [x] **Step 11** — Integration smoke
+  - [x] Tests added (idempotency + COPILOT_HOME override)
+  - [x] AC-7, AC-9 covered
 - [ ] Spec marked **Done** in `docs/context/CURRENT_SPRINT.md`
 
 ## Bats helper to add in Step 1's `tests/install-copilot.bats` setup
