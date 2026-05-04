@@ -332,11 +332,11 @@ Each step:
 - [x] Step 5 — cwd resolution
 - [x] Step 6 — policy JSON fresh write
 - [x] Step 7 — policy JSON merge
-- [ ] Step 8 — TDD gate port
-- [ ] Step 9 — confidence gate happy paths
-- [ ] Step 10 — confidence gate bypass paths
-- [ ] Step 11 — README + backup-on-mismatch
-- [ ] Step 12 — integration smoke + docs
+- [x] Step 8 — TDD gate port
+- [x] Step 9 — confidence gate happy paths
+- [x] Step 10 — confidence gate bypass paths
+- [x] Step 11 — README + backup-on-mismatch
+- [x] Step 12 — integration smoke + docs
 
 ## Hand-off
 
