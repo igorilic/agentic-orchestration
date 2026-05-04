@@ -140,7 +140,9 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 
 `install global` writes a symmetric harness for GitHub Copilot CLI alongside
 the Claude Code installation. Copilot CLI must be on `PATH` for the Copilot
-artifacts to be created; the installer skips silently when it is absent.
+artifacts to be created. If `copilot` is not on PATH, the installer prints a
+brief notice and skips Copilot-side artifacts. The Claude side installs
+normally.
 
 | Component | Purpose |
 |-----------|---------|

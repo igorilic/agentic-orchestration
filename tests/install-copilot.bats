@@ -58,6 +58,21 @@ run_install_global() {
   [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
 }
 
+@test "install global: backs up entire skill directory on re-install (multi-file)" {
+  # First install
+  run_install_global
+  # Hand-edit the auxiliary file to simulate user customisation
+  echo '# user-edit' >> "$SANDBOX/skills/override-confidence/skill.bash"
+  # Re-install
+  run_install_global
+  # The user's edit should be preserved in a backup directory
+  shopt -s nullglob
+  backups=( "$SANDBOX"/skills/override-confidence.bak.* )
+  shopt -u nullglob
+  [ "${#backups[@]}" -ge 1 ]
+  grep -q '# user-edit' "${backups[0]}/skill.bash"
+}
+
 # ---------------------------------------------------------------------------
 # Step 3: Pipeline-skill rewrite — claude --agent= → copilot --agent=
 # ---------------------------------------------------------------------------
@@ -104,7 +119,9 @@ run_install_global() {
   run_install_global
   run_install_global
   # Exactly one backup file should exist after the second run
+  shopt -s nullglob
   backups=( "$SANDBOX"/copilot-instructions.md.bak.* )
+  shopt -u nullglob
   [ "${#backups[@]}" -eq 1 ]
 }
 
@@ -142,7 +159,9 @@ JSON
   [ "$(jq -r '.renderMarkdown'  "$SANDBOX/settings.json")" = "true" ]
   [ "$(jq -r '.theme'           "$SANDBOX/settings.json")" = "auto" ]
   # And exactly one backup of the pre-merge file:
+  shopt -s nullglob
   backups=( "$SANDBOX"/settings.json.bak.* )
+  shopt -u nullglob
   [ "${#backups[@]}" -eq 1 ]
 }
 

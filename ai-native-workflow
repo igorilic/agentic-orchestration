@@ -1699,7 +1699,16 @@ install_global() {
   header "Global installation complete"
   echo ""
   info "Claude Code → ${CLAUDE_DIR}/"
-  info "Copilot CLI → ~/.copilot/agents/"
+  if command -v copilot >/dev/null 2>&1; then
+    info "Copilot CLI → ${COPILOT_DIR/$HOME/~}/"
+    dim "   Items written:"
+    dim "     agents/                   agent definitions"
+    dim "     skills/                   skill definitions"
+    dim "     copilot-instructions.md"
+    dim "     settings.json"
+  else
+    dim "Copilot CLI not found — Copilot-side artifacts skipped"
+  fi
   info "Run ${BOLD}ai-native-workflow status${NC} to verify"
   info "Start a new Claude Code or Copilot CLI session to activate"
   echo ""
@@ -3494,11 +3503,12 @@ install_global_copilot_skills() {
     local skill_name
     skill_name="$(basename "$skill_src_dir")"
     local skill_dest_dir="$COPILOT_SKILLS_DIR/$skill_name"
-    mkdir -p "$skill_dest_dir"
-    local skill_md="$skill_dest_dir/SKILL.md"
-    if [ -f "$skill_md" ]; then
-      backup_if_exists "$skill_md"
+    if [ -d "$skill_dest_dir" ]; then
+      local ts
+      ts="$(date -u +%Y%m%dT%H%M%SZ)"
+      cp -R "$skill_dest_dir" "${skill_dest_dir}.bak.${ts}"
     fi
+    mkdir -p "$skill_dest_dir"
     cp -R "$skill_src_dir". "$skill_dest_dir/"
     success "$skill_name skill"
   done
@@ -3572,7 +3582,7 @@ Detect the active stack from project files and auto-apply conventions:
 - `package.json` with react-native → React Native (Jest + RNTL)
 - `Package.swift` or `*.xcodeproj` → Swift (XCTest)
 COPILOT_INSTRUCTIONS_EOF
-  success "~/.copilot/copilot-instructions.md"
+  success "${COPILOT_INSTRUCTIONS_FILE/$HOME/~}"
 }
 
 install_global_copilot_settings() {
@@ -3588,7 +3598,7 @@ install_global_copilot_settings() {
     else
       echo "$fresh_json" > "$COPILOT_SETTINGS_FILE"
     fi
-    success "~/.copilot/settings.json (fresh install with beep:true)"
+    success "${COPILOT_SETTINGS_FILE/$HOME/~} (fresh install with beep:true)"
     return
   fi
 
@@ -3596,7 +3606,7 @@ install_global_copilot_settings() {
   backup_if_exists "$COPILOT_SETTINGS_FILE"
 
   if ! command -v jq &>/dev/null; then
-    warn "jq not found — leaving ~/.copilot/settings.json untouched"
+    warn "jq not found — leaving ${COPILOT_SETTINGS_FILE/$HOME/~} untouched"
     return
   fi
 
@@ -3607,7 +3617,7 @@ install_global_copilot_settings() {
          '. * $existing[0]' \
     > "$COPILOT_SETTINGS_FILE.tmp"
   mv "$COPILOT_SETTINGS_FILE.tmp" "$COPILOT_SETTINGS_FILE"
-  success "~/.copilot/settings.json (merged with existing)"
+  success "${COPILOT_SETTINGS_FILE/$HOME/~} (merged with existing)"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -4413,7 +4423,7 @@ uninstall_global() {
   fi
 
   # Don't delete copilot-instructions.md or settings.json — just warn
-  warn "~/.copilot/copilot-instructions.md and ~/.copilot/settings.json preserved"
+  warn "${COPILOT_INSTRUCTIONS_FILE/$HOME/~} and ${COPILOT_SETTINGS_FILE/$HOME/~} preserved"
 
   echo ""
   success "Global uninstall complete"
