@@ -27,8 +27,11 @@ set -euo pipefail
 VERSION="3.0.0"
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
-CONTEXT_DIR=".context/specs"
-STATE_FILE=".context/.pipeline-state"
+SPEC_DIR="docs/context/specs"
+SPRINT_FILE="docs/context/CURRENT_SPRINT.md"
+RUNTIME_DIR=".context"
+STATE_FILE="${RUNTIME_DIR}/.pipeline-state"
+CONTEXT_DIR="$SPEC_DIR"   # backwards-compat alias — drop after one release
 ALLOWED_QUESTIONS=0   # 0 = disabled; N = max questions per agent run
 LAST_AGENT_OUTPUT=""  # captured after each agent run for question detection
 LAST_AGENT_TOOL=""    # "copilot" or "claude" — set by run_*_agent
@@ -243,7 +246,7 @@ require_gh() {
 # ║                     ERROR HANDLING & AUDIT LOG                  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-AUDIT_LOG=".context/.pipeline-audit.log"
+AUDIT_LOG="${RUNTIME_DIR}/.pipeline-audit.log"
 
 audit_log() {
   local level="$1"
@@ -3770,8 +3773,13 @@ CLAUDE_EOF
 install_project_context() {
   local project_dir="$1"
   local context_dir="$project_dir/.context"
+  local docs_context_dir="$project_dir/docs/context"
 
-  mkdir -p "$context_dir/specs/templates"
+  # Runtime directory (gitignored): ARCHITECTURE, CONVENTIONS, GLOSSARY stay here
+  mkdir -p "$context_dir/specs"
+
+  # Tracked directory: sprint board and spec templates land here
+  mkdir -p "$docs_context_dir/specs/templates"
 
   # Only create files that don't exist
   if [ ! -f "$context_dir/ARCHITECTURE.md" ]; then
@@ -3821,8 +3829,8 @@ EOF
     success ".context/GLOSSARY.md"
   fi
 
-  if [ ! -f "$context_dir/CURRENT_SPRINT.md" ]; then
-    cat > "$context_dir/CURRENT_SPRINT.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/CURRENT_SPRINT.md" ]; then
+    cat > "$docs_context_dir/CURRENT_SPRINT.md" << 'EOF'
 # Current Sprint
 
 ## In Progress
@@ -3837,11 +3845,11 @@ EOF
 ## Blockers
 <!-- - Description -->
 EOF
-    success ".context/CURRENT_SPRINT.md"
+    success "docs/context/CURRENT_SPRINT.md"
   fi
 
-  if [ ! -f "$context_dir/specs/templates/feature-spec.md" ]; then
-    cat > "$context_dir/specs/templates/feature-spec.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/specs/templates/feature-spec.md" ]; then
+    cat > "$docs_context_dir/specs/templates/feature-spec.md" << 'EOF'
 # [TICKET-ID]: Feature Name
 
 ## Context
@@ -3863,7 +3871,7 @@ EOF
 ## Open Questions
 - <!-- Any ambiguity -->
 EOF
-    success ".context/specs/templates/feature-spec.md"
+    success "docs/context/specs/templates/feature-spec.md"
   fi
 }
 
@@ -4013,7 +4021,7 @@ install_project_gitignore() {
   local project_dir="$1"
   local gitignore="$project_dir/.gitignore"
 
-  local entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state")
+  local entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state" ".context/.pipeline-audit.log" ".context/specs/*.jsonl")
   local added=0
 
   for entry in "${entries[@]}"; do
