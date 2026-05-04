@@ -243,7 +243,7 @@ Note: at this point the local `.context/CURRENT_SPRINT.md` and `.context/specs/B
 - [x] Step 8 — `ai-native-workflow` heredocs updated (test + impl)
 - [ ] Step 9 — `hooks/session-start.sh` updated (test + impl)
 - [ ] Step 10 — `templates/AGENTS.md` + skills updated (test + impl)
-- [ ] Step 11 — README + ARCHITECTURE updated (test + impl)
+- [x] Step 11 — README + ARCHITECTURE updated (test + impl)
 - [ ] Step 12 — Integration smoke test
 - [ ] Step 13 — Final audit pass + sprint board mark Done
 
