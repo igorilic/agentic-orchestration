@@ -40,3 +40,20 @@ run_install_global() {
   # And: no function-local COPILOT_DIR redefinitions remain
   ! grep -q 'local COPILOT_DIR=' "$INSTALLER"
 }
+
+# ---------------------------------------------------------------------------
+# Step 2: install_global_copilot_skills — copy every skill
+# ---------------------------------------------------------------------------
+
+@test "install global: copies every skill from source to \$COPILOT_HOME/skills/" {
+  run_install_global
+  for d in "$REPO_ROOT/skills"/*/; do
+    name="$(basename "$d")"
+    [ -f "$SANDBOX/skills/$name/SKILL.md" ] || { echo "missing: $name"; return 1; }
+  done
+}
+
+@test "install global: copies override-confidence/skill.bash to \$COPILOT_HOME/skills/" {
+  run_install_global
+  [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
+}
