@@ -196,6 +196,17 @@ The project uses a deliberate split between tracked spec artifacts and runtime s
 
 The `docs/context/` path is version-controlled so spec reviews happen in pull requests. The `.context/` runtime artifacts are gitignored to prevent churn from pipeline state files.
 
+## Symmetric Harness (COP-1)
+
+`install global` writes a symmetric set of artifacts for both Claude Code
+(`~/.claude/`) and GitHub Copilot CLI (`~/.copilot/`). Skills, agents, and
+global instructions are identical in purpose across both tools; pipeline skills
+have `claude --agent=` invocations rewritten to `copilot --agent=` in the
+Copilot copy. There is one intentional asymmetry: Claude Code hooks are
+installed globally and fire on every session, while Copilot CLI scopes hooks
+per-repository — Copilot repo-scope hooks are installed by `install project`
+and ship via COP-2 (see Hook Surfaces below).
+
 ## Hook Surfaces
 
 The system enforces quality gates through two distinct hook surfaces:
@@ -242,4 +253,5 @@ repository-scoped ones registered in `copilot-cli-policy.json`.
 - **Pipeline per platform**: GitLab uses Copilot CLI agents, GitHub uses Claude Code subagents
 - **Requirements first**: requirements-engineer runs before architect to ensure clear, testable inputs
 - **Decision points**: Incident pipeline lets user choose between documenting findings or implementing a fix
+- **Symmetric harness**: Skills/agents/instructions are symmetric across Claude Code and Copilot CLI; hooks are Claude-global, Copilot repo-scope (per-project via `install project`)
 - **Copilot hooks are per-project**: Copilot CLI lacks user-global hook support; the dispatcher is vendored into each repo so enforcement is self-contained and portable

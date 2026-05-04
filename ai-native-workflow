@@ -26,6 +26,11 @@ set -euo pipefail
 
 VERSION="3.0.0"
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
+COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
+COPILOT_AGENTS_DIR="$COPILOT_DIR/agents"
+COPILOT_SKILLS_DIR="$COPILOT_DIR/skills"
+COPILOT_INSTRUCTIONS_FILE="$COPILOT_DIR/copilot-instructions.md"
+COPILOT_SETTINGS_FILE="$COPILOT_DIR/settings.json"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
 SPEC_DIR="docs/context/specs"
 SPRINT_FILE="docs/context/CURRENT_SPRINT.md"
@@ -1681,13 +1686,35 @@ install_global() {
   # --- Copilot CLI agents ---
   install_copilot_agents
 
+  # --- Copilot CLI skills ---
+  install_global_copilot_skills
+
+  # --- Copilot CLI global instructions ---
+  install_global_copilot_instructions
+
+  # --- Copilot CLI settings ---
+  install_global_copilot_settings
+
   echo ""
   header "Global installation complete"
   echo ""
   info "Claude Code → ${CLAUDE_DIR}/"
-  info "Copilot CLI → ~/.copilot/agents/"
+  if command -v copilot >/dev/null 2>&1; then
+    info "Copilot CLI → ${COPILOT_DIR/$HOME/~}/"
+    dim "   Items written:"
+    dim "     agents/                   agent definitions"
+    dim "     skills/                   skill definitions"
+    dim "     copilot-instructions.md"
+    dim "     settings.json"
+  else
+    dim "Copilot CLI not found — Copilot-side artifacts skipped"
+  fi
   info "Run ${BOLD}ai-native-workflow status${NC} to verify"
   info "Start a new Claude Code or Copilot CLI session to activate"
+  echo ""
+  dim "▸ Copilot hooks are NOT installed globally — Copilot CLI scopes"
+  dim "  hooks per-repo. Run \`ai-native-workflow install project\` in"
+  dim "  trusted folders for repo-level hooks (COP-2; not yet shipped)."
 }
 
 install_global_claude_md() {
@@ -2605,6 +2632,14 @@ Run from terminal: `ai-native-workflow run gitlab-feature <JIRA-ID>`
 
 This pipeline uses Copilot CLI agents and requires: copilot, glab, Jira MCP.
 See `ai-native-workflow help` for details.
+
+### Manual agent invocations (Claude Code)
+```bash
+claude --agent=requirements-engineer --prompt "Analyze Jira ticket PROJ-123"
+claude --agent=architect --prompt "Design solution for PROJ-123"
+claude --agent=tdd-developer --prompt "Step 1 of PROJ-123-todo.md"
+claude --agent=reviewer --prompt "Review Step 1 of PROJ-123"
+```
 SKILL_EOF
   success "/pipeline-gitlab-feature skill"
 
@@ -3162,10 +3197,9 @@ install_copilot_agents() {
     return
   fi
 
-  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   header "Installing Copilot CLI agents"
 
-  mkdir -p "$COPILOT_DIR/agents"
+  mkdir -p "$COPILOT_AGENTS_DIR"
 
   # --- requirements-engineer (Opus) ---
   cat > "$COPILOT_DIR/agents/requirements-engineer.agent.md" << 'AGENT_EOF'
@@ -3456,6 +3490,134 @@ AGENT_EOF
   info "Copilot CLI agents installed to: $COPILOT_DIR/agents/"
   dim "Use: copilot --agent=architect --prompt \"...\""
   dim " or: /agent in interactive mode"
+}
+
+install_global_copilot_skills() {
+  command -v copilot &>/dev/null || return 0
+
+  header "Installing Copilot CLI skills"
+
+  mkdir -p "$COPILOT_SKILLS_DIR"
+
+  for skill_src_dir in "$_ANW_SCRIPT_DIR/skills"/*/; do
+    local skill_name
+    skill_name="$(basename "$skill_src_dir")"
+    local skill_dest_dir="$COPILOT_SKILLS_DIR/$skill_name"
+    if [ -d "$skill_dest_dir" ]; then
+      local ts
+      ts="$(date -u +%Y%m%dT%H%M%SZ)"
+      cp -R "$skill_dest_dir" "${skill_dest_dir}.bak.${ts}"
+    fi
+    mkdir -p "$skill_dest_dir"
+    cp -R "$skill_src_dir". "$skill_dest_dir/"
+    success "$skill_name skill"
+  done
+
+  # Rewrite any claude --agent= references to copilot --agent= in the
+  # installed copies. Uses .tmp suffix for cross-platform sed -i portability
+  # (BSD macOS vs GNU Linux both require an explicit backup extension).
+  for skill_md in "$COPILOT_SKILLS_DIR"/*/SKILL.md; do
+    if grep -q 'claude --agent=' "$skill_md" 2>/dev/null; then
+      sed -i.tmp 's/claude --agent=/copilot --agent=/g' "$skill_md"
+      rm -f "${skill_md}.tmp"
+    fi
+  done
+}
+
+install_global_copilot_instructions() {
+  command -v copilot &>/dev/null || return 0
+
+  local target="$COPILOT_INSTRUCTIONS_FILE"
+  mkdir -p "$COPILOT_DIR"
+  backup_if_exists "$target"
+
+  cat > "$target" << 'COPILOT_INSTRUCTIONS_EOF'
+# Global Copilot CLI Defaults
+
+## Identity
+- Solo full-stack developer
+- Shell: fish (macOS)
+- CLI tools: glab, gh, kubectl, az, docker, make
+
+## Personal Preferences
+- Commit messages: Conventional Commits
+- Always explain before making destructive changes
+- Prefer asking over assuming
+
+## Available Global Skills
+- /plan — Start new work (orchestrates full Agent Pipeline)
+- /tdd — Strict TDD workflow (RED → GREEN → REFACTOR)
+- /ticket — Jira/GitHub issue → spec + test scaffold
+- /skip-tdd — Bypass TDD gate with logged reason
+- /session-report — Obsidian session report
+- /adr — Architecture Decision Record (repo + Confluence)
+- /pr — Create PR/MR (auto-detects gh/glab)
+
+## Pipelines (CLI)
+Run full agent pipelines from the terminal:
+- `ai-native-workflow run gitlab-feature PROJ-123` — Copilot CLI + Jira → MR
+- `ai-native-workflow run gitlab-incident PROJ-456` — Troubleshooter + Jira → MR
+- `ai-native-workflow run github-feature specs.md` — GitHub issue → PR
+
+## Agent Pipeline
+All new work starts with `/plan`. The pipeline:
+1. **requirements-engineer** (Opus 4.6) — elicits & formalizes requirements
+2. **architect** (Opus 4.6) — designs spec + atomic todo plan
+3. **tdd-developer** (Sonnet 4.6) — implements one step via TDD
+4. **qa** (Haiku 4.5) — runs affected tests
+5. **reviewer** (Sonnet 4.6) — reviews code, user triages findings
+Max 3 fix loops per step, then remaining issues go to tech debt.
+
+For production incidents, use **troubleshooter** (Opus 4.6):
+- Pulls Jira ticket, ArgoCD logs, Azure Application Insights
+- Produces diagnosis + TDD fix plan for tdd-developer
+
+## Stack Detection
+Detect the active stack from project files and auto-apply conventions:
+- `*.csproj` or `*.sln` → .NET (xUnit, FluentAssertions, NSubstitute)
+- `go.mod` → Go (testing + testify, table-driven)
+- `Cargo.toml` → Rust (built-in + tokio-test, axum)
+- `pyproject.toml` or `requirements.txt` → Python (pytest, Pydantic)
+- `package.json` with react → React/TS (Vitest + Testing Library)
+- `package.json` with react-native → React Native (Jest + RNTL)
+- `Package.swift` or `*.xcodeproj` → Swift (XCTest)
+COPILOT_INSTRUCTIONS_EOF
+  success "${COPILOT_INSTRUCTIONS_FILE/$HOME/~}"
+}
+
+install_global_copilot_settings() {
+  command -v copilot &>/dev/null || return 0
+
+  local fresh_json='{"renderMarkdown": true, "theme": "auto", "beep": true}'
+
+  # Fresh install path — target does not exist yet
+  if [ ! -f "$COPILOT_SETTINGS_FILE" ]; then
+    mkdir -p "$COPILOT_DIR"
+    if command -v jq &>/dev/null; then
+      echo "$fresh_json" | jq '.' > "$COPILOT_SETTINGS_FILE"
+    else
+      echo "$fresh_json" > "$COPILOT_SETTINGS_FILE"
+    fi
+    success "${COPILOT_SETTINGS_FILE/$HOME/~} (fresh install with beep:true)"
+    return
+  fi
+
+  # Merge path — target already exists; preserve user keys, fill gaps
+  backup_if_exists "$COPILOT_SETTINGS_FILE"
+
+  if ! command -v jq &>/dev/null; then
+    warn "jq not found — leaving ${COPILOT_SETTINGS_FILE/$HOME/~} untouched"
+    return
+  fi
+
+  # Additive merge: defaults first, existing user keys win.
+  # `$defaults * $existing[0]` means existing values overwrite defaults.
+  echo "$fresh_json" \
+    | jq --slurpfile existing "$COPILOT_SETTINGS_FILE" \
+         '. * $existing[0]' \
+    > "$COPILOT_SETTINGS_FILE.tmp"
+  mv "$COPILOT_SETTINGS_FILE.tmp" "$COPILOT_SETTINGS_FILE"
+  success "${COPILOT_SETTINGS_FILE/$HOME/~} (merged with existing)"
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -4438,10 +4600,11 @@ show_status() {
   check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
   check_file "$CLAUDE_DIR/agents/explorer.md" "agents/explorer (Sonnet)"
 
-  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
-  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ]; then
+  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ] || [ -d "$COPILOT_SKILLS_DIR" ]; then
     echo ""
     header "Copilot CLI ($COPILOT_DIR/)"
+    check_file "$COPILOT_INSTRUCTIONS_FILE" "copilot-instructions.md"
+    check_file "$COPILOT_SETTINGS_FILE" "settings.json"
     check_file "$COPILOT_DIR/agents/requirements-engineer.agent.md" "agents/requirements-engineer"
     check_file "$COPILOT_DIR/agents/architect.agent.md" "agents/architect"
     check_file "$COPILOT_DIR/agents/tdd-developer.agent.md" "agents/tdd-developer"
@@ -4449,6 +4612,14 @@ show_status() {
     check_file "$COPILOT_DIR/agents/reviewer.agent.md" "agents/reviewer"
     check_file "$COPILOT_DIR/agents/troubleshooter.agent.md" "agents/troubleshooter"
     check_file "$COPILOT_DIR/agents/explorer.agent.md" "agents/explorer"
+    if [ -d "$COPILOT_SKILLS_DIR" ]; then
+      for d in "$COPILOT_SKILLS_DIR"/*/; do
+        [ -d "$d" ] || continue
+        local skill_name
+        skill_name="$(basename "$d")"
+        check_file "$d/SKILL.md" "skills/$skill_name"
+      done
+    fi
   fi
 
   echo ""
@@ -4583,7 +4754,6 @@ uninstall_global() {
   warn "Remove hooks config from settings.json manually if needed"
 
   # Copilot CLI agents
-  local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
   local copilot_agents=(
     "$COPILOT_DIR/agents/requirements-engineer.agent.md"
     "$COPILOT_DIR/agents/architect.agent.md"
@@ -4598,6 +4768,16 @@ uninstall_global() {
       success "Removed $(echo "$item" | sed "s|$HOME|~|")"
     fi
   done
+
+  # Remove Copilot CLI skills tree
+  if [ -d "$COPILOT_SKILLS_DIR" ]; then
+    rm -rf "$COPILOT_SKILLS_DIR"
+    success "Removed $(echo "$COPILOT_SKILLS_DIR" | sed "s|$HOME|~|")"
+  fi
+
+  # Don't delete copilot-instructions.md or settings.json — just warn
+  warn "${COPILOT_INSTRUCTIONS_FILE/$HOME/~} and ${COPILOT_SETTINGS_FILE/$HOME/~} preserved"
+
   echo ""
   success "Global uninstall complete"
 }
