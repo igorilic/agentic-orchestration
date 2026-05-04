@@ -30,4 +30,4 @@ Save to: `~/Obsidian/Dev/Sessions/<YYYY-MM-DD>-<project>-session.md`
 If Obsidian MCP is available, use it. Otherwise write directly.
 
 ### Step 4: Update Sprint
-Update `.context/CURRENT_SPRINT.md` with current status.
+Update `docs/context/CURRENT_SPRINT.md` with current status.

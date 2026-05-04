@@ -140,7 +140,8 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 |-----------|---------|
 | `AGENTS.md` | Cross-tool agent rules (Claude + Copilot) |
 | `CLAUDE.md` | Project context |
-| `.context/` | Architecture, conventions, specs, sprint |
+| `docs/context/` | Sprint board, tracked specs, todos, requirements (git-tracked; reviewable in PRs) |
+| `.context/` | Architecture, conventions, glossary (installer-seeded) + runtime pipeline state (gitignored) |
 | `.github/copilot-instructions.md` | Copilot repo-wide rules |
 | `.github/instructions/*.instructions.md` | Stack-specific Copilot rules |
 | `docs/decisions/` | ADR directory |

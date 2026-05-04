@@ -27,8 +27,11 @@ set -euo pipefail
 VERSION="3.0.0"
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
-CONTEXT_DIR=".context/specs"
-STATE_FILE=".context/.pipeline-state"
+SPEC_DIR="docs/context/specs"
+SPRINT_FILE="docs/context/CURRENT_SPRINT.md"
+RUNTIME_DIR=".context"
+STATE_FILE="${RUNTIME_DIR}/.pipeline-state"
+CONTEXT_DIR="$SPEC_DIR"   # backwards-compat alias — drop after one release
 ALLOWED_QUESTIONS=0   # 0 = disabled; N = max questions per agent run
 LAST_AGENT_OUTPUT=""  # captured after each agent run for question detection
 LAST_AGENT_TOOL=""    # "copilot" or "claude" — set by run_*_agent
@@ -243,7 +246,7 @@ require_gh() {
 # ║                     ERROR HANDLING & AUDIT LOG                  ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
-AUDIT_LOG=".context/.pipeline-audit.log"
+AUDIT_LOG="${RUNTIME_DIR}/.pipeline-audit.log"
 
 audit_log() {
   local level="$1"
@@ -1976,8 +1979,8 @@ detect_stack() {
 STACK=$(detect_stack)
 [ -n "$STACK" ] && CONTEXT="📦 Detected stack: $STACK\n"
 
-if [ -f "$PROJECT_DIR/.context/CURRENT_SPRINT.md" ]; then
-  SPRINT=$(head -20 "$PROJECT_DIR/.context/CURRENT_SPRINT.md")
+if [ -f "$PROJECT_DIR/$SPRINT_FILE" ]; then
+  SPRINT=$(head -20 "$PROJECT_DIR/$SPRINT_FILE")
   CONTEXT="${CONTEXT}\n📋 Current Sprint:\n${SPRINT}\n"
 fi
 
@@ -2188,7 +2191,7 @@ What I need: [specific questions]
 ```
 
 ### Step 3: Create Feature Spec
-Create `.context/specs/<ticket-id>-<short-name>.md` with sections:
+Create `docs/context/specs/<ticket-id>-<short-name>.md` with sections:
 - Source (ticket URL)
 - Context (from description)
 - Acceptance Criteria (from AC field or synthesized)
@@ -2201,7 +2204,7 @@ Detect the project stack and create test file(s) with empty test
 functions matching the acceptance criteria.
 
 ### Step 5: Update Sprint
-Add the ticket to `.context/CURRENT_SPRINT.md` as "In Progress".
+Add the ticket to `docs/context/CURRENT_SPRINT.md` as "In Progress".
 SKILL_EOF
   success "/ticket skill"
 
@@ -2290,7 +2293,7 @@ Save to: `~/Obsidian/Dev/Sessions/<YYYY-MM-DD>-<project>-session.md`
 If Obsidian MCP is available, use it. Otherwise write directly.
 
 ### Step 4: Update Sprint
-Update `.context/CURRENT_SPRINT.md` with current status.
+Update `docs/context/CURRENT_SPRINT.md` with current status.
 SKILL_EOF
   success "/session-report skill"
 
@@ -2460,7 +2463,7 @@ prototype).
   ↓
 one-question-at-a-time elicitation
   ↓
-.context/specs/<id>-brainstorm.md  ← captured ideas
+docs/context/specs/<id>-brainstorm.md  ← captured ideas
   ↓
 either:
   → /plan <id>   (production track)
@@ -2470,7 +2473,7 @@ either:
 ### Workflow
 1. Restate the idea back in your own words. Confirm.
 2. Ask ONE question at a time. Build context iteratively.
-3. Capture decisions in `.context/specs/<id>-brainstorm.md`.
+3. Capture decisions in `docs/context/specs/<id>-brainstorm.md`.
 4. When the shape is clear, recommend a track:
    - **Production-ready idea** → `/plan` (spec → todo → TDD)
    - **Needs prototyping first** → `/explore` (spike under spikes/)
@@ -2710,7 +2713,7 @@ Extract, clarify, and formalize requirements so that downstream agents
 - Output a list of assumptions made (for user validation)
 
 ### 3. Structure Requirements
-Create `.context/specs/<id>-requirements.md` with: Problem Statement,
+Create `docs/context/specs/<id>-requirements.md` with: Problem Statement,
 User Stories, Functional Requirements, Non-Functional Requirements,
 Acceptance Criteria (Given/When/Then), Constraints, Out of Scope,
 Open Questions, Assumptions.
@@ -2771,12 +2774,12 @@ committable steps for the tdd-developer agent.
 - If unclear: STOP, present options with tradeoffs, ask
 
 ### 2. Create Spec
-`.context/specs/<id>-<name>.md` with: Problem Statement, Context,
+`docs/context/specs/<id>-<name>.md` with: Problem Statement, Context,
 Proposed Solution, Acceptance Criteria (testable), Technical Design
 (components, data model, API), Risks, Out of Scope.
 
 ### 3. Create Todo
-`.context/specs/<id>-todo.md` with atomic steps. Each step MUST:
+`docs/context/specs/<id>-todo.md` with atomic steps. Each step MUST:
 - Be independently testable
 - Result in a commit
 - Complete in one TDD cycle (< 30 min)
@@ -2795,7 +2798,7 @@ Format:
 End with Integration Test step + Status checklist.
 
 ### 4. Update Sprint
-Add to `.context/CURRENT_SPRINT.md` as In Progress.
+Add to `docs/context/CURRENT_SPRINT.md` as In Progress.
 
 ### 5. Hand Off
 Present plan, tell user: `Use tdd-developer on Step 1 of <id>-todo.md`
@@ -3072,8 +3075,8 @@ Output structured diagnosis with: Issue, Scope, Timeline, Root Cause,
 Evidence per region table, Fix Plan (todo.md), Prevention.
 
 ### Step 6: Create Artifacts + Hand Off
-1. Create `.context/specs/<ticket>-bugfix.md` with diagnosis
-2. Create `.context/specs/<ticket>-todo.md` with fix steps
+1. Create `docs/context/specs/<ticket>-bugfix.md` with diagnosis
+2. Create `docs/context/specs/<ticket>-todo.md` with fix steps
 3. Step 1 must REPRODUCE the bug as a failing test
 4. Tell user: `Use tdd-developer to work on Step 1`
 
@@ -3196,7 +3199,7 @@ Jira tickets, and spec documents into clear, testable requirements.
 2. Identify ambiguities, gaps, contradictions
 3. Cross-reference with `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
 4. If critical info missing: STOP and ask specific questions
-5. Create `.context/specs/<id>-requirements.md` with:
+5. Create `docs/context/specs/<id>-requirements.md` with:
    Problem Statement, User Stories, Functional Requirements,
    Non-Functional Requirements, Acceptance Criteria (Given/When/Then),
    Constraints, Out of Scope, Open Questions, Assumptions
@@ -3223,7 +3226,7 @@ name: architect
 description: >
   Entry point for ALL new work. Creates feature specs and atomic todo
   plans with testable steps. Must run BEFORE any code is written.
-  Creates spec.md and todo.md in .context/specs/.
+  Creates spec.md and todo.md in docs/context/specs/.
 model: claude-opus-4.6
 ---
 
@@ -3238,10 +3241,10 @@ committable steps for the tdd-developer agent.
 1. Read `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
 2. Scan codebase for existing patterns
 3. If unclear: STOP, present options with tradeoffs, ask
-4. Create spec at `.context/specs/<id>-<n>.md`
-5. Create todo at `.context/specs/<id>-todo.md` with atomic steps
+4. Create spec at `docs/context/specs/<id>-<n>.md`
+5. Create todo at `docs/context/specs/<id>-todo.md` with atomic steps
    Each step: what to TEST, what to IMPLEMENT, affected files
-6. Update `.context/CURRENT_SPRINT.md`
+6. Update `docs/context/CURRENT_SPRINT.md`
 7. Hand off: `copilot --agent=tdd-developer --prompt "Step 1 of <id>-todo.md"`
 
 ## Rules
@@ -3632,7 +3635,7 @@ When in doubt, ask.
 - \`fix\` — triage and address the issues just identified
 - \`f\` / \`t\` / \`i\` — per-item triage on a numbered list:
   - \`f\` = fix now
-  - \`t\` = log to tech debt (append to \`.context/CURRENT_SPRINT.md\`)
+  - \`t\` = log to tech debt (append to \`docs/context/CURRENT_SPRINT.md\`)
   - \`i\` = ignore, not a real issue
 - Positional mapping: \`f t i f\` against a 4-item list maps 1→f, 2→t, 3→i, 4→f.
 
@@ -3667,12 +3670,12 @@ Do NOT guess. Stop and present options when:
 - Business logic is unclear
 
 ### 3. Document As You Go
-- Update \`.context/CURRENT_SPRINT.md\` when task status changes
+- Update \`docs/context/CURRENT_SPRINT.md\` when task status changes
 - Note architecture decisions in commit messages
 - Flag documentation that needs updating
 
 ## Before Starting Any Work
-1. Read the spec in \`.context/specs/\` if one exists
+1. Read the spec in \`docs/context/specs/\` if one exists
 2. Scan \`.context/ARCHITECTURE.md\` for system context
 3. Check \`.context/CONVENTIONS.md\` for stack patterns
 4. Identify ALL affected components before writing code
@@ -3710,7 +3713,7 @@ Suggested action: [What to do next]
 ## Session End Protocol
 1. Ensure all tests pass
 2. Commit pending changes
-3. Update \`.context/CURRENT_SPRINT.md\`
+3. Update \`docs/context/CURRENT_SPRINT.md\`
 4. Use \`/session-report\` to generate Obsidian report
 AGENTS_EOF
   success "AGENTS.md (tailored for: $(echo "$stacks" | tr '\n' ', ' | sed 's/,$//'))"
@@ -3740,10 +3743,10 @@ ${project_name}
 Read \`.context/ARCHITECTURE.md\` for system design.
 
 ## Current Work
-Read \`.context/CURRENT_SPRINT.md\` for active tasks.
+Read \`docs/context/CURRENT_SPRINT.md\` for active tasks.
 
 ## Specs
-Feature specifications are in \`.context/specs/\`.
+Feature specifications are in \`docs/context/specs/\`.
 
 ## Commands
 \`\`\`bash
@@ -3759,7 +3762,8 @@ make dev               # Local dev server
 ## Key Paths
 | Path | Purpose |
 |---|---|
-| \`.context/\` | Specs, architecture, conventions |
+| \`docs/context/\` | Sprint board + tracked specs and todos |
+| \`.context/\` | Architecture, conventions, glossary, runtime state |
 | \`docs/\` | Arc42 documentation + ADRs |
 | \`tests/unit/\` | Unit tests |
 | \`tests/integration/\` | Integration tests |
@@ -3770,8 +3774,16 @@ CLAUDE_EOF
 install_project_context() {
   local project_dir="$1"
   local context_dir="$project_dir/.context"
+  local docs_context_dir="$project_dir/docs/context"
 
-  mkdir -p "$context_dir/specs/templates"
+  # .context/ holds two kinds of files:
+  #   - per-project installer-seeded reference (ARCHITECTURE.md, CONVENTIONS.md,
+  #     GLOSSARY.md) — committed by the consuming project
+  #   - runtime artifacts (.pipeline-state, .pipeline-audit.log, *.jsonl) — gitignored
+  mkdir -p "$context_dir/specs"
+
+  # Tracked directory: sprint board and spec templates land here
+  mkdir -p "$docs_context_dir/specs/templates"
 
   # Only create files that don't exist
   if [ ! -f "$context_dir/ARCHITECTURE.md" ]; then
@@ -3821,8 +3833,8 @@ EOF
     success ".context/GLOSSARY.md"
   fi
 
-  if [ ! -f "$context_dir/CURRENT_SPRINT.md" ]; then
-    cat > "$context_dir/CURRENT_SPRINT.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/CURRENT_SPRINT.md" ]; then
+    cat > "$docs_context_dir/CURRENT_SPRINT.md" << 'EOF'
 # Current Sprint
 
 ## In Progress
@@ -3837,11 +3849,11 @@ EOF
 ## Blockers
 <!-- - Description -->
 EOF
-    success ".context/CURRENT_SPRINT.md"
+    success "$SPRINT_FILE"
   fi
 
-  if [ ! -f "$context_dir/specs/templates/feature-spec.md" ]; then
-    cat > "$context_dir/specs/templates/feature-spec.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/specs/templates/feature-spec.md" ]; then
+    cat > "$docs_context_dir/specs/templates/feature-spec.md" << 'EOF'
 # [TICKET-ID]: Feature Name
 
 ## Context
@@ -3863,7 +3875,7 @@ EOF
 ## Open Questions
 - <!-- Any ambiguity -->
 EOF
-    success ".context/specs/templates/feature-spec.md"
+    success "$SPEC_DIR/templates/feature-spec.md"
   fi
 }
 
@@ -3887,7 +3899,7 @@ install_project_copilot() {
 3. Refactor while keeping tests green
 
 ## Before Coding
-- Check `.context/specs/` for feature specifications
+- Check `docs/context/specs/` for feature specifications
 - Read `.context/CONVENTIONS.md` for stack patterns
 - Read `.context/ARCHITECTURE.md` for system context
 
@@ -4013,7 +4025,7 @@ install_project_gitignore() {
   local project_dir="$1"
   local gitignore="$project_dir/.gitignore"
 
-  local entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state")
+  local entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state" ".context/.pipeline-audit.log" ".context/specs/*.jsonl")
   local added=0
 
   for entry in "${entries[@]}"; do
@@ -4090,7 +4102,7 @@ show_status() {
   header "Current Directory ($(pwd))"
   check_file "AGENTS.md" "AGENTS.md"
   check_file "CLAUDE.md" "CLAUDE.md"
-  check_file ".context/CURRENT_SPRINT.md" ".context/"
+  check_file "$SPRINT_FILE" "docs/context/"
   check_file ".github/copilot-instructions.md" ".github/copilot-instructions.md"
   check_dir ".github/instructions" ".github/instructions/"
 

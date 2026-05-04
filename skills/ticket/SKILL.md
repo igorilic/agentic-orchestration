@@ -34,7 +34,7 @@ What I need: [specific questions]
 ```
 
 ### Step 3: Create Feature Spec
-Create `.context/specs/<ticket-id>-<short-name>.md` with sections:
+Create `docs/context/specs/<ticket-id>-<short-name>.md` with sections:
 - Source (ticket URL)
 - Context (from description)
 - Acceptance Criteria (from AC field or synthesized)
@@ -47,4 +47,4 @@ Detect the project stack and create test file(s) with empty test
 functions matching the acceptance criteria.
 
 ### Step 5: Update Sprint
-Add the ticket to `.context/CURRENT_SPRINT.md` as "In Progress".
+Add the ticket to `docs/context/CURRENT_SPRINT.md` as "In Progress".

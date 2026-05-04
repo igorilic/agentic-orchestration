@@ -21,7 +21,7 @@ prototype).
   ↓
 one-question-at-a-time elicitation
   ↓
-.context/specs/<id>-brainstorm.md  ← captured ideas
+docs/context/specs/<id>-brainstorm.md  ← captured ideas
   ↓
 either:
   → /plan <id>   (production track)
@@ -31,7 +31,7 @@ either:
 ### Workflow
 1. Restate the idea back in your own words. Confirm.
 2. Ask ONE question at a time. Build context iteratively.
-3. Capture decisions in `.context/specs/<id>-brainstorm.md`.
+3. Capture decisions in `docs/context/specs/<id>-brainstorm.md`.
 4. When the shape is clear, recommend a track:
    - **Production-ready idea** → `/plan` (spec → todo → TDD)
    - **Needs prototyping first** → `/explore` (spike under spikes/)

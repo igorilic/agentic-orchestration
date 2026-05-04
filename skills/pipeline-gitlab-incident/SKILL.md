@@ -61,8 +61,8 @@ Jira Incident Ticket
 copilot --agent=troubleshooter --prompt "Investigate Jira incident PROJ-456"
 ```
 Troubleshooter produces:
-- `.context/specs/PROJ-456-bugfix.md` — diagnosis with key findings
-- `.context/specs/PROJ-456-todo.md` — fix steps (if applicable)
+- `docs/context/specs/PROJ-456-bugfix.md` — diagnosis with key findings
+- `docs/context/specs/PROJ-456-todo.md` — fix steps (if applicable)
 
 #### Step 2: Decide next action
 
@@ -70,7 +70,7 @@ Troubleshooter produces:
 Add the diagnosis to the Jira ticket as a comment:
 ```bash
 jira issue comment add PROJ-456 --body "## Root Cause Analysis
-$(cat .context/specs/PROJ-456-bugfix.md)"
+$(cat docs/context/specs/PROJ-456-bugfix.md)"
 ```
 Pipeline ends here. The key findings and recommended next action are
 now on the Jira ticket for the team to review.

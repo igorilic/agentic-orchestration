@@ -163,3 +163,230 @@ EOF
   [ -f "$SANDBOX/skills/override-confidence/SKILL.md" ]
   [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Steps 1+2: new docs/context/ layout and runtime-only .gitignore
+# ---------------------------------------------------------------------------
+
+@test "install project: creates docs/context/CURRENT_SPRINT.md" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  [ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: creates docs/context/specs/templates/feature-spec.md" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  [ -f "$SANDBOX_PROJECT/docs/context/specs/templates/feature-spec.md" ]
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: project .gitignore contains runtime ignore entries" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  grep -qF '.context/.pipeline-state' "$SANDBOX_PROJECT/.gitignore"
+  grep -qF '.context/.pipeline-audit.log' "$SANDBOX_PROJECT/.gitignore"
+  grep -qF '.context/specs/*.jsonl' "$SANDBOX_PROJECT/.gitignore"
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: project .gitignore does NOT contain bare .context/" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  ! grep -qE '^\.context/$' "$SANDBOX_PROJECT/.gitignore"
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 3: repo-level .gitignore shape guard
+# ---------------------------------------------------------------------------
+
+@test "repo .gitignore: does NOT contain bare .context/" {
+  ! grep -qE '^\.context/$' "$BATS_TEST_DIRNAME/../.gitignore"
+}
+
+@test "repo .gitignore: contains the three runtime entries" {
+  grep -qF '.context/.pipeline-state'    "$BATS_TEST_DIRNAME/../.gitignore"
+  grep -qF '.context/.pipeline-audit.log' "$BATS_TEST_DIRNAME/../.gitignore"
+  grep -qF '.context/specs/*.jsonl'      "$BATS_TEST_DIRNAME/../.gitignore"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 5: Claude Code agent prompts use docs/context/
+# ---------------------------------------------------------------------------
+
+@test "agents/claude-code: no spec/todo/requirements paths under .context/specs/" {
+  # Spec, todo, requirements, bugfix, brainstorm, testplan artifacts must reference docs/context/
+  # Confidence jsonl stays under .context/specs/ — excluded by the negative lookahead pattern below
+  ! rg -q '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/"
+}
+
+@test "agents/claude-code: confidence jsonl path under .context/specs/ remains" {
+  rg -q '\.context/specs/.*-confidence\.jsonl' \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/qa.md" \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/reviewer.md" \
+    "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+}
+
+@test "agents/claude-code: ARCHITECTURE and CONVENTIONS reads stay under .context/" {
+  rg -q '\.context/ARCHITECTURE\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+  rg -q '\.context/CONVENTIONS\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 6: Copilot CLI agent prompts use docs/context/
+# ---------------------------------------------------------------------------
+
+@test "agents/copilot-cli: no spec/todo/requirements paths under .context/specs/" {
+  ! rg -q '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/"
+}
+
+@test "agents/copilot-cli: confidence jsonl path under .context/specs/ remains" {
+  rg -q '\.context/specs/.*-confidence\.jsonl' \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/qa.agent.md" \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/reviewer.agent.md" \
+    "$BATS_TEST_DIRNAME/../agents/copilot-cli/architect.agent.md"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 8: ai-native-workflow embedded heredocs use docs/context/
+# ---------------------------------------------------------------------------
+
+@test "cli: ai-native-workflow heredocs use docs/context/ for spec/sprint paths (no .context/specs/<id>-...)" {
+  # Spec, todo, requirements, bugfix, brainstorm artifacts in heredocs must reference docs/context/
+  # Confidence jsonl stays under .context/specs/ — matched separately below
+  ! rg -q '\.context/specs/[^*]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+    "$BATS_TEST_DIRNAME/../ai-native-workflow"
+}
+
+@test "cli: ai-native-workflow heredocs use docs/context/ for CURRENT_SPRINT (no .context/CURRENT_SPRINT)" {
+  # All CURRENT_SPRINT references in heredocs must point to docs/context/
+  ! rg -q '\.context/CURRENT_SPRINT' \
+    "$BATS_TEST_DIRNAME/../ai-native-workflow"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 9: hooks/session-start.sh reads sprint from docs/context/
+# ---------------------------------------------------------------------------
+
+@test "hooks: session-start reads sprint from docs/context/CURRENT_SPRINT.md" {
+  local proj
+  proj="$(mktemp -d /tmp/aw-session-start-XXXXXX)"
+  mkdir -p "$proj/docs/context"
+  echo "SPRINT_MARKER_XYZ" > "$proj/docs/context/CURRENT_SPRINT.md"
+  output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
+  rm -rf "$proj"
+  echo "$output" | grep -q "SPRINT_MARKER_XYZ"
+}
+
+@test "hooks: session-start does NOT read sprint from old .context/CURRENT_SPRINT.md (hard-cut)" {
+  local proj
+  proj="$(mktemp -d /tmp/aw-session-start-XXXXXX)"
+  mkdir -p "$proj/.context"
+  echo "OLD_SPRINT_MARKER_XYZ" > "$proj/.context/CURRENT_SPRINT.md"
+  output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
+  rm -rf "$proj"
+  ! echo "$output" | grep -q "OLD_SPRINT_MARKER_XYZ"
+}
+
+@test "hooks: session-start.sh source references docs/context/CURRENT_SPRINT.md" {
+  rg -q 'docs/context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
+}
+
+@test "hooks: session-start.sh source does NOT reference .context/CURRENT_SPRINT.md" {
+  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 10: templates/AGENTS.md and skills/ reference docs/context/
+# ---------------------------------------------------------------------------
+
+@test "docs: templates/AGENTS.md does not reference .context/CURRENT_SPRINT.md" {
+  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
+}
+
+@test "docs: templates/AGENTS.md does not reference .context/specs/ for spec/todo paths" {
+  # Allow .context/ARCHITECTURE.md and .context/CONVENTIONS.md (those stay)
+  ! rg -q '\.context/specs/' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
+}
+
+@test "docs: skills/ do not reference .context/CURRENT_SPRINT.md" {
+  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../skills/"
+}
+
+@test "docs: skills/ do not reference .context/specs/ for tracked spec artifacts" {
+  # brainstorm, requirements, spec, todo, testplan, bugfix must move to docs/context/specs/
+  # Confidence jsonl stays under .context/specs/ — not matched by this pattern
+  ! rg -q '\.context/specs/[^$]*-(brainstorm|requirements|spec|todo|testplan|bugfix)' \
+    "$BATS_TEST_DIRNAME/../skills/"
+}
+
+@test "docs: README.md mentions docs/context/" {
+  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: ARCHITECTURE.md mentions docs/context/" {
+  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+}
+
+@test "docs: README.md does not reference old .context/specs/ tracked artifact paths" {
+  # Lines with confidence.jsonl (runtime artifact) are allowed to stay
+  # We check specifically for the spec/todo/requirements/bugfix/testplan/brainstorm old paths
+  ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+    "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: ARCHITECTURE.md does not reference old .context/specs/ tracked artifact paths" {
+  # Pipeline diagrams used to show → .context/specs/<id>-requirements.md; those must now show docs/context/
+  ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+}
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 12: Integration smoke — fresh install produces new layout end-to-end
+# ---------------------------------------------------------------------------
+
+@test "integration smoke: install global then install project produces new docs/context/ layout" {
+  local sandbox_claude sandbox_project
+  sandbox_claude="$(mktemp -d /tmp/aw-smoke-claude-XXXXXX)"
+  sandbox_project="$(mktemp -d /tmp/aw-smoke-project-XXXXXX)"
+
+  # Run global install into sandbox (installs agents, hooks, skills)
+  CLAUDE_HOME="$sandbox_claude" "$INSTALLER" install global >/dev/null 2>&1
+
+  # Run project install into the project sandbox
+  "$INSTALLER" install project "$sandbox_project" >/dev/null 2>&1
+
+  # AC: tracked sprint and specs go to docs/context/
+  [ -f "$sandbox_project/docs/context/CURRENT_SPRINT.md" ]
+  [ -f "$sandbox_project/docs/context/specs/templates/feature-spec.md" ]
+
+  # AC: architecture/conventions/glossary docs stay in .context/ (installer-seeded, tracked in consumer)
+  [ -f "$sandbox_project/.context/ARCHITECTURE.md" ]
+  [ -f "$sandbox_project/.context/CONVENTIONS.md" ]
+  [ -f "$sandbox_project/.context/GLOSSARY.md" ]
+
+  # AC: .gitignore contains runtime-only entries
+  grep -qF '.context/.pipeline-state' "$sandbox_project/.gitignore"
+
+  # AC: .gitignore does NOT contain bare .context/ (legacy blanket ignore gone)
+  ! grep -qE '^\.context/$' "$sandbox_project/.gitignore"
+
+  # AC: globally installed architect.md exists and has no old .context/specs/ tracked paths
+  [ -f "$sandbox_claude/agents/architect.md" ]
+  ! grep -qE '\.context/specs/[^$]*-(spec|todo|requirements)' "$sandbox_claude/agents/architect.md"
+
+  rm -rf "$sandbox_claude" "$sandbox_project"
+}
+
+@test "installer: SPEC_DIR and SPRINT_FILE constants are referenced (not just defined)" {
+  # Count uses of the constants outside their definitions
+  uses_spec="$(grep -c '\${SPEC_DIR}\|\$SPEC_DIR\b' "$INSTALLER" || true)"
+  uses_sprint="$(grep -c '\${SPRINT_FILE}\|\$SPRINT_FILE\b' "$INSTALLER" || true)"
+  # Expect at least 2 uses of each (definition + at least one consumer)
+  [ "$uses_spec" -ge 2 ]
+  [ "$uses_sprint" -ge 2 ]
+}

@@ -16,7 +16,7 @@ specs.md / User Input
   │
   ├─ 1. requirements-engineer (Opus 4.6)
   │     Read specs.md or user input → structured requirements
-  │     → .context/specs/<id>-requirements.md
+  │     → docs/context/specs/<id>-requirements.md
   │     → User validates requirements
   │
   ├─ 2. Create GitHub Issue
@@ -26,7 +26,7 @@ specs.md / User Input
   │
   ├─ 3. architect (Opus 4.6)
   │     Read requirements → design solution
-  │     → .context/specs/<id>-spec.md + <id>-todo.md
+  │     → docs/context/specs/<id>-spec.md + <id>-todo.md
   │     → User approves plan
   │
   ├─ 4. tdd-developer (Sonnet 4.6) — per step
@@ -71,14 +71,14 @@ Use requirements-engineer: "We need user authentication with OAuth2,
 supporting Google and GitHub providers, with role-based access control"
 ```
 
-Review the generated `.context/specs/<id>-requirements.md`.
+Review the generated `docs/context/specs/<id>-requirements.md`.
 Validate acceptance criteria and assumptions.
 
 #### Step 2: Create GitHub issue
 ```bash
 gh issue create \
   --title "feat: <feature name>" \
-  --body "$(cat .context/specs/<id>-requirements.md | head -n 100)" \
+  --body "$(cat docs/context/specs/<id>-requirements.md | head -n 100)" \
   --label "feature-request"
 ```
 Or let the requirements-engineer format and create the issue directly:

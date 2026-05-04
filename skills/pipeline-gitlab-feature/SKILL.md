@@ -16,17 +16,17 @@ Jira Ticket
   │
   ├─ 1. requirements-engineer (Opus 4.6)
   │     Fetch Jira ticket → analyze → structured requirements
-  │     → .context/specs/<id>-requirements.md
+  │     → docs/context/specs/<id>-requirements.md
   │     → User validates requirements
   │
   ├─ 2. qa (Haiku 4.5) — test planning
   │     Read requirements → create testing plan
   │     → Unit, integration, edge case scenarios
-  │     → .context/specs/<id>-testplan.md
+  │     → docs/context/specs/<id>-testplan.md
   │
   ├─ 3. architect (Opus 4.6)
   │     Read requirements + test plan → design solution
-  │     → .context/specs/<id>-spec.md + <id>-todo.md
+  │     → docs/context/specs/<id>-spec.md + <id>-todo.md
   │     → User approves plan
   │
   ├─ 4. tdd-developer (Sonnet 4.6) — per step
@@ -59,7 +59,7 @@ Jira Ticket
 ```bash
 copilot --agent=requirements-engineer --prompt "Analyze Jira ticket PROJ-123"
 ```
-Review the generated `.context/specs/PROJ-123-requirements.md`.
+Review the generated `docs/context/specs/PROJ-123-requirements.md`.
 Validate acceptance criteria and assumptions.
 
 #### Step 2: Create test plan
@@ -96,7 +96,7 @@ glab mr create --title "feat(scope): description" --description "Closes PROJ-123
 Or use the `/pr` skill for auto-generated MR description.
 
 ### Notes
-- Each step can be run independently — agents communicate via `.context/specs/` files
+- Each step can be run independently — agents communicate via `docs/context/specs/` files
 - The tdd-developer → qa → reviewer cycle repeats for each step in the todo
 - Max 3 fix loops per step, then remaining issues go to tech debt
 - All agents use Copilot CLI (`copilot --agent=<name>`)

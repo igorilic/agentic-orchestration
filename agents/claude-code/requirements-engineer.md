@@ -53,7 +53,7 @@ Extract, clarify, and formalize requirements so that downstream agents
 - Output a list of assumptions made (for user validation)
 
 ### 3. Structure Requirements
-Create `.context/specs/<id>-requirements.md` with:
+Create `docs/context/specs/<id>-requirements.md` with:
 
 ```markdown
 # Requirements: <feature name>

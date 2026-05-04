@@ -37,8 +37,8 @@ detect_stack() {
 STACK=$(detect_stack)
 [ -n "$STACK" ] && CONTEXT="📦 Detected stack: $STACK\n"
 
-if [ -f "$PROJECT_DIR/.context/CURRENT_SPRINT.md" ]; then
-  SPRINT=$(head -20 "$PROJECT_DIR/.context/CURRENT_SPRINT.md")
+if [ -f "$PROJECT_DIR/docs/context/CURRENT_SPRINT.md" ]; then
+  SPRINT=$(head -20 "$PROJECT_DIR/docs/context/CURRENT_SPRINT.md")
   CONTEXT="${CONTEXT}\n📋 Current Sprint:\n${SPRINT}\n"
 fi
 
