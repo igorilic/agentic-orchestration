@@ -42,7 +42,7 @@ Jira Ticket
   │
   ├─ 1. requirements-engineer (Opus 4.6)
   │     Fetch Jira ticket → structured requirements
-  │     → .context/specs/<id>-requirements.md
+  │     → docs/context/specs/<id>-requirements.md
   │
   ├─ 2. qa (Haiku 4.5) — test planning
   │     Requirements → testing plan with scenarios
@@ -111,7 +111,7 @@ specs.md / User Input
   │
   ├─ 1. requirements-engineer (Opus 4.6)
   │     Specs or input → structured requirements
-  │     → .context/specs/<id>-requirements.md
+  │     → docs/context/specs/<id>-requirements.md
   │
   ├─ 2. gh issue create
   │     Requirements → GitHub issue (feature request)
@@ -181,6 +181,20 @@ specs.md / User Input
 | qa | Haiku 4.5 | Run tests, create test plans | No |
 | reviewer | Sonnet 4.6 | Code review, quality gate | No |
 | troubleshooter | Opus 4.6 | Incident investigation, diagnosis | No |
+
+## Path Conventions
+
+The project uses a deliberate split between tracked spec artifacts and runtime state:
+
+| Path | Tracked in git? | Contents |
+|------|----------------|----------|
+| `docs/context/` | Yes | Sprint board (`CURRENT_SPRINT.md`), specs, todos, requirements, test plans |
+| `.context/` | Installer artifacts only | `ARCHITECTURE.md`, `CONVENTIONS.md`, `GLOSSARY.md` (seeded by installer, not tracked) |
+| `.context/specs/*.jsonl` | No (gitignored) | Confidence event logs (runtime state) |
+| `.context/.pipeline-state` | No (gitignored) | Pipeline run state |
+| `.context/.pipeline-audit.log` | No (gitignored) | Audit trail |
+
+The `docs/context/` path is version-controlled so spec reviews happen in pull requests. The `.context/` runtime artifacts are gitignored to prevent churn from pipeline state files.
 
 ## Key Design Decisions
 
