@@ -322,3 +322,24 @@ EOF
   ! rg -q '\.context/specs/[^$]*-(brainstorm|requirements|spec|todo|testplan|bugfix)' \
     "$BATS_TEST_DIRNAME/../skills/"
 }
+
+@test "docs: README.md mentions docs/context/" {
+  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: ARCHITECTURE.md mentions docs/context/" {
+  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+}
+
+@test "docs: README.md does not reference old .context/specs/ tracked artifact paths" {
+  # Lines with confidence.jsonl (runtime artifact) are allowed to stay
+  # We check specifically for the spec/todo/requirements/bugfix/testplan/brainstorm old paths
+  ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+    "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: ARCHITECTURE.md does not reference old .context/specs/ tracked artifact paths" {
+  # Pipeline diagrams used to show → .context/specs/<id>-requirements.md; those must now show docs/context/
+  ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+}
