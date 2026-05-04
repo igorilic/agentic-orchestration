@@ -563,10 +563,10 @@ append to it.
   - [x] Tests added (every-skill loop, multi-file skill)
   - [x] Implementation: `install_global_copilot_skills` + wire-in
   - [x] AC-1 covered
-- [ ] **Step 3** — Pipeline-skill rewrite
-  - [ ] Tests added (3 affected skills + Claude-side regression guard)
-  - [ ] Implementation: dynamic sed rewrite block
-  - [ ] AC-2 covered
+- [x] **Step 3** — Pipeline-skill rewrite
+  - [x] Tests added (3 affected skills + Claude-side regression guard)
+  - [x] Implementation: dynamic sed rewrite block
+  - [x] AC-2 covered
 - [ ] **Step 4** — Global instructions file
   - [ ] Tests added (markers + backup)
   - [ ] Implementation: `install_global_copilot_instructions` + wire-in
