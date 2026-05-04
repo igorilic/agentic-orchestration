@@ -571,14 +571,14 @@ append to it.
   - [x] Tests added (markers + backup)
   - [x] Implementation: `install_global_copilot_instructions` + wire-in
   - [x] AC-3, AC-6 covered
-- [ ] **Step 5** — Settings.json fresh install
-  - [ ] Tests added (renderMarkdown/theme/beep, no hooks)
-  - [ ] Implementation: fresh-path heredoc/jq write
-  - [ ] AC-4 covered
-- [ ] **Step 6** — Settings.json merge
-  - [ ] Tests added (preserve user keys, defaults fill gaps)
-  - [ ] Implementation: jq additive merge
-  - [ ] AC-5 covered
+- [x] **Step 5** — Settings.json fresh install
+  - [x] Tests added (renderMarkdown/theme/beep, no hooks)
+  - [x] Implementation: fresh-path heredoc/jq write
+  - [x] AC-4 covered
+- [x] **Step 6** — Settings.json merge
+  - [x] Tests added (preserve user keys, defaults fill gaps)
+  - [x] Implementation: jq additive merge
+  - [x] AC-5 covered
 - [ ] **Step 7** — Graceful skip + hooks caveat banner
   - [ ] Tests added (3 cases)
   - [ ] Implementation: banner edit, guard verification
