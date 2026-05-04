@@ -1686,6 +1686,9 @@ install_global() {
   # --- Copilot CLI agents ---
   install_copilot_agents
 
+  # --- Copilot CLI skills ---
+  install_global_copilot_skills
+
   echo ""
   header "Global installation complete"
   echo ""
@@ -3460,6 +3463,27 @@ AGENT_EOF
   info "Copilot CLI agents installed to: $COPILOT_DIR/agents/"
   dim "Use: copilot --agent=architect --prompt \"...\""
   dim " or: /agent in interactive mode"
+}
+
+install_global_copilot_skills() {
+  command -v copilot &>/dev/null || return 0
+
+  header "Installing Copilot CLI skills"
+
+  mkdir -p "$COPILOT_SKILLS_DIR"
+
+  for skill_src_dir in "$_ANW_SCRIPT_DIR/skills"/*/; do
+    local skill_name
+    skill_name="$(basename "$skill_src_dir")"
+    local skill_dest_dir="$COPILOT_SKILLS_DIR/$skill_name"
+    mkdir -p "$skill_dest_dir"
+    local skill_md="$skill_dest_dir/SKILL.md"
+    if [ -f "$skill_md" ]; then
+      backup_if_exists "$skill_md"
+    fi
+    cp -R "$skill_src_dir". "$skill_dest_dir/"
+    success "$skill_name skill"
+  done
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
