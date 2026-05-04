@@ -84,3 +84,26 @@ run_install_global() {
   run_install_global
   grep -q 'claude --agent=' "$CLAUDE_HOME/skills/pipeline-gitlab-feature/SKILL.md"
 }
+
+# ---------------------------------------------------------------------------
+# Step 4: install_global_copilot_instructions — global instructions file
+# ---------------------------------------------------------------------------
+
+@test "install global: writes copilot-instructions.md with required marker substrings" {
+  run_install_global
+  [ -f "$SANDBOX/copilot-instructions.md" ]
+  grep -q 'Stack Detection'  "$SANDBOX/copilot-instructions.md"
+  grep -q 'Agent Pipeline'   "$SANDBOX/copilot-instructions.md"
+  grep -q '/plan'            "$SANDBOX/copilot-instructions.md"
+  # Negative: no Claude-specific phrasing
+  ! grep -q '~/.claude/'           "$SANDBOX/copilot-instructions.md"
+  ! grep -q 'Claude Code session'  "$SANDBOX/copilot-instructions.md"
+}
+
+@test "install global: copilot-instructions.md is backed up on re-install" {
+  run_install_global
+  run_install_global
+  # Exactly one backup file should exist after the second run
+  backups=( "$SANDBOX"/copilot-instructions.md.bak.* )
+  [ "${#backups[@]}" -eq 1 ]
+}
