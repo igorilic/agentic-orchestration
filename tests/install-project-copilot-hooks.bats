@@ -74,3 +74,79 @@ teardown() {
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   grep -q 'toolName != "bash"' "$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
 }
+
+# ---------------------------------------------------------------------------
+# Step 6: policy JSON writer — fresh-install path
+# ---------------------------------------------------------------------------
+
+@test "install project: copilot-cli-policy.json is created on fresh install" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ -f "$SANDBOX/.github/hooks/copilot-cli-policy.json" ]
+}
+
+@test "install project: copilot-cli-policy.json is valid JSON" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  jq -e . < "$SANDBOX/.github/hooks/copilot-cli-policy.json" >/dev/null
+}
+
+@test "install project: copilot-cli-policy.json has version 1" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq -r '.version' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" = "1" ]
+}
+
+@test "install project: copilot-cli-policy.json preToolUse has exactly 1 entry on fresh install" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq '.hooks.preToolUse | length' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" -eq 1 ]
+}
+
+@test "install project: copilot-cli-policy.json preToolUse[0].bash is ./copilot-cli-dispatcher.sh" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq -r '.hooks.preToolUse[0].bash' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" = "./copilot-cli-dispatcher.sh" ]
+}
+
+@test "install project: copilot-cli-policy.json preToolUse[0].cwd is .github/hooks" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq -r '.hooks.preToolUse[0].cwd' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" = ".github/hooks" ]
+}
+
+@test "install project: copilot-cli-policy.json preToolUse[0].timeoutSec is 15" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq -r '.hooks.preToolUse[0].timeoutSec' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" -eq 15 ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 7: policy JSON writer — merge path
+# ---------------------------------------------------------------------------
+
+@test "install project: re-install merges dispatcher into existing preToolUse" {
+  # Pre-populate with a user-added entry
+  mkdir -p "$SANDBOX/.github/hooks"
+  jq -n '{version:1,hooks:{preToolUse:[{bash:"./scripts/audit-log.sh",cwd:".github/hooks",timeoutSec:10}]}}' \
+    > "$SANDBOX/.github/hooks/copilot-cli-policy.json"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq '.hooks.preToolUse | length' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" -eq 2 ]
+}
+
+@test "install project: re-install preserves user-added audit-log.sh entry" {
+  mkdir -p "$SANDBOX/.github/hooks"
+  jq -n '{version:1,hooks:{preToolUse:[{bash:"./scripts/audit-log.sh",cwd:".github/hooks",timeoutSec:10}]}}' \
+    > "$SANDBOX/.github/hooks/copilot-cli-policy.json"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  jq -e '.hooks.preToolUse[] | select(.bash == "./scripts/audit-log.sh")' \
+    "$SANDBOX/.github/hooks/copilot-cli-policy.json" >/dev/null
+}
+
+@test "install project: re-install includes dispatcher entry after merge" {
+  mkdir -p "$SANDBOX/.github/hooks"
+  jq -n '{version:1,hooks:{preToolUse:[{bash:"./scripts/audit-log.sh",cwd:".github/hooks",timeoutSec:10}]}}' \
+    > "$SANDBOX/.github/hooks/copilot-cli-policy.json"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  jq -e '.hooks.preToolUse[] | select(.bash == "./copilot-cli-dispatcher.sh")' \
+    "$SANDBOX/.github/hooks/copilot-cli-policy.json" >/dev/null
+}
+
+@test "install project: running install twice dedupes dispatcher entry" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ "$(jq '.hooks.preToolUse | length' "$SANDBOX/.github/hooks/copilot-cli-policy.json")" -eq 1 ]
+}
