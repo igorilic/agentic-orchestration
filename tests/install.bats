@@ -232,6 +232,7 @@ EOF
 
 @test "agents/claude-code: ARCHITECTURE and CONVENTIONS reads stay under .context/" {
   rg -q '\.context/ARCHITECTURE\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+  rg -q '\.context/CONVENTIONS\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
 }
 
 # ---------------------------------------------------------------------------
@@ -363,8 +364,10 @@ EOF
   [ -f "$sandbox_project/docs/context/CURRENT_SPRINT.md" ]
   [ -f "$sandbox_project/docs/context/specs/templates/feature-spec.md" ]
 
-  # AC: architecture doc stays in .context/ (per-project artifact, not tracked spec)
+  # AC: architecture/conventions/glossary docs stay in .context/ (installer-seeded, tracked in consumer)
   [ -f "$sandbox_project/.context/ARCHITECTURE.md" ]
+  [ -f "$sandbox_project/.context/CONVENTIONS.md" ]
+  [ -f "$sandbox_project/.context/GLOSSARY.md" ]
 
   # AC: .gitignore contains runtime-only entries
   grep -qF '.context/.pipeline-state' "$sandbox_project/.gitignore"
@@ -377,4 +380,13 @@ EOF
   ! grep -qE '\.context/specs/[^$]*-(spec|todo|requirements)' "$sandbox_claude/agents/architect.md"
 
   rm -rf "$sandbox_claude" "$sandbox_project"
+}
+
+@test "installer: SPEC_DIR and SPRINT_FILE constants are referenced (not just defined)" {
+  # Count uses of the constants outside their definitions
+  uses_spec="$(grep -c '\${SPEC_DIR}\|\$SPEC_DIR\b' "$INSTALLER" || true)"
+  uses_sprint="$(grep -c '\${SPRINT_FILE}\|\$SPRINT_FILE\b' "$INSTALLER" || true)"
+  # Expect at least 2 uses of each (definition + at least one consumer)
+  [ "$uses_spec" -ge 2 ]
+  [ "$uses_sprint" -ge 2 ]
 }

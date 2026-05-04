@@ -36,7 +36,7 @@ The spike's recommendation (`FINDINGS.md`) is **option G — split tracked vs ru
 
 Justification:
 - Matches existing `docs/superpowers/specs/` and `docs/superpowers/plans/` convention; reviewers already look in `docs/` for design docs.
-- Keeps `.context/` semantically clean: after this change, `.context/` contains ONLY runtime files that should never be committed.
+- Keeps `.context/` semantically clean: after this change, `.context/` contains per-project installer-seeded reference docs (ARCHITECTURE, CONVENTIONS, GLOSSARY — tracked in consumer projects) and runtime artifacts (.pipeline-state, .pipeline-audit.log, *.jsonl — gitignored). Sprint board and spec markdown move to `docs/context/` where they are always tracked.
 - A flatter `docs/specs/` would collide with any future per-feature specs the project itself ships (e.g., a "user docs" section). `docs/context/` is purpose-named and bounded.
 - Keeping the old `.context/` path "now that it's no longer fully gitignored" was considered and rejected: the current `.gitignore` line `.context/` is already in `main`. Changing it to a multi-line allow-list works, but mixes tracked and runtime files in the same directory, which makes `git status` noisier and weakens the conceptual split that's the whole point of option G.
 
@@ -126,7 +126,7 @@ The audit log path in `ai-native-workflow:246` (`AUDIT_LOG=".context/.pipeline-a
 
 ## Acceptance Criteria
 
-- **AC-1:** `docs/context/` exists and is tracked. After migration it contains `CURRENT_SPRINT.md`, `specs/BREW-1-anw-script-dir-symlink.md`, `specs/BREW-1-todo.md` (the in-flight files), and `specs/templates/feature-spec.md`. Verified: `git ls-files docs/context/` lists all four.
+- **AC-1:** `docs/context/` exists and is tracked. After migration it contains `CURRENT_SPRINT.md`, `specs/BREW-1-anw-script-dir-symlink.md`, `specs/BREW-1-todo.md` (the in-flight files), and `specs/templates/feature-spec.md`. Verified by sandbox install (see Step 12 smoke test). Running `ai-native-workflow install project` materializes the file in the consumer project's `docs/context/specs/templates/`.
 
 - **AC-2:** `.gitignore` no longer contains the bare line `.context/`. It DOES contain `.context/.pipeline-state`, `.context/.pipeline-audit.log`, and `.context/specs/*.jsonl`. Verified: `grep -E '^\.context/' .gitignore` shows the three explicit entries and not the bare directory.
 

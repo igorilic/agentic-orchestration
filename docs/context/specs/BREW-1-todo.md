@@ -144,4 +144,4 @@ test that exercises it through a symlink, replicating the brew layout.
   - [x] Test passes against fixed CLI
   - [x] AC-5 confirmed (full bats suite green)
 - [x] AC-6 satisfied: `tests/script-dir.bats` exists and covers AC-1..AC-3
-- [ ] Spec marked **Done** in `.context/CURRENT_SPRINT.md`
+- [ ] Spec marked **Done** in `docs/context/CURRENT_SPRINT.md`

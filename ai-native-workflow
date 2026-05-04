@@ -1979,8 +1979,8 @@ detect_stack() {
 STACK=$(detect_stack)
 [ -n "$STACK" ] && CONTEXT="📦 Detected stack: $STACK\n"
 
-if [ -f "$PROJECT_DIR/docs/context/CURRENT_SPRINT.md" ]; then
-  SPRINT=$(head -20 "$PROJECT_DIR/docs/context/CURRENT_SPRINT.md")
+if [ -f "$PROJECT_DIR/$SPRINT_FILE" ]; then
+  SPRINT=$(head -20 "$PROJECT_DIR/$SPRINT_FILE")
   CONTEXT="${CONTEXT}\n📋 Current Sprint:\n${SPRINT}\n"
 fi
 
@@ -3776,7 +3776,10 @@ install_project_context() {
   local context_dir="$project_dir/.context"
   local docs_context_dir="$project_dir/docs/context"
 
-  # Runtime directory (gitignored): ARCHITECTURE, CONVENTIONS, GLOSSARY stay here
+  # .context/ holds two kinds of files:
+  #   - per-project installer-seeded reference (ARCHITECTURE.md, CONVENTIONS.md,
+  #     GLOSSARY.md) — committed by the consuming project
+  #   - runtime artifacts (.pipeline-state, .pipeline-audit.log, *.jsonl) — gitignored
   mkdir -p "$context_dir/specs"
 
   # Tracked directory: sprint board and spec templates land here
@@ -3846,7 +3849,7 @@ EOF
 ## Blockers
 <!-- - Description -->
 EOF
-    success "docs/context/CURRENT_SPRINT.md"
+    success "$SPRINT_FILE"
   fi
 
   if [ ! -f "$docs_context_dir/specs/templates/feature-spec.md" ]; then
@@ -3872,7 +3875,7 @@ EOF
 ## Open Questions
 - <!-- Any ambiguity -->
 EOF
-    success "docs/context/specs/templates/feature-spec.md"
+    success "$SPEC_DIR/templates/feature-spec.md"
   fi
 }
 
@@ -4099,7 +4102,7 @@ show_status() {
   header "Current Directory ($(pwd))"
   check_file "AGENTS.md" "AGENTS.md"
   check_file "CLAUDE.md" "CLAUDE.md"
-  check_file "docs/context/CURRENT_SPRINT.md" "docs/context/"
+  check_file "$SPRINT_FILE" "docs/context/"
   check_file ".github/copilot-instructions.md" ".github/copilot-instructions.md"
   check_dir ".github/instructions" ".github/instructions/"
 
