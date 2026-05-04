@@ -4237,9 +4237,11 @@ show_status() {
   check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
   check_file "$CLAUDE_DIR/agents/explorer.md" "agents/explorer (Sonnet)"
 
-  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ]; then
+  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ] || [ -d "$COPILOT_SKILLS_DIR" ]; then
     echo ""
     header "Copilot CLI ($COPILOT_DIR/)"
+    check_file "$COPILOT_INSTRUCTIONS_FILE" "copilot-instructions.md"
+    check_file "$COPILOT_SETTINGS_FILE" "settings.json"
     check_file "$COPILOT_DIR/agents/requirements-engineer.agent.md" "agents/requirements-engineer"
     check_file "$COPILOT_DIR/agents/architect.agent.md" "agents/architect"
     check_file "$COPILOT_DIR/agents/tdd-developer.agent.md" "agents/tdd-developer"
@@ -4247,6 +4249,14 @@ show_status() {
     check_file "$COPILOT_DIR/agents/reviewer.agent.md" "agents/reviewer"
     check_file "$COPILOT_DIR/agents/troubleshooter.agent.md" "agents/troubleshooter"
     check_file "$COPILOT_DIR/agents/explorer.agent.md" "agents/explorer"
+    if [ -d "$COPILOT_SKILLS_DIR" ]; then
+      for d in "$COPILOT_SKILLS_DIR"/*/; do
+        [ -d "$d" ] || continue
+        local skill_name
+        skill_name="$(basename "$d")"
+        check_file "$d/SKILL.md" "skills/$skill_name"
+      done
+    fi
   fi
 
   echo ""
