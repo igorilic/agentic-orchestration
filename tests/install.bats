@@ -163,3 +163,37 @@ EOF
   [ -f "$SANDBOX/skills/override-confidence/SKILL.md" ]
   [ -f "$SANDBOX/skills/override-confidence/skill.bash" ]
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Steps 1+2: new docs/context/ layout and runtime-only .gitignore
+# ---------------------------------------------------------------------------
+
+@test "install project: creates docs/context/CURRENT_SPRINT.md" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  [ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: creates docs/context/specs/templates/feature-spec.md" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  [ -f "$SANDBOX_PROJECT/docs/context/specs/templates/feature-spec.md" ]
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: project .gitignore contains runtime ignore entries" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  grep -qF '.context/.pipeline-state' "$SANDBOX_PROJECT/.gitignore"
+  grep -qF '.context/.pipeline-audit.log' "$SANDBOX_PROJECT/.gitignore"
+  grep -qF '.context/specs/*.jsonl' "$SANDBOX_PROJECT/.gitignore"
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: project .gitignore does NOT contain bare .context/" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
+  ! grep -qE '^\.context/$' "$SANDBOX_PROJECT/.gitignore"
+  rm -rf "$SANDBOX_PROJECT"
+}
