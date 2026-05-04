@@ -4050,13 +4050,13 @@ install_project_copilot_hooks() {
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
-# emit_deny: write deny JSON to stdout + human message to stderr, then exit 0.
+# emit_deny: write deny JSON to stdout, then exit 0.
 # Exit 0 because Copilot reads the decision from stdout JSON, not exit code.
+# No stderr output — bats merges stdout+stderr into $output by default.
 # ---------------------------------------------------------------------------
 emit_deny() {
   local reason="${1:-hook crashed; failing closed}"
   jq -nc --arg r "$reason" '{permissionDecision: "deny", permissionDecisionReason: $r}'
-  printf '🚫 %s\n' "$reason" >&2
   exit 0
 }
 
@@ -4094,7 +4094,148 @@ fi
 [ "${ANW_DEBUG:-0}" = "1" ] && printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR" >&2
 
 # ---------------------------------------------------------------------------
-# Fall-through: no gate logic yet (added in Steps 8–10).
+# Step 8: TDD gate — port of hooks/tdd-gate.sh (exit-code → emit_deny/allow).
+# Only fires on bash commands that match "git commit".
+# ---------------------------------------------------------------------------
+BASH_CMD="$(echo "$PAYLOAD" | jq -r '(.toolArgs | fromjson).command // empty' 2>/dev/null || true)"
+
+if echo "$BASH_CMD" | grep -qE 'git\s+commit'; then
+  # Allow amend
+  if echo "$BASH_CMD" | grep -qE -- '--amend'; then
+    jq -nc '{permissionDecision: "allow"}'
+    exit 0
+  fi
+
+  # Check bypass file
+  if [ -f "$PROJECT_DIR/.tdd-skip" ]; then
+    jq -nc '{permissionDecision: "allow"}'
+    exit 0
+  fi
+
+  # Spike-only commits skip the TDD gate
+  STAGED_FILES="$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null || true)"
+  NON_SPIKE_FILES="$(echo "$STAGED_FILES" | grep -v '^spikes/' | grep -v '^$' || true)"
+  if [ -n "$STAGED_FILES" ] && [ -z "$NON_SPIKE_FILES" ]; then
+    jq -nc '{permissionDecision: "allow"}'
+    exit 0
+  fi
+
+  # Check for test files in staged changes
+  TEST_PATTERNS='(test|spec|_test\.|\.test\.|\.spec\.|tests/|__tests__/|Tests/|Test\.)'
+  TEST_FILES="$(git -C "$PROJECT_DIR" diff --cached --name-only 2>/dev/null | grep -iE "$TEST_PATTERNS" || true)"
+
+  if [ -z "$TEST_FILES" ]; then
+    MSG="$(printf 'TDD GATE: No test files staged.\n\nOptions:\n  1. Write tests first, stage them, commit together\n  2. /skip-tdd '"'"'reason'"'"' to bypass (logged)\n\nCommon reasons: '"'"'docs-only'"'"' | '"'"'CI config'"'"' | '"'"'dependency update'"'"' | '"'"'hotfix'"'"'')"
+    emit_deny "$MSG"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Step 9+10: Confidence gate — port of hooks/confidence-gate.sh.
+# Only fires on PR/MR creation commands.
+# ---------------------------------------------------------------------------
+SCORER="$PROJECT_DIR/.github/hooks/scripts/confidence.sh"
+
+if echo "$BASH_CMD" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$))'; then
+  ACTIVE_SPEC_FILE="$PROJECT_DIR/.git/aw/active-spec"
+  if [ ! -f "$ACTIVE_SPEC_FILE" ]; then
+    emit_deny "Confidence gate: no .git/aw/active-spec pointer."
+  fi
+
+  SPEC_ID="$(cat "$ACTIVE_SPEC_FILE" | tr -d '[:space:]')"
+  if ! echo "$SPEC_ID" | grep -qE '^[A-Za-z0-9._-]+$'; then
+    emit_deny "Confidence gate: invalid spec id '$SPEC_ID' — must match [A-Za-z0-9._-]+"
+  fi
+
+  CONF_LOG="$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl"
+  if [ ! -f "$CONF_LOG" ]; then
+    emit_deny "Confidence gate: log not found at $CONF_LOG"
+  fi
+
+  # Run vendored scorer
+  VERDICT_JSON="$("$SCORER" "$CONF_LOG" 2>&1)" || {
+    emit_deny "Confidence gate: scorer failed — blocking as safety default."
+  }
+  BAND="$(echo "$VERDICT_JSON" | jq -r '.band' 2>/dev/null)" || BAND=""
+  SCORE="$(echo "$VERDICT_JSON" | jq -r '.score' 2>/dev/null)" || SCORE=""
+  GATES="$(echo "$VERDICT_JSON" | jq -c '.gates' 2>/dev/null)" || GATES="[]"
+
+  if [ -z "$BAND" ] || [ -z "$SCORE" ]; then
+    emit_deny "Confidence gate: scorer output is malformed — blocking as safety default."
+  fi
+
+  # Append aggregate verdict to log
+  TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq -n \
+    --arg ts "$TS" \
+    --arg band "$BAND" \
+    --argjson score "$SCORE" \
+    --argjson gates "$GATES" \
+    '{ts:$ts, event:"verdict", scope:"aggregate", band:$band, score:$score, gates:$gates}' \
+    >> "$CONF_LOG"
+
+  case "$BAND" in
+    GREEN)
+      jq -nc '{permissionDecision: "allow"}'
+      exit 0
+      ;;
+    YELLOW)
+      # Include "YELLOW" in permissionDecisionReason so callers can detect the band.
+      jq -nc --arg r "Confidence: YELLOW ($SCORE/100) — proceeding with caution." \
+        '{permissionDecision: "allow", permissionDecisionReason: $r}'
+      exit 0
+      ;;
+    RED)
+      SKIP_TDD_FILE="$PROJECT_DIR/.tdd-skip"
+      if [ -f "$SKIP_TDD_FILE" ]; then
+        STRUCTURAL_GATES='["NO_AC","AC_NOT_TESTED"]'
+        ALL_STRUCTURAL="$(jq -n --argjson g "$GATES" --argjson s "$STRUCTURAL_GATES" \
+          '($g | length) > 0 and ($g - $s | length) == 0')"
+
+        if [ "$ALL_STRUCTURAL" = "true" ]; then
+          SKIP_REASON="$(grep -m 1 '^Reason:' "$SKIP_TDD_FILE" | sed 's/^Reason: *//' || true)"
+          jq -n \
+            --arg ts "$TS" \
+            --arg reason "${SKIP_REASON:-skip-tdd active}" \
+            --argjson gates "$GATES" \
+            '{ts:$ts, event:"override", trigger:"skip-tdd-auto", reason:$reason, gates_bypassed:$gates}' \
+            >> "$CONF_LOG"
+          jq -nc '{permissionDecision: "allow"}'
+          exit 0
+        else
+          MSG="$(printf 'Confidence: RED (%s/100) — gates: %s\n\n/skip-tdd does not bypass behavioral gates. Use /override-confidence "<reason>".' "$SCORE" "$GATES")"
+          emit_deny "$MSG"
+        fi
+      fi
+
+      OVERRIDE_FILE="$PROJECT_DIR/.git/aw/override-${SPEC_ID}"
+      if [ -f "$OVERRIDE_FILE" ]; then
+        OVERRIDE_REASON="$(jq -r '.reason // empty' "$OVERRIDE_FILE" 2>/dev/null || echo)"
+        if [ -z "$OVERRIDE_REASON" ] || [ "$OVERRIDE_REASON" = "null" ]; then
+          rm -f "$OVERRIDE_FILE"
+          emit_deny "Confidence gate: override marker malformed or missing reason."
+        fi
+        jq -n \
+          --arg ts "$TS" \
+          --arg reason "$OVERRIDE_REASON" \
+          --argjson gates "$GATES" \
+          '{ts:$ts, event:"override", trigger:"manual", reason:$reason, gates_bypassed:$gates}' \
+          >> "$CONF_LOG"
+        rm -f "$OVERRIDE_FILE"
+        jq -nc '{permissionDecision: "allow"}'
+        exit 0
+      fi
+
+      emit_deny "$(printf 'Confidence: RED (%s/100) — gates: %s\n\nOptions:\n  1. Address the failing gates and retry\n  2. /override-confidence "<reason>" to bypass (logged)' "$SCORE" "$GATES")"
+      ;;
+    *)
+      emit_deny "Confidence gate: unexpected band value '$BAND' — blocking as safety default."
+      ;;
+  esac
+fi
+
+# ---------------------------------------------------------------------------
+# Fall-through: no gate applies.
 # ---------------------------------------------------------------------------
 jq -nc '{permissionDecision: "allow"}'
 exit 0
