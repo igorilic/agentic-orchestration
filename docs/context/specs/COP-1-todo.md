@@ -579,18 +579,18 @@ append to it.
   - [x] Tests added (preserve user keys, defaults fill gaps)
   - [x] Implementation: jq additive merge
   - [x] AC-5 covered
-- [ ] **Step 7** — Graceful skip + hooks caveat banner
-  - [ ] Tests added (3 cases)
-  - [ ] Implementation: banner edit, guard verification
-  - [ ] AC-8, AC-12 covered
-- [ ] **Step 8** — Status command
-  - [ ] Tests added (skills loop + 2 files)
-  - [ ] Implementation: `show_status` edits
-  - [ ] AC-10 covered
-- [ ] **Step 9** — Uninstall
-  - [ ] Tests added (skills removed, user files preserved)
-  - [ ] Implementation: `uninstall_global` edits
-  - [ ] AC-11 covered
+- [x] **Step 7** — Graceful skip + hooks caveat banner
+  - [x] Tests added (3 cases)
+  - [x] Implementation: banner edit, guard verification
+  - [x] AC-8, AC-12 covered
+- [x] **Step 8** — Status command
+  - [x] Tests added (skills loop + 2 files)
+  - [x] Implementation: `show_status` edits
+  - [x] AC-10 covered
+- [x] **Step 9** — Uninstall
+  - [x] Tests added (skills removed, user files preserved)
+  - [x] Implementation: `uninstall_global` edits
+  - [x] AC-11 covered
 - [ ] **Step 10** — Documentation
   - [ ] Tests added (README + ARCHITECTURE asserts)
   - [ ] Implementation: README + ARCHITECTURE edits
