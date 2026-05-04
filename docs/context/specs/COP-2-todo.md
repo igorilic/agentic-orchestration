@@ -330,8 +330,8 @@ Each step:
 - [x] Step 3 — vendor confidence.sh
 - [x] Step 4 — dispatcher skeleton (trap + filter)
 - [x] Step 5 — cwd resolution
-- [ ] Step 6 — policy JSON fresh write
-- [ ] Step 7 — policy JSON merge
+- [x] Step 6 — policy JSON fresh write
+- [x] Step 7 — policy JSON merge
 - [ ] Step 8 — TDD gate port
 - [ ] Step 9 — confidence gate happy paths
 - [ ] Step 10 — confidence gate bypass paths
