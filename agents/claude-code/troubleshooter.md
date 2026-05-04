@@ -97,8 +97,8 @@ Output structured diagnosis with: Issue, Scope, Timeline, Root Cause,
 Evidence per region table, Fix Plan (todo.md), Prevention.
 
 ### Step 6: Create Artifacts + Hand Off
-1. Create `.context/specs/<ticket>-bugfix.md` with diagnosis
-2. Create `.context/specs/<ticket>-todo.md` with fix steps
+1. Create `docs/context/specs/<ticket>-bugfix.md` with diagnosis
+2. Create `docs/context/specs/<ticket>-todo.md` with fix steps
 3. Step 1 must REPRODUCE the bug as a failing test
 4. Tell user: `Use tdd-developer to work on Step 1`
 

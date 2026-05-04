@@ -32,12 +32,12 @@ committable steps for the tdd-developer agent.
 - If unclear: STOP, present options with tradeoffs, ask
 
 ### 2. Create Spec
-`.context/specs/<id>-<n>.md` with: Problem Statement, Context,
+`docs/context/specs/<id>-<n>.md` with: Problem Statement, Context,
 Proposed Solution, Acceptance Criteria (testable), Technical Design
 (components, data model, API), Risks, Out of Scope.
 
 ### 3. Create Todo
-`.context/specs/<id>-todo.md` with atomic steps. Each step MUST:
+`docs/context/specs/<id>-todo.md` with atomic steps. Each step MUST:
 - Be independently testable
 - Result in a commit
 - Complete in one TDD cycle (< 30 min)
@@ -56,7 +56,7 @@ Format:
 End with Integration Test step + Status checklist.
 
 ### 4. Update Sprint
-Add to `.context/CURRENT_SPRINT.md` as In Progress.
+Add to `docs/context/CURRENT_SPRINT.md` as In Progress.
 
 ### 5. Hand Off
 Present plan, tell user: `Use tdd-developer on Step 1 of <id>-todo.md`
@@ -75,7 +75,7 @@ AC_JSON='[{"id":"AC-1","text":"..."},{"id":"AC-2","text":"..."}]'  # extracted f
 
 jq -n \
   --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --arg path ".context/specs/<id>-spec.md" \
+  --arg path "docs/context/specs/<id>-spec.md" \
   --argjson ac "$AC_JSON" \
   '{ts:$ts, event:"spec", spec_path:$path, ac_items:$ac}' \
   >> "$LOG"

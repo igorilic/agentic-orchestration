@@ -39,7 +39,7 @@ After running tests for the current step, append a `qa` event to the spec's conf
 - `PASSED` / `FAILED` — counts from the test runner output for THIS step's affected tests.
 - `ADDED` — count of net-new test cases introduced by this step's commit (use `git diff HEAD~1..HEAD` on test files to count new `@test`, `it(`, `describe(`, `def test_`, etc., depending on stack).
 - `BUILD_STATUS` — `"ok"` if tests compiled and ran, `"failed"` if compilation/build broke.
-- `TESTED` — JSON array of AC ids covered. Read `.context/specs/<id>-spec.md` to get the AC list. Include an AC id only if at least one test you ran references the feature in that AC's text. When in doubt, omit (false negatives are safer than overreporting — the `AC_NOT_TESTED` gate exists to catch real coverage gaps).
+- `TESTED` — JSON array of AC ids covered. Read `docs/context/specs/<id>-spec.md` to get the AC list. Include an AC id only if at least one test you ran references the feature in that AC's text. When in doubt, omit (false negatives are safer than overreporting — the `AC_NOT_TESTED` gate exists to catch real coverage gaps).
 
 **Idempotency:** if a `qa` event for THIS step already exists in the log, do not emit a second one. Check with:
 ```bash
