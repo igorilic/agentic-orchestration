@@ -567,10 +567,10 @@ append to it.
   - [x] Tests added (3 affected skills + Claude-side regression guard)
   - [x] Implementation: dynamic sed rewrite block
   - [x] AC-2 covered
-- [ ] **Step 4** — Global instructions file
-  - [ ] Tests added (markers + backup)
-  - [ ] Implementation: `install_global_copilot_instructions` + wire-in
-  - [ ] AC-3, AC-6 covered
+- [x] **Step 4** — Global instructions file
+  - [x] Tests added (markers + backup)
+  - [x] Implementation: `install_global_copilot_instructions` + wire-in
+  - [x] AC-3, AC-6 covered
 - [ ] **Step 5** — Settings.json fresh install
   - [ ] Tests added (renderMarkdown/theme/beep, no hooks)
   - [ ] Implementation: fresh-path heredoc/jq write
