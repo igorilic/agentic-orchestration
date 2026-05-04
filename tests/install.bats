@@ -298,3 +298,27 @@ EOF
 @test "hooks: session-start.sh source does NOT reference .context/CURRENT_SPRINT.md" {
   ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
 }
+
+# ---------------------------------------------------------------------------
+# CTX-1 Step 10: templates/AGENTS.md and skills/ reference docs/context/
+# ---------------------------------------------------------------------------
+
+@test "docs: templates/AGENTS.md does not reference .context/CURRENT_SPRINT.md" {
+  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
+}
+
+@test "docs: templates/AGENTS.md does not reference .context/specs/ for spec/todo paths" {
+  # Allow .context/ARCHITECTURE.md and .context/CONVENTIONS.md (those stay)
+  ! rg -q '\.context/specs/' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
+}
+
+@test "docs: skills/ do not reference .context/CURRENT_SPRINT.md" {
+  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../skills/"
+}
+
+@test "docs: skills/ do not reference .context/specs/ for tracked spec artifacts" {
+  # brainstorm, requirements, spec, todo, testplan, bugfix must move to docs/context/specs/
+  # Confidence jsonl stays under .context/specs/ — not matched by this pattern
+  ! rg -q '\.context/specs/[^$]*-(brainstorm|requirements|spec|todo|testplan|bugfix)' \
+    "$BATS_TEST_DIRNAME/../skills/"
+}
