@@ -191,9 +191,11 @@ JSON
   run_install_global
   output="$(CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
     "$INSTALLER" status 2>&1)"
+  # Extract only the Copilot CLI section (lines after the "Copilot CLI" header)
+  copilot_section="$(echo "$output" | awk '/Copilot CLI/,0')"
   for d in "$REPO_ROOT/skills"/*/; do
     name="$(basename "$d")"
-    [[ "$output" == *"skills/$name"* ]]
+    [[ "$copilot_section" == *"skills/$name"* ]] || { echo "missing in Copilot section: $name"; return 1; }
   done
 }
 
@@ -201,8 +203,10 @@ JSON
   run_install_global
   output="$(CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
     "$INSTALLER" status 2>&1)"
-  [[ "$output" == *"copilot-instructions.md"* ]]
-  [[ "$output" == *"settings.json"* ]]
+  # Extract only the Copilot CLI section (lines after the "Copilot CLI" header)
+  copilot_section="$(echo "$output" | awk '/Copilot CLI/,0')"
+  [[ "$copilot_section" == *"copilot-instructions.md"* ]]
+  [[ "$copilot_section" == *"settings.json"* ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -231,4 +235,61 @@ JSON
   CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
     "$INSTALLER" uninstall global >/dev/null 2>&1
   [ -f "$SANDBOX/settings.json" ]
+}
+
+# ---------------------------------------------------------------------------
+# Step 10: Documentation — README + ARCHITECTURE updates
+# ---------------------------------------------------------------------------
+
+@test "docs: README mentions ~/.copilot/skills/" {
+  rg -q '~/\.copilot/skills/' "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: README mentions ~/.copilot/copilot-instructions.md" {
+  rg -q '~/\.copilot/copilot-instructions\.md' "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: README mentions ~/.copilot/settings.json" {
+  rg -q '~/\.copilot/settings\.json' "$BATS_TEST_DIRNAME/../README.md"
+}
+
+@test "docs: ARCHITECTURE notes hooks asymmetry (Claude global, Copilot repo-scope)" {
+  rg -qi 'copilot.*(repo|repository)[- ]scope|repo[- ]scope.*copilot' \
+    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+}
+
+# ---------------------------------------------------------------------------
+# Step 11: Integration smoke — fresh install end-to-end + idempotency
+# ---------------------------------------------------------------------------
+
+@test "integration smoke: install global twice produces full Copilot harness, one backup per file per re-run" {
+  run_install_global
+  # Snapshot first-run state
+  first_skills_count=$(find "$SANDBOX/skills" -name 'SKILL.md' | wc -l | tr -d ' ')
+  [ "$first_skills_count" -ge 14 ]
+  [ -f "$SANDBOX/copilot-instructions.md" ]
+  [ -f "$SANDBOX/settings.json" ]
+  # Re-run
+  run_install_global
+  # Backups exist for each rewritten file
+  [ "$(find "$SANDBOX" -maxdepth 2 -name 'copilot-instructions.md.bak.*' | wc -l | tr -d ' ')" -eq 1 ]
+  [ "$(find "$SANDBOX" -maxdepth 2 -name 'settings.json.bak.*' | wc -l | tr -d ' ')" -eq 1 ]
+  # Pipeline rewrite still in place after re-run
+  grep -q 'copilot --agent=' "$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md"
+  ! grep -q 'claude --agent=' "$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md"
+  # Status reflects the install
+  output="$(CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
+    "$INSTALLER" status 2>&1)"
+  [[ "$output" == *"copilot-instructions.md"* ]]
+  [[ "$output" == *"settings.json"* ]]
+}
+
+@test "integration smoke: COPILOT_HOME=/tmp/cop-test redirects all writes" {
+  ALT="$(mktemp -d /tmp/aw-cop-alt-XXXXXX)"
+  PATH="$STUB_BIN:$PATH" CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$ALT" \
+    "$INSTALLER" install global >/dev/null 2>&1
+  [ -d "$ALT/skills" ]
+  [ -f "$ALT/copilot-instructions.md" ]
+  [ -f "$ALT/settings.json" ]
+  rm -rf "$ALT"
 }
