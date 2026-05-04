@@ -65,7 +65,7 @@ run_dispatcher_env() {
   local tmpfile
   tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
   printf '' > "$tmpfile"
-  run bash -c "cat '$tmpfile' | bash '$DISPATCHER'"
+  run bash -c "cat '$tmpfile' | bash '$DISPATCHER' 2>/dev/null"
   rm -f "$tmpfile"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null
@@ -81,18 +81,23 @@ run_dispatcher_env() {
   git -C "$SANDBOX" init -q
   mkdir -p "$SANDBOX/subdir"
 
+  # Resolve the physical path (macOS /tmp -> /private/tmp symlink)
+  local real_sandbox
+  real_sandbox="$(cd "$SANDBOX" && pwd -P)"
+
   local payload
   payload="$(mk_payload "bash" "git status" "$SANDBOX/subdir")"
 
   local tmpfile
   tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
   printf '%s' "$payload" > "$tmpfile"
-  # Run with ANW_DEBUG=1; stderr (and combined output) should show resolved dir
-  run bash -c "ANW_DEBUG=1 cat '$tmpfile' | bash '$DISPATCHER' 2>&1"
+  # env var must be set on the dispatcher process itself, not on cat.
+  # Use input redirection to avoid pipe breaking the env assignment.
+  run bash -c "ANW_DEBUG=1 bash '$DISPATCHER' < '$tmpfile' 2>&1"
   rm -f "$tmpfile"
-  # Dispatcher must exist (not exit 127) and trace must mention sandbox root
+  # Dispatcher must succeed and trace must include the resolved sandbox root
   [ "$status" -eq 0 ]
-  [[ "$output" == *"$SANDBOX"* ]]
+  [[ "$output" == *"$real_sandbox"* ]]
 }
 
 @test "dispatcher: payload missing cwd and not in git repo -> deny with project dir reason" {
@@ -103,8 +108,8 @@ run_dispatcher_env() {
   local tmpfile
   tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
   printf '%s' "$payload" > "$tmpfile"
-  # Run with HOME=/tmp/nonexistent to avoid picking up any real repo
-  run bash -c "cd /tmp && cat '$tmpfile' | bash '$DISPATCHER'"
+  # cd /tmp to be outside any git repo; suppress stderr to keep output as clean JSON
+  run bash -c "cd /tmp && cat '$tmpfile' | bash '$DISPATCHER' 2>/dev/null"
   rm -f "$tmpfile"
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.permissionDecision == "deny"' >/dev/null

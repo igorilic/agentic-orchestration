@@ -4036,6 +4036,72 @@ install_project_copilot_hooks() {
   cp "$_ANW_SCRIPT_DIR/scripts/confidence.sh" "$scripts_dir/confidence.sh"
   chmod 0755 "$scripts_dir/confidence.sh"
   success ".github/hooks/scripts/confidence.sh (vendored scorer)"
+
+  # Write the Copilot CLI dispatcher (Steps 4+5).
+  # Using a quoted heredoc (<<'DISPATCHER_EOF') so all '$' are literal in the
+  # output script — they must be runtime variables, not install-time expansions.
+  local dispatcher="$hooks_dir/copilot-cli-dispatcher.sh"
+  cat > "$dispatcher" <<'DISPATCHER_EOF'
+#!/usr/bin/env bash
+# copilot-cli-dispatcher.sh — ai-native-workflow Copilot CLI pre-tool hook
+# Enforces TDD and confidence gates for GitHub Copilot CLI.
+# Contract: read JSON payload from stdin; write permissionDecision JSON to stdout.
+# CRITICAL: Must be fail-closed — crash → deny (via trap ERR below).
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# emit_deny: write deny JSON to stdout + human message to stderr, then exit 0.
+# Exit 0 because Copilot reads the decision from stdout JSON, not exit code.
+# ---------------------------------------------------------------------------
+emit_deny() {
+  local reason="${1:-hook crashed; failing closed}"
+  jq -nc --arg r "$reason" '{permissionDecision: "deny", permissionDecisionReason: $r}'
+  printf '🚫 %s\n' "$reason" >&2
+  exit 0
+}
+
+# Fail-closed trap: any unhandled error → deny.
+trap 'emit_deny "Copilot hook crashed unexpectedly"' ERR
+
+# ---------------------------------------------------------------------------
+# Read the payload exactly once from stdin.
+# jq -e fails (exit 1) on invalid JSON or null — triggers ERR trap → deny.
+# ---------------------------------------------------------------------------
+PAYLOAD="$(cat)"
+# Validate JSON and parse toolName; invalid/empty payload fails here (fail-closed).
+TOOL_NAME="$(echo "$PAYLOAD" | jq -re '.toolName')"
+
+# Filter: if toolName != "bash" allow immediately — no gate applies.
+if [ "$TOOL_NAME" != "bash" ]; then
+  jq -nc '{permissionDecision: "allow"}'
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 5: Resolve the project directory.
+# Priority: payload .cwd → git rev-parse --show-toplevel.
+# ---------------------------------------------------------------------------
+PROJECT_DIR="$(echo "$PAYLOAD" | jq -r '.cwd // empty')"
+
+# Walk up via git from the given cwd (or pwd if not provided).
+_candidate="${PROJECT_DIR:-$(pwd)}"
+PROJECT_DIR="$(git -C "$_candidate" rev-parse --show-toplevel 2>/dev/null || true)"
+
+if [ -z "$PROJECT_DIR" ]; then
+  emit_deny "cannot resolve project dir"
+fi
+
+[ "${ANW_DEBUG:-0}" = "1" ] && printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR" >&2
+
+# ---------------------------------------------------------------------------
+# Fall-through: no gate logic yet (added in Steps 8–10).
+# ---------------------------------------------------------------------------
+jq -nc '{permissionDecision: "allow"}'
+exit 0
+DISPATCHER_EOF
+
+  chmod 0755 "$dispatcher"
+  success ".github/hooks/copilot-cli-dispatcher.sh (Copilot CLI dispatcher)"
 }
 
 install_project_gitignore() {
