@@ -26,7 +26,7 @@ When in doubt, ask.
 - `fix` — triage and address the issues just identified
 - `f` / `t` / `i` — per-item triage on a numbered list:
   - `f` = fix now
-  - `t` = log to tech debt (append to `.context/CURRENT_SPRINT.md`)
+  - `t` = log to tech debt (append to `docs/context/CURRENT_SPRINT.md`)
   - `i` = ignore, not a real issue
 - Positional mapping: `f t i f` against a 4-item list maps 1→f, 2→t, 3→i, 4→f.
 
@@ -61,12 +61,12 @@ Do NOT guess. Stop and present options when:
 - Business logic is unclear
 
 ### 3. Document As You Go
-- Update `.context/CURRENT_SPRINT.md` when task status changes
+- Update `docs/context/CURRENT_SPRINT.md` when task status changes
 - Note architecture decisions in commit messages
 - Flag documentation that needs updating
 
 ## Before Starting Any Work
-1. Read the spec in `.context/specs/` if one exists
+1. Read the spec in `docs/context/specs/` if one exists
 2. Scan `.context/ARCHITECTURE.md` for system context
 3. Check `.context/CONVENTIONS.md` for stack patterns
 4. Identify ALL affected components before writing code
@@ -105,5 +105,5 @@ Suggested action: [What to do next]
 ## Session End Protocol
 1. Ensure all tests pass
 2. Commit pending changes
-3. Update `.context/CURRENT_SPRINT.md`
+3. Update `docs/context/CURRENT_SPRINT.md`
 4. Use `/session-report` to generate Obsidian report
