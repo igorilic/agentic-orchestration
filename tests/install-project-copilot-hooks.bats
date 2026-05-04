@@ -25,3 +25,23 @@ teardown() {
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   [ -d "$SANDBOX/.github/hooks/scripts" ]
 }
+
+# ---------------------------------------------------------------------------
+# Step 3: confidence.sh is vendored into .github/hooks/scripts/
+# ---------------------------------------------------------------------------
+
+@test "install project: .github/hooks/scripts/confidence.sh exists after install" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ -f "$SANDBOX/.github/hooks/scripts/confidence.sh" ]
+}
+
+@test "install project: .github/hooks/scripts/confidence.sh has executable bit set" {
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  [ -x "$SANDBOX/.github/hooks/scripts/confidence.sh" ]
+}
+
+@test "install project: .github/hooks/scripts/confidence.sh is byte-identical to repo scripts/confidence.sh" {
+  REPO_DIR="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+  "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
+  cmp -s "$REPO_DIR/scripts/confidence.sh" "$SANDBOX/.github/hooks/scripts/confidence.sh"
+}
