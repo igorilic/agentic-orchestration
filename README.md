@@ -2,9 +2,17 @@
 
 An AI-native development CLI with multi-agent pipelines for test-driven development using Claude Code and GitHub Copilot CLI.
 
-Seven specialized AI agents across two tracks:
-- **Production**: **requirements-engineer** → **architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents).
+Eight specialized AI agents across two tracks:
+- **Production**: **requirements-engineer** → **architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents), plus **diff-reviewer** for whole-PR/MR review.
 - **Exploration**: **explorer** for spikes, prototypes, and API learning under `spikes/` (gitignored, TDD gate skipped).
+
+The **diff-reviewer** agent reviews a finished GitHub PR or GitLab MR
+(quality, correctness, logic, conventions, security, landmines, best
+practices), ranks findings by severity, and — after a preview/confirm gate —
+posts severity-ranked **inline comments** on the diff (or **conceptual
+threads** for non-line issues) with a verdict. It drives `gh`/`glab` via the
+`gh-cli`/`glab-cli` skills and reads acceptance criteria from the linked
+GitHub issue or Jira ticket.
 
 ## The Problem
 
@@ -35,6 +43,10 @@ ai-native-workflow run gitlab-feature PROJ-123
   ├─ qa                     → run affected tests
   ├─ reviewer               → code review + triage
   └─ glab mr create         → merge request
+
+  then (manual follow-up, after the MR exists):
+  └─ diff-reviewer          → review MR diff; preview → confirm → post
+                              inline comments + threads + verdict (glab)
 ```
 
 ### Pipeline 2: GitLab Incident (Copilot CLI + Jira + Troubleshooter)
@@ -60,6 +72,10 @@ ai-native-workflow run github-feature specs.md
   ├─ qa                     → run affected tests
   ├─ reviewer               → code review + triage
   └─ gh pr create           → pull request (Closes #issue)
+
+  then (manual follow-up, after the PR exists):
+  └─ diff-reviewer          → review PR diff; preview → confirm → post
+                              inline comments + threads + verdict (gh)
 ```
 
 ### Exploration Track (both Claude Code and Copilot CLI)
@@ -124,13 +140,16 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 | `skills/session-report/` | Obsidian session notes |
 | `skills/adr/` | Architecture Decision Records |
 | `skills/pr/` | Create PR/MR (auto-detects gh/glab) |
+| `skills/gh-cli/` | Drive `gh` to review a GitHub PR — inline comments + threads |
+| `skills/glab-cli/` | Drive `glab` to review a GitLab MR — inline discussions + threads |
 | `skills/clusters/` | Multi-cluster reference (EMEA/APAC/NAM) |
 | `skills/pipeline-*/` | Pipeline reference skills |
 | `agents/requirements-engineer.md` | Opus 4.6 — elicit & formalize requirements |
 | `agents/architect.md` | Opus 4.6 — design, spec, atomic plans |
 | `agents/tdd-developer.md` | Sonnet 4.6 — strict TDD implementation |
 | `agents/qa.md` | Haiku 4.5 — run affected tests |
-| `agents/reviewer.md` | Sonnet 4.6 — code review + triage |
+| `agents/reviewer.md` | Sonnet 4.6 — per-step code review + triage |
+| `agents/diff-reviewer.md` | Opus 4.6 — whole-PR/MR diff review; posts inline comments + threads |
 | `agents/troubleshooter.md` | Opus 4.6 — incident diagnosis |
 | `agents/explorer.md` | Sonnet 4.6 — spikes/prototypes under `spikes/` |
 | `skills/explore/` | Exploratory mode entry point |
@@ -216,6 +235,9 @@ Use tdd-developer to work on Step 1 of auth-todo.md
 Use qa to verify the changes
 Use reviewer to review the changes
 
+# Review a finished PR/MR (posts inline comments after you confirm)
+Use diff-reviewer to review PR #42
+
 # Incident response
 Use the troubleshooter to investigate PROJ-456
 ```
@@ -230,6 +252,7 @@ copilot
 copilot --agent=requirements-engineer --prompt "Analyze PROJ-123"
 copilot --agent=architect --prompt "Plan JWT auth"
 copilot --agent=tdd-developer --prompt "Step 1 of auth-todo.md"
+copilot --agent=diff-reviewer --prompt "Review MR !42 for PROJ-123"
 copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
 ```
 

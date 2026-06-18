@@ -38,16 +38,31 @@ specs.md / User Input
   │     Run affected unit + integration tests
   │     Report pass/fail with exact errors
   │
-  ├─ 6. reviewer (Sonnet 4.6) — PR review
+  ├─ 6. reviewer (Sonnet 4.6) — per-step review
   │     Review code against requirements + conventions
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
   │     → User triages: [F]ix / [T]ech debt / [I]gnore
   │     → Max 3 fix loops per step
   │
-  └─ 7. Create Pull Request (gh pr create)
-        Push branch → create PR → link GitHub issue
-        → "Closes #<issue-number>"
+  ├─ 7. Create Pull Request (gh pr create)
+  │     Push branch → create PR → link GitHub issue
+  │     → "Closes #<issue-number>"
+  │
+  └─ 8. diff-reviewer (Opus 4.6) — whole-PR diff review
+        Review the created PR end-to-end against the issue's AC:
+        quality, correctness, logic, conventions, security,
+        landmines, best practices
+        🔴 CRITICAL / 🟠 MAJOR / 🟡 MINOR / 🟢 NIT + verdict
+        → Preview findings + confirm, then post inline comments
+          on the diff (and conceptual threads) via gh
 ```
+
+> **`reviewer` vs `diff-reviewer`:** `reviewer` is the interactive,
+> per-step quality gate that runs *during* development (steps 4–6 repeat
+> per todo step). `diff-reviewer` runs *once on the finished PR* — it reads
+> the whole diff, ranks issues by severity, and posts them back onto the PR
+> (after a preview/confirm gate). Step 8 is optional but recommended before
+> requesting human review.
 
 ### Prerequisites
 - GitHub repository with `gh` CLI configured
@@ -118,6 +133,17 @@ gh pr create \
   --title "feat(scope): description" \
   --body "Closes #<issue-number>"
 ```
+
+#### Step 8: Review the pull request (diff-reviewer)
+After the PR exists, review the whole diff and post feedback onto it:
+```
+Use diff-reviewer to review PR #<number>
+```
+The agent reads the diff (via the `gh-cli` skill) and the linked issue's
+acceptance criteria, ranks findings 🔴 CRITICAL / 🟠 MAJOR / 🟡 MINOR /
+🟢 NIT, then **previews the exact comments and asks you to confirm** before
+posting inline comments + conceptual threads and submitting a verdict
+(APPROVE / REQUEST_CHANGES / COMMENT). Nothing is posted until you say yes.
 
 ### specs.md Format
 

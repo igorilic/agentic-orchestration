@@ -38,15 +38,30 @@ Jira Ticket
   │     Run affected unit + integration tests
   │     Report pass/fail with exact errors
   │
-  ├─ 6. reviewer (Sonnet 4.6) — MR review
+  ├─ 6. reviewer (Sonnet 4.6) — per-step review
   │     Review code against requirements + conventions
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
   │     → User triages: [F]ix / [T]ech debt / [I]gnore
   │     → Max 3 fix loops per step
   │
-  └─ 7. Create MR (glab mr create)
-        Push branch → create merge request → link Jira ticket
+  ├─ 7. Create MR (glab mr create)
+  │     Push branch → create merge request → link Jira ticket
+  │
+  └─ 8. diff-reviewer (Opus 4.6) — whole-MR diff review
+        Review the created MR end-to-end against the Jira AC:
+        quality, correctness, logic, conventions, security,
+        landmines, best practices
+        🔴 CRITICAL / 🟠 MAJOR / 🟡 MINOR / 🟢 NIT + verdict
+        → Preview findings + confirm, then post inline comments
+          on the diff (and conceptual threads) via glab
 ```
+
+> **`reviewer` vs `diff-reviewer`:** `reviewer` is the interactive,
+> per-step quality gate that runs *during* development (steps 4–6 repeat
+> per todo step). `diff-reviewer` runs *once on the finished MR* — it reads
+> the whole diff, ranks issues by severity, and posts them back onto the MR
+> (after a preview/confirm gate). Step 8 is optional but recommended before
+> requesting human review.
 
 ### Prerequisites
 - GitLab repository with `glab` CLI configured
@@ -94,6 +109,18 @@ Triage findings: [F]ix / [T]ech debt / [I]gnore.
 glab mr create --title "feat(scope): description" --description "Closes PROJ-123"
 ```
 Or use the `/pr` skill for auto-generated MR description.
+
+#### Step 8: Review the merge request (diff-reviewer)
+After the MR exists, review the whole diff and post feedback onto it:
+```bash
+copilot --agent=diff-reviewer --prompt "Review MR !<iid> for PROJ-123"
+```
+The agent reads the diff (via the `glab-cli` skill) and the linked Jira
+ticket's acceptance criteria (via the `ticket` skill), ranks findings
+🔴 CRITICAL / 🟠 MAJOR / 🟡 MINOR / 🟢 NIT, then **previews the exact
+comments and asks you to confirm** before posting inline discussions +
+conceptual threads and recording a verdict (approve / leave + summary
+thread). Nothing is posted until you say yes.
 
 ### Notes
 - Each step can be run independently — agents communicate via `docs/context/specs/` files
