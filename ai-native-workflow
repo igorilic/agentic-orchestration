@@ -865,6 +865,11 @@ Removed: ${cleaned} working files (requirements, specs, todos, test plans)" 2>/d
   header "Pipeline Complete"
   success "${pipeline_name} for ${id} finished."
   info "Summary: ${BOLD}$summary_file${NC}"
+  echo ""
+  dim "💡 Next (optional): review the new PR/MR with the diff-reviewer agent."
+  dim "   It posts inline comments + a verdict after a preview/confirm gate."
+  dim "   Claude:  Use diff-reviewer to review the new PR/MR for ${id}"
+  dim "   Copilot: copilot --agent=diff-reviewer --prompt \"Review the new PR/MR for ${id}\""
 }
 
 # ╔══════════════════════════════════════════════════════════════════╗
@@ -1743,6 +1748,12 @@ install_global_claude_md() {
 - /session-report — Obsidian session report
 - /adr — Architecture Decision Record (repo + Confluence)
 - /pr — Create PR/MR (auto-detects gh/glab)
+- /gh-cli · /glab-cli — review a PR/MR diff (inline comments + threads)
+
+Plus the **diff-reviewer** agent (Opus 4.6) — whole-PR/MR review: quality,
+correctness, security, landmines. It previews findings, then (on your
+confirm) posts severity-ranked inline comments + threads with a verdict.
+Invoke after a PR/MR exists: `Use diff-reviewer to review PR #<n>`.
 
 ## Pipelines (CLI)
 Run full agent pipelines from the terminal:
@@ -2285,6 +2296,18 @@ SKILL_EOF
      "$CLAUDE_DIR/skills/override-confidence/skill.bash"
   success "/override-confidence skill"
 
+  # --- /gh-cli + /glab-cli (PR/MR review CLI skills; copied from source so
+  #     the installed copy never drifts from skills/<name>/SKILL.md) ---
+  mkdir -p "$CLAUDE_DIR/skills/gh-cli"
+  cp "$_ANW_SCRIPT_DIR/skills/gh-cli/SKILL.md" \
+     "$CLAUDE_DIR/skills/gh-cli/SKILL.md"
+  success "/gh-cli skill"
+
+  mkdir -p "$CLAUDE_DIR/skills/glab-cli"
+  cp "$_ANW_SCRIPT_DIR/skills/glab-cli/SKILL.md" \
+     "$CLAUDE_DIR/skills/glab-cli/SKILL.md"
+  success "/glab-cli skill"
+
   # --- /session-report ---
   mkdir -p "$CLAUDE_DIR/skills/session-report"
   cat > "$CLAUDE_DIR/skills/session-report/SKILL.md" << 'SKILL_EOF'
@@ -2622,7 +2645,7 @@ description: >
   GitLab feature development pipeline. Run from CLI:
   ai-native-workflow run gitlab-feature <JIRA-ID>
   Jira → requirements-engineer → qa (test plan) → architect →
-  tdd-developer → qa → reviewer → MR.
+  tdd-developer → qa → reviewer → MR, then a manual diff-reviewer pass.
 disable-model-invocation: true
 ---
 
@@ -2639,6 +2662,7 @@ claude --agent=requirements-engineer --prompt "Analyze Jira ticket PROJ-123"
 claude --agent=architect --prompt "Design solution for PROJ-123"
 claude --agent=tdd-developer --prompt "Step 1 of PROJ-123-todo.md"
 claude --agent=reviewer --prompt "Review Step 1 of PROJ-123"
+claude --agent=diff-reviewer --prompt "Review MR !12 for PROJ-123"
 ```
 SKILL_EOF
   success "/pipeline-gitlab-feature skill"
@@ -2672,7 +2696,7 @@ description: >
   GitHub feature development pipeline. Run from CLI:
   ai-native-workflow run github-feature [specs-file]
   specs.md/input → requirements-engineer → GitHub issue → architect →
-  tdd-developer → qa → reviewer → PR.
+  tdd-developer → qa → reviewer → PR, then a manual diff-reviewer pass.
 disable-model-invocation: true
 ---
 
@@ -3187,6 +3211,12 @@ that requires re-entering via `/plan` or the production pipeline.
   commits still require tests
 AGENT_EOF
   success "explorer agent (Sonnet 4.6)"
+
+  # --- diff-reviewer (Opus 4.6) — copied from source so the installed copy
+  #     never drifts from agents/claude-code/diff-reviewer.md ---
+  cp "$_ANW_SCRIPT_DIR/agents/claude-code/diff-reviewer.md" \
+     "$CLAUDE_DIR/agents/diff-reviewer.md"
+  success "diff-reviewer agent (Opus 4.6)"
 }
 
 install_copilot_agents() {
@@ -3487,6 +3517,12 @@ pipeline (architect → tdd-developer → qa → reviewer).
 AGENT_EOF
   success "explorer.agent.md"
 
+  # --- diff-reviewer (Opus) — copied from source so the installed copy never
+  #     drifts from agents/copilot-cli/diff-reviewer.agent.md ---
+  cp "$_ANW_SCRIPT_DIR/agents/copilot-cli/diff-reviewer.agent.md" \
+     "$COPILOT_DIR/agents/diff-reviewer.agent.md"
+  success "diff-reviewer.agent.md"
+
   info "Copilot CLI agents installed to: $COPILOT_DIR/agents/"
   dim "Use: copilot --agent=architect --prompt \"...\""
   dim " or: /agent in interactive mode"
@@ -3552,6 +3588,12 @@ install_global_copilot_instructions() {
 - /session-report — Obsidian session report
 - /adr — Architecture Decision Record (repo + Confluence)
 - /pr — Create PR/MR (auto-detects gh/glab)
+- /gh-cli · /glab-cli — review a PR/MR diff (inline comments + threads)
+
+Plus the **diff-reviewer** agent (Opus 4.6) — whole-PR/MR review: quality,
+correctness, security, landmines. It previews findings, then (on your
+confirm) posts severity-ranked inline comments + threads with a verdict.
+Invoke after a PR/MR exists: `copilot --agent=diff-reviewer --prompt "Review MR !<iid>"`.
 
 ## Pipelines (CLI)
 Run full agent pipelines from the terminal:
@@ -4592,11 +4634,14 @@ show_status() {
   check_file "$CLAUDE_DIR/skills/pipeline-gitlab-feature/SKILL.md" "skills/pipeline-gitlab-feature"
   check_file "$CLAUDE_DIR/skills/pipeline-gitlab-incident/SKILL.md" "skills/pipeline-gitlab-incident"
   check_file "$CLAUDE_DIR/skills/pipeline-github-feature/SKILL.md" "skills/pipeline-github-feature"
+  check_file "$CLAUDE_DIR/skills/gh-cli/SKILL.md" "skills/gh-cli (PR review)"
+  check_file "$CLAUDE_DIR/skills/glab-cli/SKILL.md" "skills/glab-cli (MR review)"
   check_file "$CLAUDE_DIR/agents/requirements-engineer.md" "agents/requirements-engineer (Opus)"
   check_file "$CLAUDE_DIR/agents/architect.md" "agents/architect (Opus)"
   check_file "$CLAUDE_DIR/agents/tdd-developer.md" "agents/tdd-developer (Sonnet)"
   check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Haiku)"
   check_file "$CLAUDE_DIR/agents/reviewer.md" "agents/reviewer (Sonnet)"
+  check_file "$CLAUDE_DIR/agents/diff-reviewer.md" "agents/diff-reviewer (Opus)"
   check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
   check_file "$CLAUDE_DIR/agents/explorer.md" "agents/explorer (Sonnet)"
 
@@ -4610,6 +4655,7 @@ show_status() {
     check_file "$COPILOT_DIR/agents/tdd-developer.agent.md" "agents/tdd-developer"
     check_file "$COPILOT_DIR/agents/qa.agent.md" "agents/qa"
     check_file "$COPILOT_DIR/agents/reviewer.agent.md" "agents/reviewer"
+    check_file "$COPILOT_DIR/agents/diff-reviewer.agent.md" "agents/diff-reviewer"
     check_file "$COPILOT_DIR/agents/troubleshooter.agent.md" "agents/troubleshooter"
     check_file "$COPILOT_DIR/agents/explorer.agent.md" "agents/explorer"
     if [ -d "$COPILOT_SKILLS_DIR" ]; then

@@ -29,6 +29,7 @@ For the full technical specification, see [PAPER.md](../PAPER.md).
 │  tdd-developer         (Sonnet 4.6) → implement via TDD   │
 │  qa                    (Haiku 4.5) → run affected tests    │
 │  reviewer              (Sonnet 4.6) → code review + triage │
+│  diff-reviewer         (Opus 4.6) → PR/MR review + comment │
 │  troubleshooter        (Opus 4.6) → incident investigation │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -66,7 +67,11 @@ Jira Ticket
   │
   ├─ 7. confidence (aggregate verdict — hook enforces RED at MR step)
   │
-  └─ 8. glab mr create → merge request (body includes ## Confidence section)
+  ├─ 8. glab mr create → merge request (body includes ## Confidence section)
+  │
+  └─ 9. diff-reviewer (Opus 4.6) — whole-MR diff review (optional)
+        Review diff + Jira AC → rank by severity → preview + confirm
+        → post inline comments + threads + verdict via glab
 ```
 
 **Platform**: GitLab + Copilot CLI + Jira
@@ -134,7 +139,11 @@ specs.md / User Input
   │
   ├─ 7. confidence (aggregate verdict — hook enforces RED at PR step)
   │
-  └─ 8. gh pr create → pull request (Closes #issue; body includes ## Confidence section)
+  ├─ 8. gh pr create → pull request (Closes #issue; body includes ## Confidence section)
+  │
+  └─ 9. diff-reviewer (Opus 4.6) — whole-PR diff review (optional)
+        Review diff + issue AC → rank by severity → preview + confirm
+        → post inline comments + threads + verdict via gh
 ```
 
 **Platform**: GitHub + Claude Code
@@ -179,7 +188,8 @@ specs.md / User Input
 | architect | Opus 4.6 | Design solutions, create plans | No |
 | tdd-developer | Sonnet 4.6 | Implement via strict TDD | Yes |
 | qa | Haiku 4.5 | Run tests, create test plans | No |
-| reviewer | Sonnet 4.6 | Code review, quality gate | No |
+| reviewer | Sonnet 4.6 | Per-step code review, quality gate | No |
+| diff-reviewer | Opus 4.6 | Whole-PR/MR diff review; posts inline comments + threads | No (posts review comments) |
 | troubleshooter | Opus 4.6 | Incident investigation, diagnosis | No |
 
 ## Path Conventions
