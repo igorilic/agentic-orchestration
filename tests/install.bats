@@ -211,6 +211,32 @@ EOF
   rm -rf "$SANDBOX_PROJECT"
 }
 
+# Drift guard: every installed agent + non-pipeline skill must be a byte-copy of
+# its source file. Agents/skills are now installed via cp-from-source, not
+# heredocs — this test ensures the old heredoc-drift class can never return.
+# (issue #8; pipeline-* skills are intentionally Claude-stubbed, so excluded.)
+@test "install global: installed agents + skills byte-match source (no drift)" {
+  STUB="$(mktemp -d /tmp/aw-stub-XXXXXX)"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/copilot"; chmod +x "$STUB/copilot"
+  PATH="$STUB:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
+    "$INSTALLER" install global >/dev/null 2>&1
+  for src in "$BATS_TEST_DIRNAME"/../agents/claude-code/*.md; do
+    cmp -s "$src" "$SANDBOX/claude/agents/$(basename "$src")" \
+      || { echo "claude agent drift: $(basename "$src")"; rm -rf "$STUB"; return 1; }
+  done
+  for src in "$BATS_TEST_DIRNAME"/../agents/copilot-cli/*.agent.md; do
+    cmp -s "$src" "$SANDBOX/copilot/agents/$(basename "$src")" \
+      || { echo "copilot agent drift: $(basename "$src")"; rm -rf "$STUB"; return 1; }
+  done
+  for src in "$BATS_TEST_DIRNAME"/../skills/*/SKILL.md; do
+    name="$(basename "$(dirname "$src")")"
+    case "$name" in pipeline-*) continue ;; esac
+    cmp -s "$src" "$SANDBOX/claude/skills/$name/SKILL.md" \
+      || { echo "skill drift: $name"; rm -rf "$STUB"; return 1; }
+  done
+  rm -rf "$STUB"
+}
+
 # ---------------------------------------------------------------------------
 # CTX-1 Step 3: repo-level .gitignore shape guard
 # ---------------------------------------------------------------------------
