@@ -25,9 +25,20 @@ jobs:
       - name: Install bats
         run: npm install -g bats
 
-      - name: Install jq (Linux)
+      - name: Install test deps (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y jq
+        run: sudo apt-get update && sudo apt-get install -y jq ripgrep
+
+      - name: Install test deps (macOS)
+        if: runner.os == 'macOS'
+        # jq is preinstalled. Expose ONLY `timeout` (-> gtimeout) on PATH — do
+        # NOT add coreutils/gnubin wholesale, or every BSD coreutil becomes GNU
+        # and we lose the bash-3.2/BSD signal that's the point of the macOS job.
+        run: |
+          brew install ripgrep coreutils
+          mkdir -p "$HOME/bin"
+          ln -sf "$(command -v gtimeout)" "$HOME/bin/timeout"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
 
       - name: Syntax check
         run: |

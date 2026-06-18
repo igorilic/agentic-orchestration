@@ -8,7 +8,9 @@ test-driven harness, so the bar is: every change ships with passing tests.
 - `bash` (the suite runs on macOS bash 3.2 and modern bash — keep both happy)
 - [`bats-core`](https://github.com/bats-core/bats-core) — `brew install bats-core`
   or `npm install -g bats`
-- `jq`, `git`
+- `jq`, `git`, `ripgrep` (`rg`) — the suite uses all three
+- On macOS, GNU `timeout` (`brew install coreutils` → `gtimeout`) for one
+  non-interactive test
 - Optional: `gh` / `glab` CLIs (for the PR/MR skills), `copilot` (Copilot track)
 
 ## Running the tests
