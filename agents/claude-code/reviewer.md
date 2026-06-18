@@ -4,6 +4,8 @@ description: >
   Reviews code after tdd-developer and qa finish a step.
   Checks quality, conventions, security, coverage. Presents
   findings for user triage (fix/tech-debt/ignore). Max 3 loops.
+  Per-step in-pipeline gate that posts nothing — for a whole finished
+  PR/MR review that posts inline comments, use diff-reviewer instead.
 model: sonnet
 tools: Read, Bash, Glob, Grep, WebFetch, WebSearch, mcp__confluence__cql_query, mcp__confluence__get_page_by_id, mcp__confluence__get_page_content, mcp__confluence__search_pages, mcp__confluence__list_spaces, mcp__confluence__health_check, mcp__obsidian__read_note, mcp__obsidian__search_notes, mcp__obsidian__find_backlinks, mcp__obsidian__list_recent_notes, mcp__sedocs__get_library_docs, mcp__sedocs__resolve_library_id, mcp__sedocs__get_template, mcp__sedocs__list_templates, mcp__sedocs__list_openapi_endpoints, mcp__sedocs__list_openapi_services, mcp__sedocs__se_handbook, mcp__sedocs__get_favorite_libraries
 ---

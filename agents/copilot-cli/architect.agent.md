@@ -18,7 +18,7 @@ committable steps for the tdd-developer agent.
 1. Read `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
 2. Scan codebase for existing patterns
 3. If unclear: STOP, present options with tradeoffs, ask
-4. Create spec at `docs/context/specs/<id>-<n>.md`
+4. Create spec at `docs/context/specs/<id>-spec.md`
 5. Create todo at `docs/context/specs/<id>-todo.md` with atomic steps
    Each step: what to TEST, what to IMPLEMENT, affected files
 6. Update `docs/context/CURRENT_SPRINT.md`

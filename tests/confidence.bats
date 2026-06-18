@@ -75,6 +75,44 @@ teardown() {
   echo "$output" | jq -e '.gates | index("TEST_FAILED") != null'
 }
 
+# Fail-closed: a qa event missing tests_failed (truncated/malformed) must NOT
+# silently pass via `add // 0`. (issue #10)
+@test "TEST_FAILED (fail-closed): qa event missing tests_failed triggers RED" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    '{"ts":"2026-05-02T18:00:01Z","event":"qa","step":1,"tests_passed":5,"build_status":"ok","ac_items_tested":["AC-1"]}' \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.band == "RED"'
+  echo "$output" | jq -e '.gates | index("TEST_FAILED") != null'
+}
+
+# Fail-closed: claiming AC coverage while running zero tests is dishonest. (#10)
+@test "TEST_FAILED (fail-closed): qa claims AC coverage with zero tests run triggers RED" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 0 0 ok '["AC-1"]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("TEST_FAILED") != null'
+}
+
+# Sanity: a legit docs/no-test step (zero tests, claims NO AC) must NOT trip it.
+@test "TEST_FAILED (fail-closed): zero tests with no AC claimed does NOT trigger" {
+  make_log "$TMPLOG" \
+    "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
+    "$(qa_event 1 0 0 ok '[]')" \
+    "$(review_event 1 0 0 0 1 0 100)"
+
+  run scripts/confidence.sh "$TMPLOG"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.gates | index("TEST_FAILED") == null'
+}
+
 @test "BUILD_BROKEN: qa event with build_status != ok triggers RED" {
   make_log "$TMPLOG" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \

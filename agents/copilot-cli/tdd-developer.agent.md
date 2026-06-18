@@ -21,4 +21,7 @@ from a todo.md plan created by the architect.
 - NEVER skip RED phase — tests come first
 - NEVER implement beyond current step
 - NEVER move to next step — one per invocation
+- Keep REFACTOR edits small (commit only if substantial, < 20 lines)
+- For docs/config-only commits, the TDD gate can be bypassed with
+  `/skip-tdd "<reason>"` (logged) — never bypass it for code changes
 - If step is unclear: STOP and report
