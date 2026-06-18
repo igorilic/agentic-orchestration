@@ -198,6 +198,19 @@ EOF
   rm -rf "$SANDBOX_PROJECT"
 }
 
+# Regression: a stackless project must NOT crash `install project`.
+# detect_stacks expanded an empty array under `set -u` (bash 3.2), aborting
+# the whole install before any file was written. (issue #7)
+@test "install project: stackless repo installs cleanly (exit 0 + dispatcher written)" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  # No go.mod/package.json/etc. — detect_stacks returns empty.
+  run "$INSTALLER" install project "$SANDBOX_PROJECT"
+  [ "$status" -eq 0 ]
+  [ -f "$SANDBOX_PROJECT/.github/hooks/copilot-cli-dispatcher.sh" ]
+  [ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]
+  rm -rf "$SANDBOX_PROJECT"
+}
+
 # ---------------------------------------------------------------------------
 # CTX-1 Step 3: repo-level .gitignore shape guard
 # ---------------------------------------------------------------------------

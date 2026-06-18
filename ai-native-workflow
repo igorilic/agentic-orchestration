@@ -175,7 +175,11 @@ detect_stacks() {
     stacks+=("swift")
   fi
 
-  # Return unique stacks
+  # Return unique stacks. Guard the empty case: under `set -u` on bash 3.2,
+  # "${stacks[@]}" on an empty array throws "unbound variable", which (as the
+  # function's terminal command) would abort `install project` on a stackless
+  # repo. Return nothing so the generic-fallback path stays reachable.
+  [ ${#stacks[@]} -eq 0 ] && return 0
   printf '%s\n' "${stacks[@]}" | sort -u
 }
 
