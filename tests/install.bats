@@ -198,6 +198,45 @@ EOF
   rm -rf "$SANDBOX_PROJECT"
 }
 
+# Regression: a stackless project must NOT crash `install project`.
+# detect_stacks expanded an empty array under `set -u` (bash 3.2), aborting
+# the whole install before any file was written. (issue #7)
+@test "install project: stackless repo installs cleanly (exit 0 + dispatcher written)" {
+  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  # No go.mod/package.json/etc. — detect_stacks returns empty.
+  run "$INSTALLER" install project "$SANDBOX_PROJECT"
+  [ "$status" -eq 0 ]
+  [ -f "$SANDBOX_PROJECT/.github/hooks/copilot-cli-dispatcher.sh" ]
+  [ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]
+  rm -rf "$SANDBOX_PROJECT"
+}
+
+# Drift guard: every installed agent + non-pipeline skill must be a byte-copy of
+# its source file. Agents/skills are now installed via cp-from-source, not
+# heredocs — this test ensures the old heredoc-drift class can never return.
+# (issue #8; pipeline-* skills are intentionally Claude-stubbed, so excluded.)
+@test "install global: installed agents + skills byte-match source (no drift)" {
+  STUB="$(mktemp -d /tmp/aw-stub-XXXXXX)"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/copilot"; chmod +x "$STUB/copilot"
+  PATH="$STUB:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
+    "$INSTALLER" install global >/dev/null 2>&1
+  for src in "$BATS_TEST_DIRNAME"/../agents/claude-code/*.md; do
+    cmp -s "$src" "$SANDBOX/claude/agents/$(basename "$src")" \
+      || { echo "claude agent drift: $(basename "$src")"; rm -rf "$STUB"; return 1; }
+  done
+  for src in "$BATS_TEST_DIRNAME"/../agents/copilot-cli/*.agent.md; do
+    cmp -s "$src" "$SANDBOX/copilot/agents/$(basename "$src")" \
+      || { echo "copilot agent drift: $(basename "$src")"; rm -rf "$STUB"; return 1; }
+  done
+  for src in "$BATS_TEST_DIRNAME"/../skills/*/SKILL.md; do
+    name="$(basename "$(dirname "$src")")"
+    case "$name" in pipeline-*) continue ;; esac
+    cmp -s "$src" "$SANDBOX/claude/skills/$name/SKILL.md" \
+      || { echo "skill drift: $name"; rm -rf "$STUB"; return 1; }
+  done
+  rm -rf "$STUB"
+}
+
 # ---------------------------------------------------------------------------
 # CTX-1 Step 3: repo-level .gitignore shape guard
 # ---------------------------------------------------------------------------

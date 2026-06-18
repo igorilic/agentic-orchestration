@@ -58,8 +58,14 @@ if [ "$SCOPE" = "aggregate" ]; then
   [ "$ac_count" -gt 0 ] || gates+=("NO_AC")
 fi
 
-failed_total="$(jq '[.[] | select(.event=="qa") | .tests_failed] | add // 0' <<<"$events")"
-[ "$failed_total" -eq 0 ] || gates+=("TEST_FAILED")
+failed_total="$(jq '[.[] | select(.event=="qa") | (.tests_failed // 0)] | add // 0' <<<"$events")"
+# Fail-closed: a qa event missing tests_failed (truncated/malformed) or one that
+# claims AC coverage while running zero tests is treated as a failure, not a
+# silent pass. Closes the empty-but-passing gaming vector. (#10)
+qa_unsound="$(jq '[.[] | select(.event=="qa") | select((.tests_failed == null) or (((.ac_items_tested // []) | length) > 0 and (((.tests_passed // 0) + (.tests_failed // 0)) == 0)))] | length' <<<"$events")"
+if [ "$failed_total" -ne 0 ] || [ "$qa_unsound" -ne 0 ]; then
+  gates+=("TEST_FAILED")
+fi
 
 broken="$(jq '[.[] | select(.event=="qa" and .build_status != "ok")] | length' <<<"$events")"
 [ "$broken" -eq 0 ] || gates+=("BUILD_BROKEN")

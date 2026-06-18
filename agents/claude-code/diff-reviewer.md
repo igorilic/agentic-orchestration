@@ -7,7 +7,8 @@ description: >
   and (after a preview + confirm gate) posts them as inline comments on
   the exact diff lines or as conceptual threads when not line-specific.
   Use for: review pr, review mr, diff review, pull request review,
-  merge request review, code review.
+  merge request review, code review. This is the whole-PR/MR reviewer
+  that posts comments; for per-step review during development use reviewer.
 model: opus
 tools: Read, Bash, Glob, Grep, WebFetch, WebSearch, mcp__confluence__cql_query, mcp__confluence__get_page_by_id, mcp__confluence__get_page_content, mcp__confluence__search_pages, mcp__confluence__list_spaces, mcp__confluence__health_check, mcp__obsidian__read_note, mcp__obsidian__search_notes, mcp__obsidian__find_backlinks, mcp__obsidian__list_recent_notes, mcp__sedocs__get_library_docs, mcp__sedocs__resolve_library_id, mcp__sedocs__get_template, mcp__sedocs__list_templates, mcp__sedocs__list_openapi_endpoints, mcp__sedocs__list_openapi_services, mcp__sedocs__se_handbook, mcp__sedocs__get_favorite_libraries
 skills:

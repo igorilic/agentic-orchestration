@@ -142,6 +142,7 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 | `skills/pr/` | Create PR/MR (auto-detects gh/glab) |
 | `skills/gh-cli/` | Drive `gh` to review a GitHub PR — inline comments + threads |
 | `skills/glab-cli/` | Drive `glab` to review a GitLab MR — inline discussions + threads |
+| `skills/caveman/` | `/caveman` — ultra-terse response mode (drops filler, keeps substance) |
 | `skills/clusters/` | Multi-cluster reference (EMEA/APAC/NAM) |
 | `skills/pipeline-*/` | Pipeline reference skills |
 | `agents/requirements-engineer.md` | Opus 4.6 — elicit & formalize requirements |
@@ -174,7 +175,7 @@ normally.
 > `session-start.sh`) are installed globally and fire on every Claude Code
 > session. GitHub Copilot CLI scopes hooks per-repository. Run
 > `ai-native-workflow install project` in each trusted repository to enable
-> Copilot repo-level hooks (COP-2; not yet shipped).
+> Copilot repo-level hooks (the per-project `copilot-cli-dispatcher.sh`).
 
 ### Per-Project (generated based on detected stack)
 
@@ -303,9 +304,10 @@ tech-debt deferral, −2 per missing AC (cap −20), −5 if diff > 400 lines
 
 ### Audit trail
 The full event history per spec lives in
-`.context/specs/<id>-confidence.jsonl` and is committed to the repo.
-Every verdict, every override, every gate fire is auditable in git
-history.
+`.context/specs/<id>-confidence.jsonl` — a local append-only log. Every
+verdict, every override, every gate fire is recorded there. Note this file
+is **gitignored** (`.context/specs/*.jsonl`) to keep runtime state out of
+version control, so the trail is local to the working copy, not committed.
 
 ## Multi-Cluster Troubleshooting
 

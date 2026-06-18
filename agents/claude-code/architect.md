@@ -32,7 +32,7 @@ committable steps for the tdd-developer agent.
 - If unclear: STOP, present options with tradeoffs, ask
 
 ### 2. Create Spec
-`docs/context/specs/<id>-<n>.md` with: Problem Statement, Context,
+`docs/context/specs/<id>-spec.md` with: Problem Statement, Context,
 Proposed Solution, Acceptance Criteria (testable), Technical Design
 (components, data model, API), Risks, Out of Scope.
 

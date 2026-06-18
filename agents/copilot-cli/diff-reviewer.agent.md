@@ -6,7 +6,8 @@ description: >
   best practices. Ranks findings by severity, proposes fixes, and after
   a preview + confirm gate posts them inline on the diff or as conceptual
   threads. Use for: review pr, review mr, diff review, pull request review,
-  merge request review, code review.
+  merge request review, code review. Whole-PR/MR reviewer that posts
+  comments; for per-step review during development use reviewer.
 model: claude-opus-4.6
 ---
 
