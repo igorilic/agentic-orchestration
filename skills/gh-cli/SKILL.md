@@ -53,28 +53,33 @@ Bundle every line-anchored comment and the verdict into a single
 built with `-f`/`-F`, so pass raw JSON. Build it with `jq` (safest — it
 escapes bodies for you) **or** a quoted heredoc, then `--input`.
 
-Generate the payload (fill in the real head SHA, paths, lines, bodies):
+Write the static `comments[]` array with a **quoted** heredoc (so backticks
+and `$` in bodies stay literal), then let `jq` inject the **computed**
+`commit_id` and `event` — never hardcode the verdict, or you'll post
+`REQUEST_CHANGES` on a self-PR (422). `$EVENT` and `$HEAD_SHA` come from
+steps 1 and 5; on your own PR `$EVENT` is `COMMENT`.
 ```bash
-cat > /tmp/review.json <<'JSON'
-{
-  "commit_id": "0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b",
-  "event": "REQUEST_CHANGES",
-  "body": "## diff-reviewer verdict: REQUEST CHANGES\n\n2 critical, 3 major. See inline comments + threads.",
-  "comments": [
-    { "path": "src/auth.ts", "line": 88, "side": "RIGHT",
-      "body": "**🔴 CRITICAL — SQL injection.** Query is built by string concat; userId is attacker-controlled. Use a parameterised query (see suggestion)." },
-    { "path": "src/api.ts", "start_line": 20, "start_side": "RIGHT", "line": 23, "side": "RIGHT",
-      "body": "**🟠 MAJOR — unhandled rejection.** Wrap this block in try/catch and return a 5xx." },
-    { "path": "src/old.ts", "line": 7, "side": "LEFT",
-      "body": "**🟡 MINOR** — comment on a *deleted* line (LEFT = original file)." }
-  ]
-}
+cat > /tmp/comments.json <<'JSON'
+[
+  { "path": "src/auth.ts", "line": 88, "side": "RIGHT",
+    "body": "**🔴 CRITICAL — SQL injection.** userId is concatenated into the query; use a bound parameter (see suggestion)." },
+  { "path": "src/api.ts", "start_line": 20, "start_side": "RIGHT", "line": 23, "side": "RIGHT",
+    "body": "**🟠 MAJOR — unhandled rejection.** Wrap this block in try/catch and return a 5xx." },
+  { "path": "src/old.ts", "line": 7, "side": "LEFT",
+    "body": "**🟡 MINOR** — comment on a *deleted* line (LEFT = original file)." }
+]
 JSON
-gh api repos/{owner}/{repo}/pulls/$PR/reviews --input /tmp/review.json
+jq -n \
+  --arg sha   "$HEAD_SHA" \
+  --arg event "$EVENT" \
+  --arg body  "## diff-reviewer verdict: $EVENT — see inline comments + threads." \
+  --slurpfile comments /tmp/comments.json \
+  '{commit_id:$sha, event:$event, body:$body, comments:$comments[0]}' \
+  | gh api repos/{owner}/{repo}/pulls/$PR/reviews --input -
 ```
-> Use a **quoted** heredoc (`<<'JSON'`) or `jq` so backticks and `$` inside
-> comment bodies stay literal. The head SHA, paths and lines must be real
-> values — interpolate them before writing the file.
+> `jq` escapes the bodies and injects the real `$HEAD_SHA`/`$EVENT`, so the
+> verdict always matches step 5 (and the self-PR fallback). Keep `{owner}`/
+> `{repo}` in the URL — they don't expand inside the JSON.
 
 **Line/side rules (getting these wrong → HTTP 422):**
 - `path` — repo-relative file path.

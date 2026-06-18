@@ -866,7 +866,7 @@ Removed: ${cleaned} working files (requirements, specs, todos, test plans)" 2>/d
   success "${pipeline_name} for ${id} finished."
   info "Summary: ${BOLD}$summary_file${NC}"
   echo ""
-  dim "💡 Next (optional): review the new PR/MR with the diff-reviewer agent."
+  dim "Next (optional): review the new PR/MR with the diff-reviewer agent."
   dim "   It posts inline comments + a verdict after a preview/confirm gate."
   dim "   Claude:  Use diff-reviewer to review the new PR/MR for ${id}"
   dim "   Copilot: copilot --agent=diff-reviewer --prompt \"Review the new PR/MR for ${id}\""

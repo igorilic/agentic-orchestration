@@ -179,3 +179,12 @@ claude_install() {
   [ -f "$SANDBOX/copilot/skills/gh-cli/SKILL.md" ]
   [ -f "$SANDBOX/copilot/skills/glab-cli/SKILL.md" ]
 }
+
+@test "install global: the diff-reviewer's ticket dependency ships on both tracks" {
+  # The agent declares skills: [gh-cli, glab-cli, ticket]; gh-cli/glab-cli are
+  # covered above — assert the ticket (Jira AC) skill installs too.
+  PATH="$STUB_BIN:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
+    "$INSTALLER" install global >/dev/null 2>&1
+  [ -f "$SANDBOX/claude/skills/ticket/SKILL.md" ]
+  [ -f "$SANDBOX/copilot/skills/ticket/SKILL.md" ]
+}

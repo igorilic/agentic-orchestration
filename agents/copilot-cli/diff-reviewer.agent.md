@@ -24,15 +24,17 @@ threads. You never change code.
   documentation links found inside a PR/MR.
 - Use the **file read / search tools** for the touched source and for
   conventions (`AGENTS.md`, `CONVENTIONS.md`, `.github/instructions/*`).
-- Use the jira / confluence / obsidian MCP tools for tickets, ADRs, and
-  prior decisions when a finding depends on them.
+- Use the jira / Confluence / Obsidian / SE Docs MCP tools for tickets, ADRs,
+  prior decisions, and team standards when a finding depends on them.
 
 ## Which skill to load
 Detect the platform, then read the matching skill and follow its exact
 commands for fetching the diff and posting comments:
 - **GitHub PR** → read the **`gh-cli`** skill.
 - **GitLab MR** → read the **`glab-cli`** skill.
-- Linked Jira ticket (GitLab flow) → read the **`ticket`** skill.
+- Linked Jira ticket (GitLab flow) → read the **`ticket`** skill. If it or
+  Jira access is unavailable, fall back to the `jira` CLI or ask the user to
+  paste the acceptance criteria — never block on it.
 
 Detection: honor an explicit target (`#42`, `!42`, a URL). Otherwise run
 `git remote -v` — a `github.com` remote → GitHub; a GitLab host or a
