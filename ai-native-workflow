@@ -3374,6 +3374,7 @@ show_status() {
   check_file "$CLAUDE_DIR/skills/pipeline-github-feature/SKILL.md" "skills/pipeline-github-feature"
   check_file "$CLAUDE_DIR/skills/gh-cli/SKILL.md" "skills/gh-cli (PR review)"
   check_file "$CLAUDE_DIR/skills/glab-cli/SKILL.md" "skills/glab-cli (MR review)"
+  check_file "$CLAUDE_DIR/skills/caveman/SKILL.md" "skills/caveman (terse mode)"
   check_file "$CLAUDE_DIR/agents/requirements-engineer.md" "agents/requirements-engineer (Opus)"
   check_file "$CLAUDE_DIR/agents/architect.md" "agents/architect (Opus)"
   check_file "$CLAUDE_DIR/agents/tdd-developer.md" "agents/tdd-developer (Sonnet)"

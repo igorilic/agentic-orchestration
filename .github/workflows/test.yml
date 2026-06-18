@@ -1,0 +1,38 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bats:
+    name: bats (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS exercises bash 3.2 (where the set -u empty-array class of bug
+        # lives); ubuntu exercises modern bash.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install bats
+        run: npm install -g bats
+
+      - name: Install jq (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Syntax check
+        run: |
+          bash -n ai-native-workflow
+          for f in hooks/*.sh scripts/*.sh; do bash -n "$f"; done
+
+      - name: Run test suite
+        run: bats tests/
