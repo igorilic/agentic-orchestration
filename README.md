@@ -25,7 +25,7 @@ Separate concerns by guarantee level:
 | Layer | Mechanism | Guarantee |
 |-------|-----------|-----------|
 | **Hooks** | Shell scripts at lifecycle points | 100% — blocks actions via exit code 2 |
-| **Skills** | Reusable workflow instructions | ~80% — model loads when contextually relevant |
+| **Skills** | Reusable workflow instructions | Probabilistic — model loads when contextually relevant (not guaranteed) |
 | **Agents** | Specialized AI with scoped tools | Purpose-built — each agent does one thing |
 
 The TDD gate is a `PreToolUse` hook that **blocks `git commit`** if no test files are staged. It's not a suggestion — it's a shell script that returns exit code 2. The AI cannot override it.
