@@ -98,29 +98,29 @@ The architecture is governed by four principles:
 ### 3.2 Three-Layer Architecture
 
 ```
-┌───────────────────────────────────────────────────────────────┐
-│  ENFORCEMENT LAYER (Hooks — Deterministic)                    │
-│  SessionStart → load context, detect stack                    │
-│  PreToolUse   → TDD gate + confidence gate (block commits)    │
-│  Notification → desktop alerts                                │
-├───────────────────────────────────────────────────────────────┤
-│  WORKFLOW LAYER (Skills — Probabilistic)                      │
-│  /plan    → pipeline orchestration entry point                │
-│  /tdd     → RED→GREEN→REFACTOR cycle                          │
-│  /ticket  → Jira/GitHub issue → spec + test stubs             │
-│  /adr · /pr → decision records, PR/MR creation                │
-│  /override-confidence → accountable confidence bypass         │
-├───────────────────────────────────────────────────────────────┤
-│  REASONING LAYER (Agents — Specialized)                       │
-│  requirements-engineer (Opus 4.6)   → elicit, formalize ACs   │
-│  architect             (Opus 4.6)   → design, spec, plan      │
-│  tdd-developer         (Sonnet 4.6) → implement via TDD       │
-│  qa                    (Haiku 4.5)  → run affected tests      │
-│  reviewer              (Sonnet 4.6) → per-step review         │
-│  diff-reviewer         (Opus 4.6)   → whole-PR/MR review      │
-│  troubleshooter        (Opus 4.6)   → incident investigation  │
-│  explorer              (Sonnet 4.6) → spikes & prototypes     │
-└───────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  ENFORCEMENT LAYER (Hooks — Deterministic)                     │
+│  SessionStart → load context, detect stack                     │
+│  PreToolUse   → TDD gate + confidence gate (block commits)     │
+│  Notification → desktop alerts                                 │
+├────────────────────────────────────────────────────────────────┤
+│  WORKFLOW LAYER (Skills — Probabilistic)                       │
+│  /plan    → pipeline orchestration entry point                 │
+│  /tdd     → RED→GREEN→REFACTOR cycle                           │
+│  /ticket  → Jira/GitHub issue → spec + test stubs              │
+│  /adr · /pr → decision records, PR/MR creation                 │
+│  /override-confidence → accountable confidence bypass          │
+├────────────────────────────────────────────────────────────────┤
+│  REASONING LAYER (Agents — Specialized)                        │
+│  requirements-engineer (Opus-tier)   → elicit, formalize ACs   │
+│  architect             (Opus-tier)   → design, spec, plan      │
+│  tdd-developer         (Sonnet-tier) → implement via TDD       │
+│  qa                    (Haiku-tier)  → run affected tests      │
+│  reviewer              (Sonnet-tier) → per-step review         │
+│  diff-reviewer         (Opus-tier)   → whole-PR/MR review      │
+│  troubleshooter        (Opus-tier)   → incident investigation  │
+│  explorer              (Sonnet-tier) → spikes & prototypes     │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.3 Agent Pipeline
@@ -129,23 +129,23 @@ The architecture is governed by four principles:
 
 The feature development pipeline follows a strict linear progression:
 
-1. **Requirements-Engineer** (Opus 4.6) elicits and formalizes the requirement — from a Jira ticket, a `specs.md` file, or direct user input — into a structured requirements document with testable acceptance criteria. This runs before any design so the architect plans against explicit, verifiable goals rather than an ambiguous prompt.
+1. **Requirements-Engineer** (Opus-tier) elicits and formalizes the requirement — from a Jira ticket, a `specs.md` file, or direct user input — into a structured requirements document with testable acceptance criteria. This runs before any design so the architect plans against explicit, verifiable goals rather than an ambiguous prompt.
 
-2. **Architect** (Opus 4.6) reads the requirements, analyzes the codebase, and produces two artifacts: a feature specification (`spec.md`) and an atomic todo plan (`todo.md`). Each step in the todo must be independently testable and result in a commit. The architect never writes implementation code.
+2. **Architect** (Opus-tier) reads the requirements, analyzes the codebase, and produces two artifacts: a feature specification (`spec.md`) and an atomic todo plan (`todo.md`). Each step in the todo must be independently testable and result in a commit. The architect never writes implementation code.
 
-3. **TDD-Developer** (Sonnet 4.6) receives one step at a time from the todo plan and executes the RED→GREEN→REFACTOR cycle. It writes failing tests first (RED), implements the minimum code to pass (GREEN), refactors while keeping tests green, and commits at each phase. The PreToolUse hooks block any `git commit` that doesn't include test files in the staging area, or that fails the confidence gate's hard checks.
+3. **TDD-Developer** (Sonnet-tier) receives one step at a time from the todo plan and executes the RED→GREEN→REFACTOR cycle. It writes failing tests first (RED), implements the minimum code to pass (GREEN), refactors while keeping tests green, and commits at each phase. The PreToolUse hooks block any `git commit` that doesn't include test files in the staging area, or that fails the confidence gate's hard checks.
 
-4. **QA** (Haiku 4.5) runs after each step completes, executing only the tests affected by the changed files. It detects the appropriate test runner from project files and reports exact pass/fail results without interpretation.
+4. **QA** (Haiku-tier) runs after each step completes, executing only the tests affected by the changed files. It detects the appropriate test runner from project files and reports exact pass/fail results without interpretation.
 
-5. **Reviewer** (Sonnet 4.6) evaluates the changes against a checklist covering correctness, test quality, code quality, stack conventions, security, and performance. Findings are categorized as MUST FIX (automatic), SHOULD FIX (user decides), and SUGGESTION (user decides). The user triages each item as Fix, Tech Debt, or Ignore.
+5. **Reviewer** (Sonnet-tier) evaluates the changes against a checklist covering correctness, test quality, code quality, stack conventions, security, and performance. Findings are categorized as MUST FIX (automatic), SHOULD FIX (user decides), and SUGGESTION (user decides). The user triages each item as Fix, Tech Debt, or Ignore.
 
 6. **Fix Loop** (max 3 iterations): items marked for fixing are sent back to the TDD-Developer. After three cycles, remaining issues are automatically moved to a tech debt backlog.
 
-Two further agents operate outside this linear flow: **diff-reviewer** (Opus 4.6) performs a whole-PR/MR review once a pull/merge request exists — ranking findings by severity and, after a preview-and-confirm gate, posting them as inline comments or threads — and **explorer** (Sonnet 4.6) supports spikes, prototyping, and API learning, writing throwaway code under a gitignored `spikes/` directory rather than shipping it.
+Two further agents operate outside this linear flow: **diff-reviewer** (Opus-tier) performs a whole-PR/MR review once a pull/merge request exists — ranking findings by severity and, after a preview-and-confirm gate, posting them as inline comments or threads — and **explorer** (Sonnet-tier) supports spikes, prototyping, and API learning, writing throwaway code under a gitignored `spikes/` directory rather than shipping it.
 
 #### 3.3.2 Incident Response Pipeline
 
-The troubleshooter agent (Opus 4.6) handles a parallel workflow for production incidents:
+The troubleshooter agent (Opus-tier) handles a parallel workflow for production incidents:
 
 1. Fetch incident context from Jira (via MCP)
 2. Determine scope — query Azure Application Insights across all three regional clusters (EMEA, APAC, NAM) to determine if the issue is regional or global
@@ -160,16 +160,18 @@ Model selection is based on the cognitive demands of each role:
 
 | Agent | Model | Rationale |
 |-------|-------|-----------|
-| Requirements-Engineer | Opus 4.6 | Elicits and disambiguates intent into testable acceptance criteria — high-stakes framing that the rest of the pipeline depends on |
-| Architect | Opus 4.6 | Requires deep codebase analysis, design reasoning, and creative problem decomposition |
-| TDD-Developer | Sonnet 4.6 | Needs strong coding ability but follows a prescribed plan — no design decisions |
-| QA | Haiku 4.5 | Executes test commands and reports output — minimal reasoning required |
-| Reviewer | Sonnet 4.6 | Pattern matching against conventions and best practices — moderate reasoning |
-| Diff-Reviewer | Opus 4.6 | Whole-PR/MR review — security, logic, and landmine analysis across an entire diff |
-| Troubleshooter | Opus 4.6 | Requires cross-system correlation, root cause analysis, and creative diagnosis |
-| Explorer | Sonnet 4.6 | Generates and evaluates throwaway options for spikes — coding ability without ship-quality constraints |
+| Requirements-Engineer | Opus-tier | Elicits and disambiguates intent into testable acceptance criteria — high-stakes framing that the rest of the pipeline depends on |
+| Architect | Opus-tier | Requires deep codebase analysis, design reasoning, and creative problem decomposition |
+| TDD-Developer | Sonnet-tier | Needs strong coding ability but follows a prescribed plan — no design decisions |
+| QA | Haiku-tier | Executes test commands and reports output — minimal reasoning required |
+| Reviewer | Sonnet-tier | Pattern matching against conventions and best practices — moderate reasoning |
+| Diff-Reviewer | Opus-tier | Whole-PR/MR review — security, logic, and landmine analysis across an entire diff |
+| Troubleshooter | Opus-tier | Requires cross-system correlation, root cause analysis, and creative diagnosis |
+| Explorer | Sonnet-tier | Generates and evaluates throwaway options for spikes — coding ability without ship-quality constraints |
 
-This tiering optimizes both cost and latency. The QA agent (Haiku) returns results in seconds, while the Architect and Troubleshooter (Opus) take longer but produce higher-quality reasoning for tasks where that matters.
+This tiering optimizes both cost and latency. The QA agent (Haiku-tier) returns results in seconds, while the Architect and Troubleshooter (Opus-tier) take longer but produce higher-quality reasoning for tasks where that matters.
+
+The architecturally meaningful decision is the **tier**, not a specific model version. Agents are therefore configured with floating tier aliases (`opus`, `sonnet`, `haiku`) rather than pinned version identifiers, so each role automatically tracks the current best model of its tier as new releases ship — no per-release maintenance, and no quality left on the table. We avoid naming concrete versions in this paper for the same reason: with no controlled evaluation pinned to a particular model (see §5.3), a version number would imply a reproducibility claim the system does not make. On Copilot CLI, which does not expose model selection in agent frontmatter, tier selection is delegated to the platform's automatic model routing.
 
 ### 3.5 Commit-Time Enforcement: TDD and Confidence Gates
 
