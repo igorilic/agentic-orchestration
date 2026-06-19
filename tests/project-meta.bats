@@ -34,7 +34,7 @@ teardown() {
   [ -f "$REPO_ROOT/CONTRIBUTING.md" ]
   grep -q 'make test' "$REPO_ROOT/CONTRIBUTING.md"
   grep -q 'docs/context/' "$REPO_ROOT/CONTRIBUTING.md"
-  grep -q '\.context/' "$REPO_ROOT/CONTRIBUTING.md"
+  grep -q '\.anw/' "$REPO_ROOT/CONTRIBUTING.md"
 }
 
 # --- caveman skill ---

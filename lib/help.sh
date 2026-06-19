@@ -16,7 +16,7 @@ show_help() {
 
   INSTALL COMMANDS
     install global              Install hooks, skills, agents to ~/.claude/
-    install project [path]      Install AGENTS.md, Copilot config, .context/
+    install project [path]      Install AGENTS.md, Copilot config, docs/context/
                                 (auto-detects stack from project files)
     install all [path]          Install both global + project
 
@@ -106,7 +106,8 @@ show_help() {
     Per-Project:
       AGENTS.md                 Cross-tool rules (Claude + Copilot)
       CLAUDE.md                 Project context
-      .context/                 Architecture, conventions, specs, sprint
+      docs/context/             Architecture, conventions, specs, sprint
+      .anw/                     Runtime pipeline state + confidence logs (gitignored)
       .github/copilot-instructions.md   Copilot repo-wide rules
       .github/instructions/*.md          Stack-specific Copilot rules
       docs/decisions/           ADR directory

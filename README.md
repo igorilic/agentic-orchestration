@@ -183,8 +183,8 @@ normally.
 |-----------|---------|
 | `AGENTS.md` | Cross-tool agent rules (Claude + Copilot) |
 | `CLAUDE.md` | Project context |
-| `docs/context/` | Sprint board, tracked specs, todos, requirements (git-tracked; reviewable in PRs) |
-| `.context/` | Architecture, conventions, glossary (installer-seeded) + runtime pipeline state (gitignored) |
+| `docs/context/` | Sprint board, tracked specs/todos/requirements, plus installer-seeded architecture/conventions/glossary (git-tracked; reviewable in PRs) |
+| `.anw/` | Runtime pipeline state, audit log, and confidence logs (gitignored) |
 | `.github/copilot-instructions.md` | Copilot repo-wide rules |
 | `.github/instructions/*.instructions.md` | Stack-specific Copilot rules |
 | `.github/hooks/copilot-cli-dispatcher.sh` | **Copilot CLI per-project hook** — enforces TDD + confidence gates (mirrors Claude's global hooks; per-project because Copilot CLI has no user-global hook support) |
@@ -269,7 +269,7 @@ copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
 
 After every pipeline run, a deterministic confidence verdict is computed
 from the events that `architect`, `qa`, and `reviewer` write to
-`.context/specs/<id>-confidence.jsonl`. The verdict surfaces both as a
+`.anw/specs/<id>-confidence.jsonl`. The verdict surfaces both as a
 0–100 score and as a band (GREEN / YELLOW / RED).
 
 **The hook (`hooks/confidence-gate.sh`) blocks `gh pr create` /
@@ -304,9 +304,9 @@ tech-debt deferral, −2 per missing AC (cap −20), −5 if diff > 400 lines
 
 ### Audit trail
 The full event history per spec lives in
-`.context/specs/<id>-confidence.jsonl` — a local append-only log. Every
+`.anw/specs/<id>-confidence.jsonl` — a local append-only log. Every
 verdict, every override, every gate fire is recorded there. Note this file
-is **gitignored** (`.context/specs/*.jsonl`) to keep runtime state out of
+is **gitignored** (`.anw/specs/*.jsonl`) to keep runtime state out of
 version control, so the trail is local to the working copy, not committed.
 
 ## Multi-Cluster Troubleshooting

@@ -119,7 +119,7 @@ uninstall_project() {
     fi
   done
 
-  warn "AGENTS.md, CLAUDE.md, and .context/ preserved (contain project data)"
+  warn "AGENTS.md, CLAUDE.md, docs/context/, and .anw/ preserved (contain project data)"
   echo ""
   success "Project uninstall complete"
 }

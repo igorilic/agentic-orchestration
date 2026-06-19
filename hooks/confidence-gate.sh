@@ -26,7 +26,7 @@ if ! echo "$SPEC_ID" | grep -qE '^[A-Za-z0-9._-]+$'; then
   echo "🚫 Confidence gate: invalid spec id '$SPEC_ID' — must match [A-Za-z0-9._-]+" >&2
   exit 2
 fi
-LOG="$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl"
+LOG="$PROJECT_DIR/.anw/specs/${SPEC_ID}-confidence.jsonl"
 
 if [ ! -f "$LOG" ]; then
   echo "🚫 Confidence gate: log not found at $LOG" >&2

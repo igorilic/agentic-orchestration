@@ -9,9 +9,9 @@
 3. Refactor while keeping tests green
 
 ## Before Coding
-- Check `.context/specs/` for feature specifications
-- Read `.context/CONVENTIONS.md` for stack patterns
-- Read `.context/ARCHITECTURE.md` for system context
+- Check `docs/context/specs/` for feature specifications
+- Read `docs/context/CONVENTIONS.md` for stack patterns
+- Read `docs/context/ARCHITECTURE.md` for system context
 
 ## When Uncertain
 Stop and ask. Present options with tradeoffs.

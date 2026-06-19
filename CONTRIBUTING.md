@@ -57,13 +57,15 @@ and add a `check_file` line to `show_status` in `lib/status.sh`.
 
 ## Path conventions (important, and easy to trip on)
 
-- `docs/context/specs/` — **tracked** spec/todo/requirements artifacts (reviewed
-  in PRs). Agents write specs here as `<id>-spec.md` / `<id>-todo.md`.
-- `.context/` — **gitignored** runtime state: pipeline state, audit log, and the
-  per-spec confidence log `.context/specs/<id>-confidence.jsonl`.
+- `docs/context/` — **tracked** project context (reviewed in PRs): the sprint
+  board, spec/todo/requirements artifacts (agents write `<id>-spec.md` /
+  `<id>-todo.md` under `docs/context/specs/`), and the installer-seeded
+  `ARCHITECTURE.md` / `CONVENTIONS.md` / `GLOSSARY.md`.
+- `.anw/` — **gitignored** runtime state only: pipeline state, audit log, and
+  the per-spec confidence log `.anw/specs/<id>-confidence.jsonl`.
 
-Two near-identical roots; don't cross them. The confidence log is local-only
-(gitignored), not committed.
+One tracked root (`docs/context/`), one runtime root (`.anw/`) — don't cross
+them. The confidence log is local-only (gitignored), not committed.
 
 ## Commit & PR conventions
 

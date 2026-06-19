@@ -34,7 +34,7 @@ COPILOT_SETTINGS_FILE="$COPILOT_DIR/settings.json"
 BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
 SPEC_DIR="docs/context/specs"
 SPRINT_FILE="docs/context/CURRENT_SPRINT.md"
-RUNTIME_DIR=".context"
+RUNTIME_DIR=".anw"
 STATE_FILE="${RUNTIME_DIR}/.pipeline-state"
 CONTEXT_DIR="$SPEC_DIR"   # backwards-compat alias — drop after one release
 ALLOWED_QUESTIONS=0   # 0 = disabled; N = max questions per agent run

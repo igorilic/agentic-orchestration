@@ -8,7 +8,7 @@ setup() {
   TESTDIR="$(mktemp -d)"
   cd "$TESTDIR"
   git init -q
-  mkdir -p .context/specs .git/aw
+  mkdir -p .anw/specs .git/aw
   CLI_HELPER="$BATS_TEST_DIRNAME/../scripts/confidence-cli.sh"
 }
 
@@ -67,7 +67,7 @@ teardown() {
 
 @test "build_pr_body injects ## Confidence section into base body" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -78,7 +78,7 @@ teardown() {
 
 @test "build_pr_body shows GREEN for clean log" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -90,7 +90,7 @@ teardown() {
 @test "build_pr_body shows RED with failing gate names in body" {
   source "$CLI_HELPER"
   # No spec event → NO_AC gate fires → RED
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(qa_event 1 5 0 ok '[]')" \
     "$(review_event 1 0 0 0 1 0 100)"
 
@@ -100,7 +100,7 @@ teardown() {
 
 @test "build_pr_body preserves the base body text" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -111,14 +111,14 @@ teardown() {
 
 @test "build_pr_body does not mutate the log file" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
 
-  before_lines=$(wc -l < .context/specs/PROJ-1-confidence.jsonl)
+  before_lines=$(wc -l < .anw/specs/PROJ-1-confidence.jsonl)
   build_pr_body "PROJ-1" "body" >/dev/null
-  after_lines=$(wc -l < .context/specs/PROJ-1-confidence.jsonl)
+  after_lines=$(wc -l < .anw/specs/PROJ-1-confidence.jsonl)
   [ "$before_lines" -eq "$after_lines" ]
 }
 
@@ -128,28 +128,28 @@ teardown() {
 
 @test "emit_step_verdict appends a step-scope verdict event to the log" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
 
-  before_lines=$(wc -l < .context/specs/PROJ-1-confidence.jsonl)
+  before_lines=$(wc -l < .anw/specs/PROJ-1-confidence.jsonl)
   # Feed 'go' to skip the interactive prompt (band will be GREEN, no prompt)
   emit_step_verdict "PROJ-1" 1 >/dev/null
-  after_lines=$(wc -l < .context/specs/PROJ-1-confidence.jsonl)
+  after_lines=$(wc -l < .anw/specs/PROJ-1-confidence.jsonl)
   [ "$after_lines" -gt "$before_lines" ]
 }
 
 @test "emit_step_verdict appended event has scope=step and correct step number" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
 
   emit_step_verdict "PROJ-1" 1 >/dev/null
   # Last line of the log should be the verdict event
-  last="$(tail -1 .context/specs/PROJ-1-confidence.jsonl)"
+  last="$(tail -1 .anw/specs/PROJ-1-confidence.jsonl)"
   echo "$last" | jq -e '.event == "verdict"'
   echo "$last" | jq -e '.scope == "step"'
   echo "$last" | jq -e '.step == 1'
@@ -157,7 +157,7 @@ teardown() {
 
 @test "emit_step_verdict prints band and score to stdout" {
   source "$CLI_HELPER"
-  make_log ".context/specs/PROJ-1-confidence.jsonl" \
+  make_log ".anw/specs/PROJ-1-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -172,8 +172,8 @@ teardown() {
   # No stdin redirection; if the function tried to prompt, the test would hang.
   source "$CLI_HELPER"
 
-  mkdir -p .context/specs
-  make_log ".context/specs/SMOKE-confidence.jsonl" \
+  mkdir -p .anw/specs
+  make_log ".anw/specs/SMOKE-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 5 0 1 0 100)"
@@ -187,8 +187,8 @@ teardown() {
 # Fix 5: build_pr_body includes failing gate names when RED
 @test "build_pr_body: includes failing gate names when RED" {
   source "$CLI_HELPER"
-  mkdir -p .context/specs
-  make_log ".context/specs/X-confidence.jsonl" \
+  mkdir -p .anw/specs
+  make_log ".anw/specs/X-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 1 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -201,8 +201,8 @@ teardown() {
 
 @test "build_pr_body: omits failing-gates line when GREEN" {
   source "$CLI_HELPER"
-  mkdir -p .context/specs
-  make_log ".context/specs/X-confidence.jsonl" \
+  mkdir -p .anw/specs
+  make_log ".anw/specs/X-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -270,11 +270,11 @@ _setup_pipeline_stubs() {
 @test "pipeline wiring: github-feature TDD loop calls emit_step_verdict — verdict event appears in confidence log" {
   local spec_id="PROJ-wiring-01"
 
-  mkdir -p .context/specs
+  mkdir -p .anw/specs
   # A 1-step todo file so the loop runs once
-  printf '### Step 1\nDo thing\n' > ".context/specs/${spec_id}-todo.md"
+  printf '### Step 1\nDo thing\n' > ".anw/specs/${spec_id}-todo.md"
   # Seed the confidence log so emit_step_verdict can score
-  make_log ".context/specs/${spec_id}-confidence.jsonl" \
+  make_log ".anw/specs/${spec_id}-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -286,7 +286,7 @@ _setup_pipeline_stubs() {
   # find returns our todo file
   find() {
     if [[ "$*" == *"-todo.md"* ]]; then
-      echo ".context/specs/${spec_id}-todo.md"
+      echo ".anw/specs/${spec_id}-todo.md"
     else
       command find "$@"
     fi
@@ -310,7 +310,7 @@ _setup_pipeline_stubs() {
   # Instead, override emit_step_verdict to write to our known log path.
   emit_step_verdict() {
     local sid="$1" step="$2"
-    local log=".context/specs/${spec_id}-confidence.jsonl"
+    local log=".anw/specs/${spec_id}-confidence.jsonl"
     local ts
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     jq -cn --arg ts "$ts" --argjson step "$step" --arg band "GREEN" --argjson score 100 \
@@ -329,15 +329,15 @@ _setup_pipeline_stubs() {
 
   # The verdict event should have been appended by the (possibly stubbed)
   # emit_step_verdict call site inside the pipeline.
-  grep -q '"event":"verdict"' ".context/specs/${spec_id}-confidence.jsonl"
+  grep -q '"event":"verdict"' ".anw/specs/${spec_id}-confidence.jsonl"
 }
 
 @test "pipeline wiring: github-feature TDD loop calls emit_step_verdict with correct step number" {
   local spec_id="PROJ-wiring-02"
 
-  mkdir -p .context/specs
-  printf '### Step 1\nDo thing\n' > ".context/specs/${spec_id}-todo.md"
-  make_log ".context/specs/${spec_id}-confidence.jsonl" \
+  mkdir -p .anw/specs
+  printf '### Step 1\nDo thing\n' > ".anw/specs/${spec_id}-todo.md"
+  make_log ".anw/specs/${spec_id}-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -345,7 +345,7 @@ _setup_pipeline_stubs() {
   _setup_pipeline_stubs
   count_steps() { echo 1; }
   find() {
-    [[ "$*" == *"-todo.md"* ]] && echo ".context/specs/${spec_id}-todo.md" || command find "$@"
+    [[ "$*" == *"-todo.md"* ]] && echo ".anw/specs/${spec_id}-todo.md" || command find "$@"
   }
   should_skip_step() {
     local s="$1"; [ "$s" = "6.1" ] && return 1; return 0
@@ -353,7 +353,7 @@ _setup_pipeline_stubs() {
   gh() { return 0; }
   emit_step_verdict() {
     local sid="$1" step="$2"
-    local log=".context/specs/${spec_id}-confidence.jsonl"
+    local log=".anw/specs/${spec_id}-confidence.jsonl"
     local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     jq -cn --arg ts "$ts" --argjson step "$step" --arg band "GREEN" --argjson score 100 \
       '{ts:$ts, event:"verdict", scope:"step", step:$step, band:$band, score:$score}' >> "$log"
@@ -364,7 +364,7 @@ _setup_pipeline_stubs() {
 
   pipeline_github_feature "specs.md" 2>/dev/null || true
 
-  last="$(grep '"event":"verdict"' ".context/specs/${spec_id}-confidence.jsonl" | tail -1)"
+  last="$(grep '"event":"verdict"' ".anw/specs/${spec_id}-confidence.jsonl" | tail -1)"
   echo "$last" | jq -e '.step == 1'
 }
 
@@ -377,10 +377,10 @@ _setup_pipeline_stubs() {
   local captured_body_file
   captured_body_file="$(mktemp)"
 
-  mkdir -p .context/specs
+  mkdir -p .anw/specs
   # No steps todo so the TDD loop is empty; we only want step 7 to run
-  printf '' > ".context/specs/${spec_id}-todo.md"
-  make_log ".context/specs/${spec_id}-confidence.jsonl" \
+  printf '' > ".anw/specs/${spec_id}-todo.md"
+  make_log ".anw/specs/${spec_id}-confidence.jsonl" \
     "$(spec_event '[{"id":"AC-1","text":"x"}]')" \
     "$(qa_event 1 5 0 ok '["AC-1"]')" \
     "$(review_event 1 0 0 0 1 0 100)"
@@ -388,7 +388,7 @@ _setup_pipeline_stubs() {
   _setup_pipeline_stubs
   count_steps() { echo 0; }
   find() {
-    [[ "$*" == *"-todo.md"* ]] && echo ".context/specs/${spec_id}-todo.md" || command find "$@"
+    [[ "$*" == *"-todo.md"* ]] && echo ".anw/specs/${spec_id}-todo.md" || command find "$@"
   }
   should_skip_step() {
     local s="$1"; [ "$s" = "7" ] && return 1; return 0

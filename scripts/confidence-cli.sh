@@ -25,7 +25,7 @@ write_active_spec() {
 build_pr_body() {
   local spec_id="$1"
   local base_body="$2"
-  local log=".context/specs/${spec_id}-confidence.jsonl"
+  local log=".anw/specs/${spec_id}-confidence.jsonl"
   local verdict band score penalties_summary
 
   verdict="$("$_CONFIDENCE_CLI_DIR/confidence.sh" "$log" 2>/dev/null)" || verdict='{"band":"UNKNOWN","score":0,"penalties":{}}'
@@ -51,7 +51,7 @@ $base_body
 $gates_line
 
 Penalties: $penalties_summary
-Audit: \`.context/specs/${spec_id}-confidence.jsonl\`
+Audit: \`.anw/specs/${spec_id}-confidence.jsonl\`
 EOF
   else
     cat <<EOF
@@ -61,7 +61,7 @@ $base_body
 **$band: $score/100**
 
 Penalties: $penalties_summary
-Audit: \`.context/specs/${spec_id}-confidence.jsonl\`
+Audit: \`.anw/specs/${spec_id}-confidence.jsonl\`
 EOF
   fi
 }
@@ -73,7 +73,7 @@ EOF
 emit_step_verdict() {
   local spec_id="$1"
   local step="$2"
-  local log=".context/specs/${spec_id}-confidence.jsonl"
+  local log=".anw/specs/${spec_id}-confidence.jsonl"
   local verdict
 
   verdict="$("$_CONFIDENCE_CLI_DIR/confidence.sh" "$log" --scope=step --step="$step" 2>/dev/null)" \

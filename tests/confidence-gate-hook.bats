@@ -6,9 +6,9 @@ setup() {
   TESTDIR="$(mktemp -d)"
   cd "$TESTDIR"
   git init -q
-  mkdir -p .git/aw .context/specs
+  mkdir -p .git/aw .anw/specs
   echo "PROJ-1" > .git/aw/active-spec
-  LOG=".context/specs/PROJ-1-confidence.jsonl"
+  LOG=".anw/specs/PROJ-1-confidence.jsonl"
 }
 
 teardown() {
