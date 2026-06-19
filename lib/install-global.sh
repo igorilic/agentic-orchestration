@@ -99,29 +99,8 @@ Run full agent pipelines from the terminal:
 - `ai-native-workflow run gitlab-incident PROJ-456` — Troubleshooter + Jira → MR
 - `ai-native-workflow run github-feature specs.md` — Claude Code → GitHub issue → PR
 
-## Agent Pipeline
-All new work starts with `/plan`. The pipeline:
-1. **requirements-engineer** (Opus-tier) — elicits & formalizes requirements
-2. **architect** (Opus-tier) — designs spec + atomic todo plan
-3. **tdd-developer** (Sonnet-tier) — implements one step via TDD
-4. **qa** (Haiku-tier) — runs affected tests
-5. **reviewer** (Sonnet-tier) — reviews code, user triages findings
-Max 3 fix loops per step, then remaining issues go to tech debt.
-
-For production incidents, use **troubleshooter** (Opus-tier):
-- Pulls Jira ticket, ArgoCD logs, Azure Application Insights
-- Produces diagnosis + TDD fix plan for tdd-developer
-
-## Stack Detection
-Detect the active stack from project files and auto-apply conventions:
-- `*.csproj` or `*.sln` → .NET (xUnit, FluentAssertions, NSubstitute)
-- `go.mod` → Go (testing + testify, table-driven)
-- `Cargo.toml` → Rust (built-in + tokio-test, axum)
-- `pyproject.toml` or `requirements.txt` → Python (pytest, Pydantic)
-- `package.json` with react → React/TS (Vitest + Testing Library)
-- `package.json` with react-native → React Native (Jest + RNTL)
-- `Package.swift` or `*.xcodeproj` → Swift (XCTest)
 MANAGED_EOF
+    render_pipeline_and_stacks_md
     echo "$end"
   } > "$managed_temp"
 
@@ -726,29 +705,8 @@ Run full agent pipelines from the terminal:
 - `ai-native-workflow run gitlab-incident PROJ-456` — Troubleshooter + Jira → MR
 - `ai-native-workflow run github-feature specs.md` — GitHub issue → PR
 
-## Agent Pipeline
-All new work starts with `/plan`. The pipeline:
-1. **requirements-engineer** (Opus-tier) — elicits & formalizes requirements
-2. **architect** (Opus-tier) — designs spec + atomic todo plan
-3. **tdd-developer** (Sonnet-tier) — implements one step via TDD
-4. **qa** (Haiku-tier) — runs affected tests
-5. **reviewer** (Sonnet-tier) — reviews code, user triages findings
-Max 3 fix loops per step, then remaining issues go to tech debt.
-
-For production incidents, use **troubleshooter** (Opus-tier):
-- Pulls Jira ticket, ArgoCD logs, Azure Application Insights
-- Produces diagnosis + TDD fix plan for tdd-developer
-
-## Stack Detection
-Detect the active stack from project files and auto-apply conventions:
-- `*.csproj` or `*.sln` → .NET (xUnit, FluentAssertions, NSubstitute)
-- `go.mod` → Go (testing + testify, table-driven)
-- `Cargo.toml` → Rust (built-in + tokio-test, axum)
-- `pyproject.toml` or `requirements.txt` → Python (pytest, Pydantic)
-- `package.json` with react → React/TS (Vitest + Testing Library)
-- `package.json` with react-native → React Native (Jest + RNTL)
-- `Package.swift` or `*.xcodeproj` → Swift (XCTest)
 COPILOT_INSTRUCTIONS_EOF
+  render_pipeline_and_stacks_md >> "$target"
   success "${COPILOT_INSTRUCTIONS_FILE/$HOME/~}"
 }
 

@@ -58,3 +58,18 @@ teardown() {
   run env CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" "$INSTALLER" status
   [[ "$output" == *"caveman"* ]]
 }
+
+# --- dedup guard (issue #15) ---
+
+# The "## Agent Pipeline" + "## Stack Detection" markdown is generated from one
+# source (render_pipeline_and_stacks_md) and emitted into BOTH the global
+# CLAUDE.md managed block and the Copilot instructions. Guard that the two
+# installed copies never drift apart again.
+@test "dedup: Agent Pipeline + Stack Detection block is byte-identical across CLAUDE.md and copilot-instructions.md" {
+  PATH="$STUB:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
+    "$INSTALLER" install global >/dev/null 2>&1
+  sed -n '/^## Agent Pipeline/,/XCTest/p' "$SANDBOX/claude/CLAUDE.md" > "$SANDBOX/blk-claude"
+  sed -n '/^## Agent Pipeline/,/XCTest/p' "$SANDBOX/copilot/copilot-instructions.md" > "$SANDBOX/blk-copilot"
+  [ -s "$SANDBOX/blk-claude" ]            # non-empty (block actually present)
+  diff "$SANDBOX/blk-claude" "$SANDBOX/blk-copilot"
+}
