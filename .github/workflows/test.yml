@@ -43,7 +43,7 @@ jobs:
       - name: Syntax check
         run: |
           bash -n ai-native-workflow
-          for f in hooks/*.sh scripts/*.sh; do bash -n "$f"; done
+          for f in lib/*.sh hooks/*.sh scripts/*.sh; do bash -n "$f"; done
 
       - name: Run test suite
         run: bats tests/

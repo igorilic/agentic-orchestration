@@ -13,9 +13,9 @@ test: ## Run the full bats suite
 test-file: ## Run one test file: make test-file FILE=tests/confidence.bats
 	bats $(FILE)
 
-lint: ## Syntax-check the installer, hooks, and scripts
+lint: ## Syntax-check the installer, lib modules, hooks, and scripts
 	bash -n ai-native-workflow
-	@for f in hooks/*.sh scripts/*.sh skills/*/*.bash; do \
+	@for f in lib/*.sh hooks/*.sh scripts/*.sh skills/*/*.bash; do \
 		[ -e "$$f" ] && bash -n "$$f" || true; \
 	done
 	@echo "lint OK"

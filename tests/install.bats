@@ -297,14 +297,15 @@ EOF
 @test "cli: ai-native-workflow heredocs use docs/context/ for spec/sprint paths (no .context/specs/<id>-...)" {
   # Spec, todo, requirements, bugfix, brainstorm artifacts in heredocs must reference docs/context/
   # Confidence jsonl stays under .context/specs/ — matched separately below
+  # (installer is now split across ai-native-workflow + lib/*.sh)
   ! rg -q '\.context/specs/[^*]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
-    "$BATS_TEST_DIRNAME/../ai-native-workflow"
+    "$BATS_TEST_DIRNAME/../ai-native-workflow" "$BATS_TEST_DIRNAME/../lib"
 }
 
 @test "cli: ai-native-workflow heredocs use docs/context/ for CURRENT_SPRINT (no .context/CURRENT_SPRINT)" {
   # All CURRENT_SPRINT references in heredocs must point to docs/context/
   ! rg -q '\.context/CURRENT_SPRINT' \
-    "$BATS_TEST_DIRNAME/../ai-native-workflow"
+    "$BATS_TEST_DIRNAME/../ai-native-workflow" "$BATS_TEST_DIRNAME/../lib"
 }
 
 # ---------------------------------------------------------------------------
@@ -422,9 +423,11 @@ EOF
 }
 
 @test "installer: SPEC_DIR and SPRINT_FILE constants are referenced (not just defined)" {
-  # Count uses of the constants outside their definitions
-  uses_spec="$(grep -c '\${SPEC_DIR}\|\$SPEC_DIR\b' "$INSTALLER" || true)"
-  uses_sprint="$(grep -c '\${SPRINT_FILE}\|\$SPRINT_FILE\b' "$INSTALLER" || true)"
+  # Count uses across the whole installer codebase: the constants are defined in
+  # ai-native-workflow but consumed in lib/*.sh after the monolith split.
+  local sources="$INSTALLER $BATS_TEST_DIRNAME/../lib"
+  uses_spec="$(grep -rE '\$\{SPEC_DIR\}|\$SPEC_DIR' $sources | wc -l | tr -d ' ')"
+  uses_sprint="$(grep -rE '\$\{SPRINT_FILE\}|\$SPRINT_FILE' $sources | wc -l | tr -d ' ')"
   # Expect at least 2 uses of each (definition + at least one consumer)
   [ "$uses_spec" -ge 2 ]
   [ "$uses_sprint" -ge 2 ]
