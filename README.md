@@ -25,7 +25,7 @@ Separate concerns by guarantee level:
 | Layer | Mechanism | Guarantee |
 |-------|-----------|-----------|
 | **Hooks** | Shell scripts at lifecycle points | 100% — blocks actions via exit code 2 |
-| **Skills** | Reusable workflow instructions | ~80% — model loads when contextually relevant |
+| **Skills** | Reusable workflow instructions | Probabilistic — model loads when contextually relevant (not guaranteed) |
 | **Agents** | Specialized AI with scoped tools | Purpose-built — each agent does one thing |
 
 The TDD gate is a `PreToolUse` hook that **blocks `git commit`** if no test files are staged. It's not a suggestion — it's a shell script that returns exit code 2. The AI cannot override it.
@@ -145,14 +145,14 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 | `skills/caveman/` | `/caveman` — ultra-terse response mode (drops filler, keeps substance) |
 | `skills/clusters/` | Multi-cluster reference (EMEA/APAC/NAM) |
 | `skills/pipeline-*/` | Pipeline reference skills |
-| `agents/requirements-engineer.md` | Opus 4.6 — elicit & formalize requirements |
-| `agents/architect.md` | Opus 4.6 — design, spec, atomic plans |
-| `agents/tdd-developer.md` | Sonnet 4.6 — strict TDD implementation |
-| `agents/qa.md` | Haiku 4.5 — run affected tests |
-| `agents/reviewer.md` | Sonnet 4.6 — per-step code review + triage |
-| `agents/diff-reviewer.md` | Opus 4.6 — whole-PR/MR diff review; posts inline comments + threads |
-| `agents/troubleshooter.md` | Opus 4.6 — incident diagnosis |
-| `agents/explorer.md` | Sonnet 4.6 — spikes/prototypes under `spikes/` |
+| `agents/requirements-engineer.md` | Opus-tier — elicit & formalize requirements |
+| `agents/architect.md` | Opus-tier — design, spec, atomic plans |
+| `agents/tdd-developer.md` | Sonnet-tier — strict TDD implementation |
+| `agents/qa.md` | Haiku-tier — run affected tests |
+| `agents/reviewer.md` | Sonnet-tier — per-step code review + triage |
+| `agents/diff-reviewer.md` | Opus-tier — whole-PR/MR diff review; posts inline comments + threads |
+| `agents/troubleshooter.md` | Opus-tier — incident diagnosis |
+| `agents/explorer.md` | Sonnet-tier — spikes/prototypes under `spikes/` |
 | `skills/explore/` | Exploratory mode entry point |
 | `skills/brainstorm/` | One-question-at-a-time spec elicitation |
 

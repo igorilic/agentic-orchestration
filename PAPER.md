@@ -6,9 +6,20 @@ March 2026
 
 ---
 
+> **Note on scope and method.** This is a *design and architecture whitepaper*
+> describing a working open-source system, not an empirical study. It reports
+> no controlled evaluation. Claims about behavioral drift, TDD discipline, and
+> reliability are design rationale and informal observation from single-developer
+> use, not measured results; statements that a mechanism is "probabilistic" or
+> "guaranteed" describe intended behavior of the underlying tools, not benchmarked
+> rates. Read it as an engineering description of how the system is built and why,
+> with the contributions below understood as design contributions.
+
+---
+
 ## Abstract
 
-This paper presents a multi-agent orchestration architecture designed for solo full-stack developers managing polyglot codebases across distributed Kubernetes environments. The system coordinates five specialized AI agents — architect, test-driven developer, quality assurance, code reviewer, and troubleshooter — through a deterministic pipeline enforced by lifecycle hooks, with probabilistic skill activation for workflow flexibility. The architecture operates across two primary AI coding platforms (Claude Code and GitHub Copilot CLI) using a shared instruction layer (AGENTS.md) to ensure behavioral consistency. We demonstrate how separating concerns between deterministic enforcement (hooks), probabilistic workflows (skills), and specialized reasoning (agents with model-tier selection) creates a development system where test-driven discipline is guaranteed by machinery rather than developer memory, while maintaining the flexibility needed for real-world incident response across multi-region cloud infrastructure. The system is delivered as a self-contained CLI installer with automatic stack detection for .NET, Go, Rust, Python, React/TypeScript, React Native, and Swift codebases.
+This paper presents a multi-agent orchestration architecture designed for solo full-stack developers managing polyglot codebases across distributed Kubernetes environments. The system coordinates eight specialized AI agents — requirements engineer, architect, test-driven developer, quality assurance, code reviewer, diff reviewer, troubleshooter, and explorer — through a deterministic pipeline enforced by lifecycle hooks, with probabilistic skill activation for workflow flexibility. The architecture operates across two primary AI coding platforms (Claude Code and GitHub Copilot CLI) using a shared instruction layer (AGENTS.md) to ensure behavioral consistency. We describe how separating concerns between deterministic enforcement (hooks), probabilistic workflows (skills), and specialized reasoning (agents with model-tier selection) creates a development system where test-driven discipline is guaranteed by machinery rather than developer memory, while maintaining the flexibility needed for real-world incident response across multi-region cloud infrastructure. The system is delivered as a self-contained CLI installer with automatic stack detection for .NET, Go, Rust, Python, React/TypeScript, React Native, and Swift codebases.
 
 **Keywords:** multi-agent orchestration, test-driven development, AI-assisted software engineering, Claude Code, GitHub Copilot, DevOps, Kubernetes, agentic workflows
 
@@ -41,9 +52,10 @@ The system is further designed around a **pipeline pattern** where agents hand o
 This paper makes the following contributions:
 
 - A formalization of the **hooks/skills/agents** separation principle for AI-assisted development workflows
-- A **five-agent pipeline** (architect → tdd-developer → qa → reviewer → troubleshooter) with model-tier optimization per agent role
+- An **eight-agent system**: a linear feature pipeline (requirements-engineer → architect → tdd-developer → qa → reviewer) plus specialist agents — troubleshooter (incidents), diff-reviewer (whole-PR/MR review), and explorer (spikes) — each with model-tier optimization per role
 - A **cross-tool instruction layer** (AGENTS.md) that provides behavioral consistency across Claude Code and GitHub Copilot CLI
 - A **deterministic TDD gate** that blocks commits without test files, with an accountable bypass mechanism
+- A **confidence gate** that scores step readiness from a per-spec log and blocks commits that fail hard gates (e.g., failing or absent tests), with an accountable `/override-confidence` bypass
 - A **multi-cluster troubleshooting workflow** for distributed Kubernetes environments with ArgoCD, Azure Application Insights, and kubectl
 - A **self-contained CLI installer** with automatic polyglot stack detection
 
@@ -86,27 +98,29 @@ The architecture is governed by four principles:
 ### 3.2 Three-Layer Architecture
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│  ENFORCEMENT LAYER (Hooks — Deterministic)                 │
-│  SessionStart → load context, detect stack                 │
-│  PreToolUse   → TDD gate (blocks commits without tests)   │
-│  Notification → macOS native alerts                        │
-├────────────────────────────────────────────────────────────┤
-│  WORKFLOW LAYER (Skills — Probabilistic)                   │
-│  /plan    → pipeline orchestration entry point             │
-│  /tdd     → RED→GREEN→REFACTOR cycle                      │
-│  /ticket  → Jira/GitHub issue → spec + test stubs          │
-│  /adr     → Architecture Decision Record                   │
-│  /pr      → Pull request creation (gh/glab)                │
-│  /clusters → Multi-region reference data                   │
-├────────────────────────────────────────────────────────────┤
-│  REASONING LAYER (Agents — Specialized)                    │
-│  architect       (Opus 4.6)   → design, spec, plan        │
-│  tdd-developer   (Sonnet 4.6) → implement via TDD         │
-│  qa              (Haiku 4.5)  → run affected tests         │
-│  reviewer        (Sonnet 4.6) → code review + triage       │
-│  troubleshooter  (Opus 4.6)   → incident investigation     │
-└────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│  ENFORCEMENT LAYER (Hooks — Deterministic)                     │
+│  SessionStart → load context, detect stack                     │
+│  PreToolUse   → TDD gate + confidence gate (block commits)     │
+│  Notification → desktop alerts                                 │
+├────────────────────────────────────────────────────────────────┤
+│  WORKFLOW LAYER (Skills — Probabilistic)                       │
+│  /plan    → pipeline orchestration entry point                 │
+│  /tdd     → RED→GREEN→REFACTOR cycle                           │
+│  /ticket  → Jira/GitHub issue → spec + test stubs              │
+│  /adr · /pr → decision records, PR/MR creation                 │
+│  /override-confidence → accountable confidence bypass          │
+├────────────────────────────────────────────────────────────────┤
+│  REASONING LAYER (Agents — Specialized)                        │
+│  requirements-engineer (Opus-tier)   → elicit, formalize ACs   │
+│  architect             (Opus-tier)   → design, spec, plan      │
+│  tdd-developer         (Sonnet-tier) → implement via TDD       │
+│  qa                    (Haiku-tier)  → run affected tests      │
+│  reviewer              (Sonnet-tier) → per-step review         │
+│  diff-reviewer         (Opus-tier)   → whole-PR/MR review      │
+│  troubleshooter        (Opus-tier)   → incident investigation  │
+│  explorer              (Sonnet-tier) → spikes & prototypes     │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.3 Agent Pipeline
@@ -115,19 +129,23 @@ The architecture is governed by four principles:
 
 The feature development pipeline follows a strict linear progression:
 
-1. **Architect** (Opus 4.6) reads the requirement, analyzes the codebase, and produces two artifacts: a feature specification (`spec.md`) and an atomic todo plan (`todo.md`). Each step in the todo must be independently testable and result in a commit. The architect never writes implementation code.
+1. **Requirements-Engineer** (Opus-tier) elicits and formalizes the requirement — from a Jira ticket, a `specs.md` file, or direct user input — into a structured requirements document with testable acceptance criteria. This runs before any design so the architect plans against explicit, verifiable goals rather than an ambiguous prompt.
 
-2. **TDD-Developer** (Sonnet 4.6) receives one step at a time from the todo plan and executes the RED→GREEN→REFACTOR cycle. It writes failing tests first (RED), implements the minimum code to pass (GREEN), refactors while keeping tests green, and commits at each phase. The PreToolUse hook blocks any `git commit` that doesn't include test files in the staging area.
+2. **Architect** (Opus-tier) reads the requirements, analyzes the codebase, and produces two artifacts: a feature specification (`spec.md`) and an atomic todo plan (`todo.md`). Each step in the todo must be independently testable and result in a commit. The architect never writes implementation code.
 
-3. **QA** (Haiku 4.5) runs after each step completes, executing only the tests affected by the changed files. It detects the appropriate test runner from project files and reports exact pass/fail results without interpretation.
+3. **TDD-Developer** (Sonnet-tier) receives one step at a time from the todo plan and executes the RED→GREEN→REFACTOR cycle. It writes failing tests first (RED), implements the minimum code to pass (GREEN), refactors while keeping tests green, and commits at each phase. The PreToolUse hooks block any `git commit` that doesn't include test files in the staging area, or that fails the confidence gate's hard checks.
 
-4. **Reviewer** (Sonnet 4.6) evaluates the changes against a checklist covering correctness, test quality, code quality, stack conventions, security, and performance. Findings are categorized as MUST FIX (automatic), SHOULD FIX (user decides), and SUGGESTION (user decides). The user triages each item as Fix, Tech Debt, or Ignore.
+4. **QA** (Haiku-tier) runs after each step completes, executing only the tests affected by the changed files. It detects the appropriate test runner from project files and reports exact pass/fail results without interpretation.
 
-5. **Fix Loop** (max 3 iterations): items marked for fixing are sent back to the TDD-Developer. After three cycles, remaining issues are automatically moved to a tech debt backlog.
+5. **Reviewer** (Sonnet-tier) evaluates the changes against a checklist covering correctness, test quality, code quality, stack conventions, security, and performance. Findings are categorized as MUST FIX (automatic), SHOULD FIX (user decides), and SUGGESTION (user decides). The user triages each item as Fix, Tech Debt, or Ignore.
+
+6. **Fix Loop** (max 3 iterations): items marked for fixing are sent back to the TDD-Developer. After three cycles, remaining issues are automatically moved to a tech debt backlog.
+
+Two further agents operate outside this linear flow: **diff-reviewer** (Opus-tier) performs a whole-PR/MR review once a pull/merge request exists — ranking findings by severity and, after a preview-and-confirm gate, posting them as inline comments or threads — and **explorer** (Sonnet-tier) supports spikes, prototyping, and API learning, writing throwaway code under a gitignored `spikes/` directory rather than shipping it.
 
 #### 3.3.2 Incident Response Pipeline
 
-The troubleshooter agent (Opus 4.6) handles a parallel workflow for production incidents:
+The troubleshooter agent (Opus-tier) handles a parallel workflow for production incidents:
 
 1. Fetch incident context from Jira (via MCP)
 2. Determine scope — query Azure Application Insights across all three regional clusters (EMEA, APAC, NAM) to determine if the issue is regional or global
@@ -142,17 +160,22 @@ Model selection is based on the cognitive demands of each role:
 
 | Agent | Model | Rationale |
 |-------|-------|-----------|
-| Architect | Opus 4.6 | Requires deep codebase analysis, design reasoning, and creative problem decomposition |
-| TDD-Developer | Sonnet 4.6 | Needs strong coding ability but follows a prescribed plan — no design decisions |
-| QA | Haiku 4.5 | Executes test commands and reports output — minimal reasoning required |
-| Reviewer | Sonnet 4.6 | Pattern matching against conventions and best practices — moderate reasoning |
-| Troubleshooter | Opus 4.6 | Requires cross-system correlation, root cause analysis, and creative diagnosis |
+| Requirements-Engineer | Opus-tier | Elicits and disambiguates intent into testable acceptance criteria — high-stakes framing that the rest of the pipeline depends on |
+| Architect | Opus-tier | Requires deep codebase analysis, design reasoning, and creative problem decomposition |
+| TDD-Developer | Sonnet-tier | Needs strong coding ability but follows a prescribed plan — no design decisions |
+| QA | Haiku-tier | Executes test commands and reports output — minimal reasoning required |
+| Reviewer | Sonnet-tier | Pattern matching against conventions and best practices — moderate reasoning |
+| Diff-Reviewer | Opus-tier | Whole-PR/MR review — security, logic, and landmine analysis across an entire diff |
+| Troubleshooter | Opus-tier | Requires cross-system correlation, root cause analysis, and creative diagnosis |
+| Explorer | Sonnet-tier | Generates and evaluates throwaway options for spikes — coding ability without ship-quality constraints |
 
-This tiering optimizes both cost and latency. The QA agent (Haiku) returns results in seconds, while the Architect and Troubleshooter (Opus) take longer but produce higher-quality reasoning for tasks where that matters.
+This tiering optimizes both cost and latency. The QA agent (Haiku-tier) returns results in seconds, while the Architect and Troubleshooter (Opus-tier) take longer but produce higher-quality reasoning for tasks where that matters.
 
-### 3.5 TDD Enforcement Mechanism
+The architecturally meaningful decision is the **tier**, not a specific model version. Agents are therefore configured with floating tier aliases (`opus`, `sonnet`, `haiku`) rather than pinned version identifiers, so each role automatically tracks the current best model of its tier as new releases ship — no per-release maintenance, and no quality left on the table. We avoid naming concrete versions in this paper for the same reason: with no controlled evaluation pinned to a particular model (see §5.3), a version number would imply a reproducibility claim the system does not make. On Copilot CLI, which does not expose model selection in agent frontmatter, tier selection is delegated to the platform's automatic model routing.
 
-The TDD gate is implemented as a `PreToolUse` hook that intercepts `git commit` commands:
+### 3.5 Commit-Time Enforcement: TDD and Confidence Gates
+
+Two `PreToolUse` hooks gate `git commit`. The TDD gate is the first:
 
 ```bash
 # Simplified logic
@@ -166,6 +189,10 @@ fi
 Exit code 2 is the critical mechanism — Claude Code treats it as a hard block that prevents the action. This is fundamentally different from a prompt instruction, which the model can deprioritize or forget.
 
 The bypass mechanism (`/skip-tdd`) creates a timestamped `.tdd-skip` file with the developer's reason, which is automatically deleted after the next commit. This provides accountability without rigidity.
+
+The second gate is a **confidence gate**. As the pipeline runs, agents append structured events to a per-spec confidence log (`.context/specs/<id>-confidence.jsonl`) recording acceptance-criteria coverage and test outcomes. A second `PreToolUse` hook scores the active step's readiness from this log into one of three bands — GREEN, YELLOW, RED — combining *hard gates* (e.g., a failing test run, or an acceptance criterion claimed complete with zero tests) that force RED with softer scored penalties. A RED band blocks the commit. The scorer is deliberately **fail-closed**: a missing or unparseable `tests_failed` field is treated as a failure rather than waved through, so the absence of evidence never reads as success. As with the TDD gate, the bypass (`/override-confidence`) is accountable — it requires a non-boilerplate reason of meaningful length, which is logged against the active spec.
+
+Together the two gates encode a simple invariant: a commit must carry tests, and the recorded evidence for the current step must not be in a known-bad state. Both are machinery rather than prompt instructions, so neither can be deprioritized as a conversation grows.
 
 ### 3.6 Cross-Tool Compatibility
 
@@ -210,12 +237,14 @@ ArgoCD's Model Context Protocol (MCP) server requires only a single URL regardle
 
 ### 4.3 CLI Installer
 
-The entire system is distributed as a single bash script (`tdd-workflow`, ~2300 lines) with all agent definitions, skill content, hook scripts, and configuration templates embedded. The installer supports:
+The system is driven by a single bash entry point (`ai-native-workflow`, ~3,900 lines) that handles both installation and pipeline execution. Agent and skill definitions live as standalone files under `agents/` and `skills/` and are installed by copying from source — a single source of truth, enforced by a drift test that fails if an installed copy diverges from its source. The script itself embeds the hook scripts, the confidence-scoring tooling, and the configuration templates. The CLI supports:
 
-- `tdd-workflow install global` — installs hooks, skills, agents to `~/.claude/` and `~/.copilot/`
-- `tdd-workflow install project <path>` — generates stack-tailored AGENTS.md, Copilot instructions, and `.context/` directory
-- `tdd-workflow status` — health check of global and project installation
-- `tdd-workflow detect <path>` — stack detection without installation
+- `ai-native-workflow install global` — installs hooks, skills, agents, and settings to `~/.claude/` and `~/.copilot/`
+- `ai-native-workflow install project <path>` — generates a stack-tailored AGENTS.md, Copilot instructions, and `.context/` directory
+- `ai-native-workflow run <pipeline> [arg]` — drives an end-to-end pipeline: `gitlab-feature` / `gitlab-incident` (Copilot CLI + Jira → MR), `github-feature` / `github-issue` (Claude Code → PR), plus `run status` / `run resume` for checkpointed state
+- `ai-native-workflow status` — health check of global and project installation
+- `ai-native-workflow detect <path>` — stack detection without installation
+- `ai-native-workflow uninstall global|project [path]` — removes the installation
 
 ---
 
@@ -242,12 +271,13 @@ Using the filesystem rather than conversational context as the inter-agent commu
 - **Skill activation reliability**: Skills are probabilistic and may not activate autonomously in all cases. The `/plan` skill uses `disable-model-invocation: true` to require explicit invocation.
 - **Copilot CLI model selection**: Unlike Claude Code, Copilot CLI does not expose model selection in agent frontmatter. The system relies on Copilot's automatic model selection.
 - **Single developer**: The pipeline is designed for solo workflows. Multi-developer orchestration would require additional coordination mechanisms.
+- **No controlled evaluation**: The claimed benefits — reduced behavioral drift, sustained TDD discipline, lower context-switching cost — are motivated by design and observed informally in single-developer use. This paper reports no A/B comparison, no measured task-completion or defect-rate data, and no benchmarked skill-activation rate. Quantifying these effects against a non-orchestrated baseline is the most important direction for future work.
 
 ---
 
 ## 6. Conclusion
 
-We have presented a practical architecture for AI-assisted test-driven development that separates enforcement, workflow, and reasoning into distinct mechanism types. The system guarantees TDD compliance through deterministic hooks while maintaining developer flexibility through accountable bypass mechanisms. Five specialized agents, each optimized for a specific role with an appropriate model tier, collaborate through filesystem artifacts in a pipeline that covers the full software lifecycle from design through implementation to incident response.
+We have presented a practical architecture for AI-assisted test-driven development that separates enforcement, workflow, and reasoning into distinct mechanism types. The system enforces TDD and step-confidence compliance through deterministic hooks while maintaining developer flexibility through accountable bypass mechanisms. Eight specialized agents, each optimized for a specific role with an appropriate model tier, collaborate through filesystem artifacts in a pipeline that covers the full software lifecycle from requirements and design through implementation, review, and incident response. We present this as a design contribution: the architecture is operational and in single-developer use, but the paper makes no claim of controlled empirical evaluation.
 
 The architecture is operational today using Claude Code and GitHub Copilot CLI, requires no custom infrastructure beyond the standard AI tool installations, and is distributed as a single self-contained installer script. By making TDD the path of least resistance rather than a discipline to maintain, the system addresses the fundamental challenge of sustaining engineering rigor in AI-accelerated development workflows.
 
