@@ -14,31 +14,31 @@ disable-model-invocation: true
 ```
 Jira Ticket
   │
-  ├─ 1. requirements-engineer (Opus 4.6)
+  ├─ 1. requirements-engineer (Opus-tier)
   │     Fetch Jira ticket → analyze → structured requirements
   │     → docs/context/specs/<id>-requirements.md
   │     → User validates requirements
   │
-  ├─ 2. qa (Haiku 4.5) — test planning
+  ├─ 2. qa (Haiku-tier) — test planning
   │     Read requirements → create testing plan
   │     → Unit, integration, edge case scenarios
   │     → docs/context/specs/<id>-testplan.md
   │
-  ├─ 3. architect (Opus 4.6)
+  ├─ 3. architect (Opus-tier)
   │     Read requirements + test plan → design solution
   │     → docs/context/specs/<id>-spec.md + <id>-todo.md
   │     → User approves plan
   │
-  ├─ 4. tdd-developer (Sonnet 4.6) — per step
+  ├─ 4. tdd-developer (Sonnet-tier) — per step
   │     RED: write failing tests → commit
   │     GREEN: minimum code → commit
   │     REFACTOR: improve → commit
   │
-  ├─ 5. qa (Haiku 4.5) — test execution
+  ├─ 5. qa (Haiku-tier) — test execution
   │     Run affected unit + integration tests
   │     Report pass/fail with exact errors
   │
-  ├─ 6. reviewer (Sonnet 4.6) — per-step review
+  ├─ 6. reviewer (Sonnet-tier) — per-step review
   │     Review code against requirements + conventions
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
   │     → User triages: [F]ix / [T]ech debt / [I]gnore
@@ -47,7 +47,7 @@ Jira Ticket
   ├─ 7. Create MR (glab mr create)
   │     Push branch → create merge request → link Jira ticket
   │
-  └─ 8. diff-reviewer (Opus 4.6) — whole-MR diff review
+  └─ 8. diff-reviewer (Opus-tier) — whole-MR diff review
         Review the created MR end-to-end against the Jira AC:
         quality, correctness, logic, conventions, security,
         landmines, best practices

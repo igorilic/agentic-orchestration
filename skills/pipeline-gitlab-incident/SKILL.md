@@ -14,7 +14,7 @@ disable-model-invocation: true
 ```
 Jira Incident Ticket
   │
-  ├─ 1. troubleshooter (Opus 4.6)
+  ├─ 1. troubleshooter (Opus-tier)
   │     Fetch Jira ticket → gather evidence
   │     → ArgoCD status, kubectl logs, App Insights
   │     → Correlate timestamps → root cause diagnosis
@@ -28,15 +28,15 @@ Jira Incident Ticket
   │     └─ Option B: Fix the issue
   │         ↓
   │
-  ├─ 3. tdd-developer (Sonnet 4.6) — per step
+  ├─ 3. tdd-developer (Sonnet-tier) — per step
   │     Step 1: write test that REPRODUCES the bug (RED)
   │     Step 2+: implement fix (GREEN → REFACTOR)
   │
-  ├─ 4. qa (Haiku 4.5)
+  ├─ 4. qa (Haiku-tier)
   │     Run affected tests → verify fix
   │     Ensure no regressions
   │
-  ├─ 5. reviewer (Sonnet 4.6) — MR review
+  ├─ 5. reviewer (Sonnet-tier) — MR review
   │     Review fix against diagnosis
   │     Verify bug reproduction test exists
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
