@@ -33,7 +33,18 @@ class of bug that won't show up on modern bash.
 | **Hooks** | `hooks/*.sh` | deterministic — block actions via exit code / `permissionDecision` |
 | **Skills** | `skills/*/SKILL.md` | model-loaded workflow instructions |
 | **Agents** | `agents/{claude-code,copilot-cli}/` | scoped LLM specialists |
-| **Installer + runner** | `ai-native-workflow` | installs the above + drives the pipelines |
+| **Installer + runner** | `ai-native-workflow` + `lib/*.sh` | installs the above + drives the pipelines |
+
+**Installer layout:** `ai-native-workflow` is a thin dispatcher — it resolves
+its own path (through symlinks), sources the `lib/*.sh` modules, and runs the
+subcommand. The implementation lives in `lib/`: `common` (colors, helpers),
+`detect` (stack/platform detection + `require_*`), `pipeline-core` (state,
+agent runners, triage), `pipelines` (the `run` workflows), `install-global`,
+`install-project`, `status`, `uninstall`, and `help`. Constants and colors are
+defined in the dispatcher before the modules are sourced, so the modules are
+function-definition-only and rely on them at call time. Add a new module to the
+`for _anw_mod in …` source list in `ai-native-workflow`, and `bash -n` it via
+`make lint` (which now covers `lib/*.sh`).
 
 **Single source of truth:** agents and skills are installed via `cp` from
 `agents/`/`skills/` — the installer no longer embeds heredoc copies. Edit the
@@ -42,7 +53,7 @@ that the installed copy matches. (The 3 `pipeline-*` skills are the one
 exception: the Claude side ships an abbreviated `claude --agent=` stub.)
 
 When you add an agent or skill, drop the file under `agents/…` or `skills/…`
-and add a `check_file` line to `show_status` in `ai-native-workflow`.
+and add a `check_file` line to `show_status` in `lib/status.sh`.
 
 ## Path conventions (important, and easy to trip on)
 

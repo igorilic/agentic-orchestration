@@ -237,7 +237,7 @@ ArgoCD's Model Context Protocol (MCP) server requires only a single URL regardle
 
 ### 4.3 CLI Installer
 
-The system is driven by a single bash entry point (`ai-native-workflow`, ~3,900 lines) that handles both installation and pipeline execution. Agent and skill definitions live as standalone files under `agents/` and `skills/` and are installed by copying from source — a single source of truth, enforced by a drift test that fails if an installed copy diverges from its source. The script itself embeds the hook scripts, the confidence-scoring tooling, and the configuration templates. The CLI supports:
+The system is driven by a bash entry point (`ai-native-workflow`) that handles both installation and pipeline execution. The entry point is a thin (~220-line) dispatcher: it resolves its own location through any symlink chain, sources a set of cohesive library modules under `lib/` (`common`, `detect`, `pipeline-core`, `pipelines`, `install-global`, `install-project`, `status`, `uninstall`, `help`), then dispatches the subcommand. Agent and skill definitions live as standalone files under `agents/` and `skills/` and are installed by copying from source — a single source of truth, enforced by a drift test that fails if an installed copy diverges from its source. The library modules embed the hook scripts, the confidence-scoring tooling, and the configuration templates. The CLI supports:
 
 - `ai-native-workflow install global` — installs hooks, skills, agents, and settings to `~/.claude/` and `~/.copilot/`
 - `ai-native-workflow install project <path>` — generates a stack-tailored AGENTS.md, Copilot instructions, and `.context/` directory
