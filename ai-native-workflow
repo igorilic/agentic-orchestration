@@ -1754,7 +1754,7 @@ install_global_claude_md() {
 - /gh-cli · /glab-cli — review a PR/MR diff (inline comments + threads)
 - /caveman — ultra-terse "caveman speak" replies (token-saver; slash-only)
 
-Plus the **diff-reviewer** agent (Opus 4.6) — whole-PR/MR review: quality,
+Plus the **diff-reviewer** agent (Opus-tier) — whole-PR/MR review: quality,
 correctness, security, landmines. It previews findings, then (on your
 confirm) posts severity-ranked inline comments + threads with a verdict.
 Invoke after a PR/MR exists: `Use diff-reviewer to review PR #<n>`.
@@ -1767,14 +1767,14 @@ Run full agent pipelines from the terminal:
 
 ## Agent Pipeline
 All new work starts with `/plan`. The pipeline:
-1. **requirements-engineer** (Opus 4.6) — elicits & formalizes requirements
-2. **architect** (Opus 4.6) — designs spec + atomic todo plan
-3. **tdd-developer** (Sonnet 4.6) — implements one step via TDD
-4. **qa** (Haiku 4.5) — runs affected tests
-5. **reviewer** (Sonnet 4.6) — reviews code, user triages findings
+1. **requirements-engineer** (Opus-tier) — elicits & formalizes requirements
+2. **architect** (Opus-tier) — designs spec + atomic todo plan
+3. **tdd-developer** (Sonnet-tier) — implements one step via TDD
+4. **qa** (Haiku-tier) — runs affected tests
+5. **reviewer** (Sonnet-tier) — reviews code, user triages findings
 Max 3 fix loops per step, then remaining issues go to tech debt.
 
-For production incidents, use **troubleshooter** (Opus 4.6):
+For production incidents, use **troubleshooter** (Opus-tier):
 - Pulls Jira ticket, ArgoCD logs, Azure Application Insights
 - Produces diagnosis + TDD fix plan for tdd-developer
 
@@ -2381,7 +2381,7 @@ install_global_copilot_instructions() {
 - /pr — Create PR/MR (auto-detects gh/glab)
 - /gh-cli · /glab-cli — review a PR/MR diff (inline comments + threads)
 
-Plus the **diff-reviewer** agent (Opus 4.6) — whole-PR/MR review: quality,
+Plus the **diff-reviewer** agent (Opus-tier) — whole-PR/MR review: quality,
 correctness, security, landmines. It previews findings, then (on your
 confirm) posts severity-ranked inline comments + threads with a verdict.
 Invoke after a PR/MR exists: `copilot --agent=diff-reviewer --prompt "Review MR !<iid>"`.
@@ -2394,14 +2394,14 @@ Run full agent pipelines from the terminal:
 
 ## Agent Pipeline
 All new work starts with `/plan`. The pipeline:
-1. **requirements-engineer** (Opus 4.6) — elicits & formalizes requirements
-2. **architect** (Opus 4.6) — designs spec + atomic todo plan
-3. **tdd-developer** (Sonnet 4.6) — implements one step via TDD
-4. **qa** (Haiku 4.5) — runs affected tests
-5. **reviewer** (Sonnet 4.6) — reviews code, user triages findings
+1. **requirements-engineer** (Opus-tier) — elicits & formalizes requirements
+2. **architect** (Opus-tier) — designs spec + atomic todo plan
+3. **tdd-developer** (Sonnet-tier) — implements one step via TDD
+4. **qa** (Haiku-tier) — runs affected tests
+5. **reviewer** (Sonnet-tier) — reviews code, user triages findings
 Max 3 fix loops per step, then remaining issues go to tech debt.
 
-For production incidents, use **troubleshooter** (Opus 4.6):
+For production incidents, use **troubleshooter** (Opus-tier):
 - Pulls Jira ticket, ArgoCD logs, Azure Application Insights
 - Produces diagnosis + TDD fix plan for tdd-developer
 
@@ -3740,12 +3740,12 @@ show_help() {
       skills/plan/              /plan — Pipeline orchestration entry point
       skills/clusters/          /clusters — Multi-region reference
       skills/pipeline-*/        Pipeline reference skills
-      agents/requirements-engineer.md  Opus 4.6 — elicit requirements
-      agents/architect.md       Opus 4.6 — design, spec, todo plan
-      agents/tdd-developer.md   Sonnet 4.6 — strict TDD implementation
-      agents/qa.md              Haiku 4.5 — run affected tests
-      agents/reviewer.md        Sonnet 4.6 — code review + triage
-      agents/troubleshooter.md  Opus 4.6 — incident diagnosis + fix plan
+      agents/requirements-engineer.md  Opus-tier — elicit requirements
+      agents/architect.md       Opus-tier — design, spec, todo plan
+      agents/tdd-developer.md   Sonnet-tier — strict TDD implementation
+      agents/qa.md              Haiku-tier — run affected tests
+      agents/reviewer.md        Sonnet-tier — code review + triage
+      agents/troubleshooter.md  Opus-tier — incident diagnosis + fix plan
 
     Per-Project:
       AGENTS.md                 Cross-tool rules (Claude + Copilot)
@@ -3757,12 +3757,12 @@ show_help() {
 
   AGENT ROSTER
 
-    requirements-engineer (Opus 4.6)  → elicit & formalize requirements
-    architect (Opus 4.6)              → design, spec, atomic plan
-    tdd-developer (Sonnet 4.6)        → RED→GREEN→REFACTOR per step
-    qa (Haiku 4.5)                    → run affected tests
-    reviewer (Sonnet 4.6)             → code review, user triages
-    troubleshooter (Opus 4.6)         → incident investigation + diagnosis
+    requirements-engineer (Opus-tier)  → elicit & formalize requirements
+    architect (Opus-tier)              → design, spec, atomic plan
+    tdd-developer (Sonnet-tier)        → RED→GREEN→REFACTOR per step
+    qa (Haiku-tier)                    → run affected tests
+    reviewer (Sonnet-tier)             → code review, user triages
+    troubleshooter (Opus-tier)         → incident investigation + diagnosis
 
   COPILOT CLI USAGE
 

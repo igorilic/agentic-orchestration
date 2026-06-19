@@ -24,13 +24,13 @@ For the full technical specification, see [PAPER.md](../PAPER.md).
 │  /clusters → Multi-region reference data                   │
 ├────────────────────────────────────────────────────────────┤
 │  REASONING LAYER (Agents — Specialized)                    │
-│  requirements-engineer (Opus 4.6) → elicit, formalize reqs │
-│  architect             (Opus 4.6) → design, spec, plan     │
-│  tdd-developer         (Sonnet 4.6) → implement via TDD   │
-│  qa                    (Haiku 4.5) → run affected tests    │
-│  reviewer              (Sonnet 4.6) → code review + triage │
-│  diff-reviewer         (Opus 4.6) → PR/MR review + comment │
-│  troubleshooter        (Opus 4.6) → incident investigation │
+│  requirements-engineer (Opus-tier) → elicit, formalize reqs │
+│  architect             (Opus-tier) → design, spec, plan     │
+│  tdd-developer         (Sonnet-tier) → implement via TDD   │
+│  qa                    (Haiku-tier) → run affected tests    │
+│  reviewer              (Sonnet-tier) → code review + triage │
+│  diff-reviewer         (Opus-tier) → PR/MR review + comment │
+│  troubleshooter        (Opus-tier) → incident investigation │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -41,26 +41,26 @@ For the full technical specification, see [PAPER.md](../PAPER.md).
 ```
 Jira Ticket
   │
-  ├─ 1. requirements-engineer (Opus 4.6)
+  ├─ 1. requirements-engineer (Opus-tier)
   │     Fetch Jira ticket → structured requirements
   │     → docs/context/specs/<id>-requirements.md
   │
-  ├─ 2. qa (Haiku 4.5) — test planning
+  ├─ 2. qa (Haiku-tier) — test planning
   │     Requirements → testing plan with scenarios
   │
-  ├─ 3. architect (Opus 4.6)
+  ├─ 3. architect (Opus-tier)
   │     Requirements + test plan → spec.md + todo.md
   │     → User approves plan
   │     → emits spec event to <id>-confidence.jsonl
   │
-  ├─ 4. tdd-developer (Sonnet 4.6) — per step
+  ├─ 4. tdd-developer (Sonnet-tier) — per step
   │     RED → GREEN → REFACTOR → commit
   │
-  ├─ 5. qa (Haiku 4.5) — test execution
+  ├─ 5. qa (Haiku-tier) — test execution
   │     Run affected tests → pass/fail
   │     → emits qa event
   │
-  ├─ 6. reviewer (Sonnet 4.6) — MR review
+  ├─ 6. reviewer (Sonnet-tier) — MR review
   │     Review → triage → max 3 fix loops
   │     → emits review event
   │     → confidence per-step verdict (pauses on YELLOW/RED)
@@ -69,7 +69,7 @@ Jira Ticket
   │
   ├─ 8. glab mr create → merge request (body includes ## Confidence section)
   │
-  └─ 9. diff-reviewer (Opus 4.6) — whole-MR diff review (optional)
+  └─ 9. diff-reviewer (Opus-tier) — whole-MR diff review (optional)
         Review diff + Jira AC → rank by severity → preview + confirm
         → post inline comments + threads + verdict via glab
 ```
@@ -82,7 +82,7 @@ Jira Ticket
 ```
 Jira Incident Ticket
   │
-  ├─ 1. troubleshooter (Opus 4.6)
+  ├─ 1. troubleshooter (Opus-tier)
   │     Jira → ArgoCD → App Insights → kubectl
   │     → Key findings + next action
   │
@@ -90,14 +90,14 @@ Jira Incident Ticket
   │     ├─ A: Document only → add findings to Jira → END
   │     └─ B: Fix the issue → continue
   │
-  ├─ 3. tdd-developer (Sonnet 4.6)
+  ├─ 3. tdd-developer (Sonnet-tier)
   │     Step 1: reproduce bug as failing test
   │     Step 2+: implement fix
   │
-  ├─ 4. qa (Haiku 4.5) → verify fix
+  ├─ 4. qa (Haiku-tier) → verify fix
   │     → emits qa event
   │
-  ├─ 5. reviewer (Sonnet 4.6) → review MR
+  ├─ 5. reviewer (Sonnet-tier) → review MR
   │     → emits review event
   │     → confidence per-step verdict (pauses on YELLOW/RED)
   │
@@ -114,25 +114,25 @@ Jira Incident Ticket
 ```
 specs.md / User Input
   │
-  ├─ 1. requirements-engineer (Opus 4.6)
+  ├─ 1. requirements-engineer (Opus-tier)
   │     Specs or input → structured requirements
   │     → docs/context/specs/<id>-requirements.md
   │
   ├─ 2. gh issue create
   │     Requirements → GitHub issue (feature request)
   │
-  ├─ 3. architect (Opus 4.6)
+  ├─ 3. architect (Opus-tier)
   │     Requirements → spec.md + todo.md
   │     → User approves plan
   │     → emits spec event to <id>-confidence.jsonl
   │
-  ├─ 4. tdd-developer (Sonnet 4.6) — per step
+  ├─ 4. tdd-developer (Sonnet-tier) — per step
   │     RED → GREEN → REFACTOR → commit
   │
-  ├─ 5. qa (Haiku 4.5) → run affected tests
+  ├─ 5. qa (Haiku-tier) → run affected tests
   │     → emits qa event
   │
-  ├─ 6. reviewer (Sonnet 4.6) — PR review
+  ├─ 6. reviewer (Sonnet-tier) — PR review
   │     Review → triage → max 3 fix loops
   │     → emits review event
   │     → confidence per-step verdict (pauses on YELLOW/RED)
@@ -141,7 +141,7 @@ specs.md / User Input
   │
   ├─ 8. gh pr create → pull request (Closes #issue; body includes ## Confidence section)
   │
-  └─ 9. diff-reviewer (Opus 4.6) — whole-PR diff review (optional)
+  └─ 9. diff-reviewer (Opus-tier) — whole-PR diff review (optional)
         Review diff + issue AC → rank by severity → preview + confirm
         → post inline comments + threads + verdict via gh
 ```
@@ -154,23 +154,23 @@ specs.md / User Input
 ```
 /plan "add user authentication"
   │
-  ├─ 1. architect (Opus 4.6)
+  ├─ 1. architect (Opus-tier)
   │     Reads codebase → creates spec.md + todo.md
   │     Each step: what to test, what to implement, which files
   │     → User approves the plan
   │     → emits spec event to <id>-confidence.jsonl
   │
-  ├─ 2. tdd-developer (Sonnet 4.6) — per step
+  ├─ 2. tdd-developer (Sonnet-tier) — per step
   │     RED: writes failing tests → commits
   │     GREEN: minimum code → commits
   │     REFACTOR: improve → commits
   │
-  ├─ 3. qa (Haiku 4.5)
+  ├─ 3. qa (Haiku-tier)
   │     Runs only affected unit + integration tests
   │     Reports pass/fail with exact errors
   │     → emits qa event
   │
-  ├─ 4. reviewer (Sonnet 4.6)
+  ├─ 4. reviewer (Sonnet-tier)
   │     Reviews against checklist
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
   │     → User triages: [F]ix / [T]ech debt / [I]gnore
@@ -184,13 +184,13 @@ specs.md / User Input
 
 | Agent | Model | Role | Writes Code? |
 |-------|-------|------|-------------|
-| requirements-engineer | Opus 4.6 | Elicit & formalize requirements | No |
-| architect | Opus 4.6 | Design solutions, create plans | No |
-| tdd-developer | Sonnet 4.6 | Implement via strict TDD | Yes |
-| qa | Haiku 4.5 | Run tests, create test plans | No |
-| reviewer | Sonnet 4.6 | Per-step code review, quality gate | No |
-| diff-reviewer | Opus 4.6 | Whole-PR/MR diff review; posts inline comments + threads | No (posts review comments) |
-| troubleshooter | Opus 4.6 | Incident investigation, diagnosis | No |
+| requirements-engineer | Opus-tier | Elicit & formalize requirements | No |
+| architect | Opus-tier | Design solutions, create plans | No |
+| tdd-developer | Sonnet-tier | Implement via strict TDD | Yes |
+| qa | Haiku-tier | Run tests, create test plans | No |
+| reviewer | Sonnet-tier | Per-step code review, quality gate | No |
+| diff-reviewer | Opus-tier | Whole-PR/MR diff review; posts inline comments + threads | No (posts review comments) |
+| troubleshooter | Opus-tier | Incident investigation, diagnosis | No |
 
 ## Path Conventions
 

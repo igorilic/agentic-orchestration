@@ -14,7 +14,7 @@ disable-model-invocation: true
 ```
 specs.md / User Input
   │
-  ├─ 1. requirements-engineer (Opus 4.6)
+  ├─ 1. requirements-engineer (Opus-tier)
   │     Read specs.md or user input → structured requirements
   │     → docs/context/specs/<id>-requirements.md
   │     → User validates requirements
@@ -24,21 +24,21 @@ specs.md / User Input
   │     → gh issue create --title "..." --body "..."
   │     → Issue number becomes the tracking ID
   │
-  ├─ 3. architect (Opus 4.6)
+  ├─ 3. architect (Opus-tier)
   │     Read requirements → design solution
   │     → docs/context/specs/<id>-spec.md + <id>-todo.md
   │     → User approves plan
   │
-  ├─ 4. tdd-developer (Sonnet 4.6) — per step
+  ├─ 4. tdd-developer (Sonnet-tier) — per step
   │     RED: write failing tests → commit
   │     GREEN: minimum code → commit
   │     REFACTOR: improve → commit
   │
-  ├─ 5. qa (Haiku 4.5)
+  ├─ 5. qa (Haiku-tier)
   │     Run affected unit + integration tests
   │     Report pass/fail with exact errors
   │
-  ├─ 6. reviewer (Sonnet 4.6) — per-step review
+  ├─ 6. reviewer (Sonnet-tier) — per-step review
   │     Review code against requirements + conventions
   │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
   │     → User triages: [F]ix / [T]ech debt / [I]gnore
@@ -48,7 +48,7 @@ specs.md / User Input
   │     Push branch → create PR → link GitHub issue
   │     → "Closes #<issue-number>"
   │
-  └─ 8. diff-reviewer (Opus 4.6) — whole-PR diff review
+  └─ 8. diff-reviewer (Opus-tier) — whole-PR diff review
         Review the created PR end-to-end against the issue's AC:
         quality, correctness, logic, conventions, security,
         landmines, best practices
