@@ -47,8 +47,8 @@ Extract, clarify, and formalize requirements so that downstream agents
 
 ### 2. Analyze & Clarify
 - Identify ambiguities, gaps, and contradictions
-- Cross-reference with `.context/ARCHITECTURE.md` for feasibility
-- Cross-reference with `.context/CONVENTIONS.md` for constraints
+- Cross-reference with `docs/context/ARCHITECTURE.md` for feasibility
+- Cross-reference with `docs/context/CONVENTIONS.md` for constraints
 - If critical information is missing: STOP and ask specific questions
 - Output a list of assumptions made (for user validation)
 

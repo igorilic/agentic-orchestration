@@ -32,7 +32,7 @@ install_project() {
   # --- CLAUDE.md ---
   install_project_claude_md "$project_dir"
 
-  # --- .context/ directory ---
+  # --- project context (docs/context/) + runtime dir (.anw/) ---
   install_project_context "$project_dir"
 
   # --- .github/ (copilot instructions) ---
@@ -57,8 +57,8 @@ install_project() {
   echo ""
   info "Next steps:"
   dim "1. Edit AGENTS.md to customize for this project"
-  dim "2. Edit .context/ARCHITECTURE.md with your system design"
-  dim "3. Add domain terms to .context/GLOSSARY.md"
+  dim "2. Edit docs/context/ARCHITECTURE.md with your system design"
+  dim "3. Add domain terms to docs/context/GLOSSARY.md"
   dim "4. Start your first feature with /ticket or /tdd"
 }
 
@@ -221,8 +221,8 @@ Do NOT guess. Stop and present options when:
 
 ## Before Starting Any Work
 1. Read the spec in \`docs/context/specs/\` if one exists
-2. Scan \`.context/ARCHITECTURE.md\` for system context
-3. Check \`.context/CONVENTIONS.md\` for stack patterns
+2. Scan \`docs/context/ARCHITECTURE.md\` for system context
+3. Check \`docs/context/CONVENTIONS.md\` for stack patterns
 4. Identify ALL affected components before writing code
 
 ## Commit Messages
@@ -285,7 +285,7 @@ install_project_claude_md() {
 ${project_name}
 
 ## Architecture
-Read \`.context/ARCHITECTURE.md\` for system design.
+Read \`docs/context/ARCHITECTURE.md\` for system design.
 
 ## Current Work
 Read \`docs/context/CURRENT_SPRINT.md\` for active tasks.
@@ -307,8 +307,8 @@ make dev               # Local dev server
 ## Key Paths
 | Path | Purpose |
 |---|---|
-| \`docs/context/\` | Sprint board + tracked specs and todos |
-| \`.context/\` | Architecture, conventions, glossary, runtime state |
+| \`docs/context/\` | Sprint board, tracked specs/todos, architecture, conventions, glossary |
+| \`.anw/\` | Runtime pipeline state + confidence logs (gitignored) |
 | \`docs/\` | Arc42 documentation + ADRs |
 | \`tests/unit/\` | Unit tests |
 | \`tests/integration/\` | Integration tests |
@@ -318,21 +318,18 @@ CLAUDE_EOF
 
 install_project_context() {
   local project_dir="$1"
-  local context_dir="$project_dir/.context"
   local docs_context_dir="$project_dir/docs/context"
 
-  # .context/ holds two kinds of files:
-  #   - per-project installer-seeded reference (ARCHITECTURE.md, CONVENTIONS.md,
-  #     GLOSSARY.md) — committed by the consuming project
-  #   - runtime artifacts (.pipeline-state, .pipeline-audit.log, *.jsonl) — gitignored
-  mkdir -p "$context_dir/specs"
-
-  # Tracked directory: sprint board and spec templates land here
+  # Tracked project context lives under docs/context/ — the sprint board, spec
+  # templates, and the installer-seeded ARCHITECTURE/CONVENTIONS/GLOSSARY that
+  # the consuming project commits. Runtime artifacts (.pipeline-state,
+  # .pipeline-audit.log, confidence *.jsonl) live under .anw/ and are gitignored.
   mkdir -p "$docs_context_dir/specs/templates"
+  mkdir -p "$project_dir/.anw/specs"
 
   # Only create files that don't exist
-  if [ ! -f "$context_dir/ARCHITECTURE.md" ]; then
-    cat > "$context_dir/ARCHITECTURE.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/ARCHITECTURE.md" ]; then
+    cat > "$docs_context_dir/ARCHITECTURE.md" << 'EOF'
 # Architecture
 
 > Document your system architecture here.
@@ -349,11 +346,11 @@ install_project_context() {
 ## Key Decisions
 <!-- Link to ADRs: docs/decisions/ADR-*.md -->
 EOF
-    success ".context/ARCHITECTURE.md"
+    success "docs/context/ARCHITECTURE.md"
   fi
 
-  if [ ! -f "$context_dir/CONVENTIONS.md" ]; then
-    cat > "$context_dir/CONVENTIONS.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/CONVENTIONS.md" ]; then
+    cat > "$docs_context_dir/CONVENTIONS.md" << 'EOF'
 # Conventions
 
 > Stack-specific conventions for this project.
@@ -362,11 +359,11 @@ EOF
 ## Project-Specific Patterns
 <!-- Add project-specific conventions here -->
 EOF
-    success ".context/CONVENTIONS.md"
+    success "docs/context/CONVENTIONS.md"
   fi
 
-  if [ ! -f "$context_dir/GLOSSARY.md" ]; then
-    cat > "$context_dir/GLOSSARY.md" << 'EOF'
+  if [ ! -f "$docs_context_dir/GLOSSARY.md" ]; then
+    cat > "$docs_context_dir/GLOSSARY.md" << 'EOF'
 # Glossary
 
 > Domain terminology for this project.
@@ -375,7 +372,7 @@ EOF
 |---|---|
 <!-- Add domain terms here -->
 EOF
-    success ".context/GLOSSARY.md"
+    success "docs/context/GLOSSARY.md"
   fi
 
   if [ ! -f "$docs_context_dir/CURRENT_SPRINT.md" ]; then
@@ -445,8 +442,8 @@ install_project_copilot() {
 
 ## Before Coding
 - Check `docs/context/specs/` for feature specifications
-- Read `.context/CONVENTIONS.md` for stack patterns
-- Read `.context/ARCHITECTURE.md` for system context
+- Read `docs/context/CONVENTIONS.md` for stack patterns
+- Read `docs/context/ARCHITECTURE.md` for system context
 
 ## When Uncertain
 Stop and ask. Present options with tradeoffs.
@@ -709,7 +706,7 @@ if echo "$BASH_CMD" | grep -qE '(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$)
     emit_deny "Confidence gate: invalid spec id '$SPEC_ID' — must match [A-Za-z0-9._-]+"
   fi
 
-  CONF_LOG="$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl"
+  CONF_LOG="$PROJECT_DIR/.anw/specs/${SPEC_ID}-confidence.jsonl"
   if [ ! -f "$CONF_LOG" ]; then
     emit_deny "Confidence gate: log not found at $CONF_LOG"
   fi
@@ -863,7 +860,7 @@ CLI does not support user-global hooks — only repository-scoped ones.
 Every confidence gate verdict and bypass is appended to:
 
 ```
-.context/specs/<spec-id>-confidence.jsonl
+.anw/specs/<spec-id>-confidence.jsonl
 ```
 
 This file is gitignored (runtime state) but retained for local audit.
@@ -920,7 +917,9 @@ install_project_gitignore() {
   local project_dir="$1"
   local gitignore="$project_dir/.gitignore"
 
-  local entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state" ".context/.pipeline-audit.log" ".context/specs/*.jsonl")
+  # .anw/ is purely runtime now (pipeline state, audit log, confidence logs), so
+  # ignore the whole directory rather than listing individual files.
+  local entries=(".tdd-skip" ".claude/settings.local.json" ".anw/")
   local added=0
 
   for entry in "${entries[@]}"; do

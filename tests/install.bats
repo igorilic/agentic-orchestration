@@ -182,19 +182,17 @@ EOF
   rm -rf "$SANDBOX_PROJECT"
 }
 
-@test "install project: project .gitignore contains runtime ignore entries" {
+@test "install project: project .gitignore ignores the .anw/ runtime dir" {
   SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
-  grep -qF '.context/.pipeline-state' "$SANDBOX_PROJECT/.gitignore"
-  grep -qF '.context/.pipeline-audit.log' "$SANDBOX_PROJECT/.gitignore"
-  grep -qF '.context/specs/*.jsonl' "$SANDBOX_PROJECT/.gitignore"
+  grep -qF '.anw/' "$SANDBOX_PROJECT/.gitignore"
   rm -rf "$SANDBOX_PROJECT"
 }
 
-@test "install project: project .gitignore does NOT contain bare .context/" {
+@test "install project: project .gitignore no longer references the renamed .context/ dir" {
   SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
-  ! grep -qE '^\.context/$' "$SANDBOX_PROJECT/.gitignore"
+  ! grep -q '\.context' "$SANDBOX_PROJECT/.gitignore"
   rm -rf "$SANDBOX_PROJECT"
 }
 
@@ -241,50 +239,45 @@ EOF
 # CTX-1 Step 3: repo-level .gitignore shape guard
 # ---------------------------------------------------------------------------
 
-@test "repo .gitignore: does NOT contain bare .context/" {
-  ! grep -qE '^\.context/$' "$BATS_TEST_DIRNAME/../.gitignore"
-}
-
-@test "repo .gitignore: contains the three runtime entries" {
-  grep -qF '.context/.pipeline-state'    "$BATS_TEST_DIRNAME/../.gitignore"
-  grep -qF '.context/.pipeline-audit.log' "$BATS_TEST_DIRNAME/../.gitignore"
-  grep -qF '.context/specs/*.jsonl'      "$BATS_TEST_DIRNAME/../.gitignore"
+@test "repo .gitignore: ignores the .anw/ runtime dir and no longer mentions .context/" {
+  grep -qF '.anw/'   "$BATS_TEST_DIRNAME/../.gitignore"
+  ! grep -q '\.context' "$BATS_TEST_DIRNAME/../.gitignore"
 }
 
 # ---------------------------------------------------------------------------
 # CTX-1 Step 5: Claude Code agent prompts use docs/context/
 # ---------------------------------------------------------------------------
 
-@test "agents/claude-code: no spec/todo/requirements paths under .context/specs/" {
+@test "agents/claude-code: no spec/todo/requirements paths under .anw/specs/" {
   # Spec, todo, requirements, bugfix, brainstorm, testplan artifacts must reference docs/context/
-  # Confidence jsonl stays under .context/specs/ — excluded by the negative lookahead pattern below
-  ! rg -q '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+  # Confidence jsonl stays under .anw/specs/ — excluded by the negative lookahead pattern below
+  ! rg -q '\.anw/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
     "$BATS_TEST_DIRNAME/../agents/claude-code/"
 }
 
-@test "agents/claude-code: confidence jsonl path under .context/specs/ remains" {
-  rg -q '\.context/specs/.*-confidence\.jsonl' \
+@test "agents/claude-code: confidence jsonl path under .anw/specs/ remains" {
+  rg -q '\.anw/specs/.*-confidence\.jsonl' \
     "$BATS_TEST_DIRNAME/../agents/claude-code/qa.md" \
     "$BATS_TEST_DIRNAME/../agents/claude-code/reviewer.md" \
     "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
 }
 
-@test "agents/claude-code: ARCHITECTURE and CONVENTIONS reads stay under .context/" {
-  rg -q '\.context/ARCHITECTURE\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
-  rg -q '\.context/CONVENTIONS\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+@test "agents/claude-code: ARCHITECTURE and CONVENTIONS reads point at docs/context/" {
+  rg -q 'docs/context/ARCHITECTURE\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
+  rg -q 'docs/context/CONVENTIONS\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
 }
 
 # ---------------------------------------------------------------------------
 # CTX-1 Step 6: Copilot CLI agent prompts use docs/context/
 # ---------------------------------------------------------------------------
 
-@test "agents/copilot-cli: no spec/todo/requirements paths under .context/specs/" {
-  ! rg -q '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+@test "agents/copilot-cli: no spec/todo/requirements paths under .anw/specs/" {
+  ! rg -q '\.anw/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
     "$BATS_TEST_DIRNAME/../agents/copilot-cli/"
 }
 
-@test "agents/copilot-cli: confidence jsonl path under .context/specs/ remains" {
-  rg -q '\.context/specs/.*-confidence\.jsonl' \
+@test "agents/copilot-cli: confidence jsonl path under .anw/specs/ remains" {
+  rg -q '\.anw/specs/.*-confidence\.jsonl' \
     "$BATS_TEST_DIRNAME/../agents/copilot-cli/qa.agent.md" \
     "$BATS_TEST_DIRNAME/../agents/copilot-cli/reviewer.agent.md" \
     "$BATS_TEST_DIRNAME/../agents/copilot-cli/architect.agent.md"
@@ -294,11 +287,11 @@ EOF
 # CTX-1 Step 8: ai-native-workflow embedded heredocs use docs/context/
 # ---------------------------------------------------------------------------
 
-@test "cli: ai-native-workflow heredocs use docs/context/ for spec/sprint paths (no .context/specs/<id>-...)" {
+@test "cli: ai-native-workflow heredocs use docs/context/ for spec/sprint paths (no .anw/specs/<id>-...)" {
   # Spec, todo, requirements, bugfix, brainstorm artifacts in heredocs must reference docs/context/
-  # Confidence jsonl stays under .context/specs/ — matched separately below
+  # Confidence jsonl stays under .anw/specs/ — matched separately below
   # (installer is now split across ai-native-workflow + lib/*.sh)
-  ! rg -q '\.context/specs/[^*]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+  ! rg -q '\.anw/specs/[^*]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
     "$BATS_TEST_DIRNAME/../ai-native-workflow" "$BATS_TEST_DIRNAME/../lib"
 }
 
@@ -348,19 +341,19 @@ EOF
   ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
 }
 
-@test "docs: templates/AGENTS.md does not reference .context/specs/ for spec/todo paths" {
-  # Allow .context/ARCHITECTURE.md and .context/CONVENTIONS.md (those stay)
-  ! rg -q '\.context/specs/' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
+@test "docs: templates/AGENTS.md does not reference .anw/specs/ for spec/todo paths" {
+  # Allow docs/context/ARCHITECTURE.md and docs/context/CONVENTIONS.md (those stay)
+  ! rg -q '\.anw/specs/' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
 }
 
 @test "docs: skills/ do not reference .context/CURRENT_SPRINT.md" {
   ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../skills/"
 }
 
-@test "docs: skills/ do not reference .context/specs/ for tracked spec artifacts" {
+@test "docs: skills/ do not reference .anw/specs/ for tracked spec artifacts" {
   # brainstorm, requirements, spec, todo, testplan, bugfix must move to docs/context/specs/
-  # Confidence jsonl stays under .context/specs/ — not matched by this pattern
-  ! rg -q '\.context/specs/[^$]*-(brainstorm|requirements|spec|todo|testplan|bugfix)' \
+  # Confidence jsonl stays under .anw/specs/ — not matched by this pattern
+  ! rg -q '\.anw/specs/[^$]*-(brainstorm|requirements|spec|todo|testplan|bugfix)' \
     "$BATS_TEST_DIRNAME/../skills/"
 }
 
@@ -372,16 +365,16 @@ EOF
   rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
 }
 
-@test "docs: README.md does not reference old .context/specs/ tracked artifact paths" {
+@test "docs: README.md does not reference old .anw/specs/ tracked artifact paths" {
   # Lines with confidence.jsonl (runtime artifact) are allowed to stay
   # We check specifically for the spec/todo/requirements/bugfix/testplan/brainstorm old paths
-  ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+  ! rg -q '\.anw/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
     "$BATS_TEST_DIRNAME/../README.md"
 }
 
-@test "docs: ARCHITECTURE.md does not reference old .context/specs/ tracked artifact paths" {
-  # Pipeline diagrams used to show → .context/specs/<id>-requirements.md; those must now show docs/context/
-  ! rg -q '\.context/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+@test "docs: ARCHITECTURE.md does not reference old .anw/specs/ tracked artifact paths" {
+  # Pipeline diagrams used to show → .anw/specs/<id>-requirements.md; those must now show docs/context/
+  ! rg -q '\.anw/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
     "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
 }
 
@@ -404,20 +397,19 @@ EOF
   [ -f "$sandbox_project/docs/context/CURRENT_SPRINT.md" ]
   [ -f "$sandbox_project/docs/context/specs/templates/feature-spec.md" ]
 
-  # AC: architecture/conventions/glossary docs stay in .context/ (installer-seeded, tracked in consumer)
-  [ -f "$sandbox_project/.context/ARCHITECTURE.md" ]
-  [ -f "$sandbox_project/.context/CONVENTIONS.md" ]
-  [ -f "$sandbox_project/.context/GLOSSARY.md" ]
+  # AC: installer-seeded architecture/conventions/glossary docs now live under
+  # docs/context/ alongside the specs (tracked in the consumer project) — #17.2
+  [ -f "$sandbox_project/docs/context/ARCHITECTURE.md" ]
+  [ -f "$sandbox_project/docs/context/CONVENTIONS.md" ]
+  [ -f "$sandbox_project/docs/context/GLOSSARY.md" ]
 
-  # AC: .gitignore contains runtime-only entries
-  grep -qF '.context/.pipeline-state' "$sandbox_project/.gitignore"
+  # AC: .gitignore ignores the runtime .anw/ dir and no longer mentions .context/
+  grep -qF '.anw/' "$sandbox_project/.gitignore"
+  ! grep -q '\.context' "$sandbox_project/.gitignore"
 
-  # AC: .gitignore does NOT contain bare .context/ (legacy blanket ignore gone)
-  ! grep -qE '^\.context/$' "$sandbox_project/.gitignore"
-
-  # AC: globally installed architect.md exists and has no old .context/specs/ tracked paths
+  # AC: globally installed architect.md exists and has no old .anw/specs/ tracked paths
   [ -f "$sandbox_claude/agents/architect.md" ]
-  ! grep -qE '\.context/specs/[^$]*-(spec|todo|requirements)' "$sandbox_claude/agents/architect.md"
+  ! grep -qE '\.anw/specs/[^$]*-(spec|todo|requirements)' "$sandbox_claude/agents/architect.md"
 
   rm -rf "$sandbox_claude" "$sandbox_project"
 }

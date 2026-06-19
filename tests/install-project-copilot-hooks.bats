@@ -264,11 +264,11 @@ _smoke_run_dispatcher() {
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
 
   # Set up active spec pointer
-  mkdir -p "$SANDBOX/.git/aw" "$SANDBOX/.context/specs"
+  mkdir -p "$SANDBOX/.git/aw" "$SANDBOX/.anw/specs"
   echo "SMOKE-1" > "$SANDBOX/.git/aw/active-spec"
 
   # Confidence log with GREEN aggregate score
-  local log="$SANDBOX/.context/specs/SMOKE-1-confidence.jsonl"
+  local log="$SANDBOX/.anw/specs/SMOKE-1-confidence.jsonl"
   make_log "$log" \
     "$(spec_event '["AC-1"]')" \
     "$(qa_event 1 5 0 "ok" '["AC-1"]')" \

@@ -86,7 +86,7 @@ This sums all numeric tokens in the shortstat (files changed, insertions, deleti
 **Then emit:**
 ```bash
 SPEC_ID="..."   # e.g. PROJ-123
-LOG=".context/specs/${SPEC_ID}-confidence.jsonl"
+LOG=".anw/specs/${SPEC_ID}-confidence.jsonl"
 mkdir -p "$(dirname "$LOG")"
 
 jq -n \

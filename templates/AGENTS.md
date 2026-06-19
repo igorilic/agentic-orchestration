@@ -67,8 +67,8 @@ Do NOT guess. Stop and present options when:
 
 ## Before Starting Any Work
 1. Read the spec in `docs/context/specs/` if one exists
-2. Scan `.context/ARCHITECTURE.md` for system context
-3. Check `.context/CONVENTIONS.md` for stack patterns
+2. Scan `docs/context/ARCHITECTURE.md` for system context
+3. Check `docs/context/CONVENTIONS.md` for stack patterns
 4. Identify ALL affected components before writing code
 
 ## Commit Messages
