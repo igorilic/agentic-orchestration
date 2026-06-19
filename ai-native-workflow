@@ -1729,21 +1729,20 @@ install_global() {
 install_global_claude_md() {
   local target="$CLAUDE_DIR/CLAUDE.md"
   mkdir -p "$CLAUDE_DIR"
-  backup_if_exists "$target"
 
-  cat > "$target" << 'CLAUDE_MD_EOF'
-# Global Claude Code Defaults
+  # CLAUDE.md is split into a user-owned preamble (Identity / Personal
+  # Preferences — seeded once, never overwritten) and an installer-managed
+  # block (skills, pipelines, agents, stack detection) wrapped in markers and
+  # regenerated on every install. This stops re-install from clobbering a
+  # user's customised CLAUDE.md (issue #12).
+  local begin='<!-- >>> ai-native-workflow managed block — do not edit; regenerated on install >>> -->'
+  local end='<!-- <<< ai-native-workflow managed block <<< -->'
 
-## Identity
-- Solo full-stack developer
-- Shell: fish (macOS)
-- CLI tools: glab, gh, kubectl, az, docker, make
-
-## Personal Preferences
-- Commit messages: Conventional Commits
-- Always explain before making destructive changes
-- Prefer asking over assuming
-
+  local managed_temp
+  managed_temp="$(mktemp /tmp/aw-claudemd-XXXXXX.md)"
+  {
+    echo "$begin"
+    cat << 'MANAGED_EOF'
 ## Available Global Skills
 - /plan — Start new work (orchestrates full agent pipeline)
 - /tdd — Strict TDD workflow (RED → GREEN → REFACTOR)
@@ -1753,6 +1752,7 @@ install_global_claude_md() {
 - /adr — Architecture Decision Record (repo + Confluence)
 - /pr — Create PR/MR (auto-detects gh/glab)
 - /gh-cli · /glab-cli — review a PR/MR diff (inline comments + threads)
+- /caveman — ultra-terse "caveman speak" replies (token-saver; slash-only)
 
 Plus the **diff-reviewer** agent (Opus 4.6) — whole-PR/MR review: quality,
 correctness, security, landmines. It previews findings, then (on your
@@ -1787,8 +1787,59 @@ Detect the active stack from project files and auto-apply conventions:
 - `package.json` with react → React/TS (Vitest + Testing Library)
 - `package.json` with react-native → React Native (Jest + RNTL)
 - `Package.swift` or `*.xcodeproj` → Swift (XCTest)
-CLAUDE_MD_EOF
-  success "~/.claude/CLAUDE.md"
+MANAGED_EOF
+    echo "$end"
+  } > "$managed_temp"
+
+  if [ ! -f "$target" ]; then
+    # Fresh install: seed the user preamble once, then the managed block.
+    {
+      cat << 'PREAMBLE_EOF'
+# Global Claude Code Defaults
+
+## Identity
+- Solo full-stack developer
+- Shell: fish (macOS)
+- CLI tools: glab, gh, kubectl, az, docker, make
+
+## Personal Preferences
+- Commit messages: Conventional Commits
+- Always explain before making destructive changes
+- Prefer asking over assuming
+
+PREAMBLE_EOF
+      cat "$managed_temp"
+    } > "$target"
+    rm -f "$managed_temp"
+    success "~/.claude/CLAUDE.md (seeded)"
+    return 0
+  fi
+
+  if grep -qF "$begin" "$target" && grep -qF "$end" "$target"; then
+    # Markers present: replace ONLY the managed region, preserving everything
+    # else (including a user-customised preamble) verbatim.
+    local out_temp
+    out_temp="$(mktemp /tmp/aw-claudemd-out-XXXXXX.md)"
+    awk -v begin="$begin" -v end="$end" -v mf="$managed_temp" '
+      $0 == begin { while ((getline line < mf) > 0) print line; close(mf); skip=1; next }
+      $0 == end   { skip=0; next }
+      skip != 1   { print }
+    ' "$target" > "$out_temp"
+    mv "$out_temp" "$target"
+    rm -f "$managed_temp"
+    success "~/.claude/CLAUDE.md (managed block updated)"
+    return 0
+  fi
+
+  # Legacy file, no markers: never clobber. Back it up, append a managed block,
+  # and warn that the old unmarked copy may now be duplicated.
+  backup_if_exists "$target"
+  {
+    echo ""
+    cat "$managed_temp"
+  } >> "$target"
+  rm -f "$managed_temp"
+  warn "~/.claude/CLAUDE.md had no managed markers — appended one and backed up the original. If you see duplicated 'Available Global Skills'/'Stack Detection' sections, delete the older unmarked copy; future installs update only the marked block."
 }
 
 install_global_settings() {
@@ -1851,22 +1902,24 @@ HOOKS_JSON_EOF
       # Deep merge: existing settings + new hooks
       # Union PreToolUse entries by matcher, and within each matcher union hooks
       # by .command, so user matchers and hooks are preserved on re-install.
-      # Only PreToolUse is merged this way; SessionStart and Notification are
-      # overwritten by the deep merge (.[0] * .[1]) which is safe since users
-      # rarely customise those hook types.
+      # ALL three installer hook types (PreToolUse, SessionStart, Notification)
+      # are concat-merged the same way, so a user-customised hook of any type
+      # survives re-install instead of being silently replaced (issue #12).
       local new_temp
       new_temp="$(mktemp /tmp/aw-hooks-new-XXXXXX.json)"
       echo "$hooks_json" > "$new_temp"
       jq -s '
         . as [$existing, $new] |
-        $existing * $new |
-        .hooks.PreToolUse = (
-          (($existing.hooks.PreToolUse // []) + ($new.hooks.PreToolUse // []))
-          | group_by(.matcher)
-          | map({
-              matcher: .[0].matcher,
-              hooks: (map(.hooks) | add | unique_by(.command))
-            })
+        ($existing * $new) as $merged |
+        reduce ["PreToolUse","SessionStart","Notification"][] as $k ($merged;
+          .hooks[$k] = (
+            (($existing.hooks[$k] // []) + ($new.hooks[$k] // []))
+            | group_by(.matcher)
+            | map({
+                matcher: .[0].matcher,
+                hooks: (map(.hooks) | add | unique_by(.command))
+              })
+          )
         )
       ' "$target" "$new_temp" > "${target}.tmp"
       rm -f "$new_temp"
