@@ -1,9 +1,8 @@
 .DS_Store
 .tdd-skip
 .claude/settings.local.json
-.context/.pipeline-state
-.context/.pipeline-audit.log
-.context/specs/*.jsonl
+# Runtime pipeline state, audit log, and confidence logs (#17.2)
+.anw/
 node_modules/
 *.env
 

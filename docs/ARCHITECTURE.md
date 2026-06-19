@@ -198,11 +198,10 @@ The project uses a deliberate split between tracked spec artifacts and runtime s
 
 | Path | Tracked in git? | Contents |
 |------|----------------|----------|
-| `docs/context/` | Yes | Sprint board (`CURRENT_SPRINT.md`), specs, todos, requirements, test plans |
-| `.context/` | Installer artifacts only | `ARCHITECTURE.md`, `CONVENTIONS.md`, `GLOSSARY.md` (seeded by installer; tracked in consumer projects, not generated in this repo) |
-| `.context/specs/*.jsonl` | No (gitignored) | Confidence event logs (runtime state) |
-| `.context/.pipeline-state` | No (gitignored) | Pipeline run state |
-| `.context/.pipeline-audit.log` | No (gitignored) | Audit trail |
+| `docs/context/` | Yes | Sprint board (`CURRENT_SPRINT.md`), specs, todos, requirements, test plans, plus installer-seeded `ARCHITECTURE.md` / `CONVENTIONS.md` / `GLOSSARY.md` (tracked in consumer projects, not generated in this repo) |
+| `.anw/specs/*.jsonl` | No (gitignored) | Confidence event logs (runtime state) |
+| `.anw/.pipeline-state` | No (gitignored) | Pipeline run state |
+| `.anw/.pipeline-audit.log` | No (gitignored) | Audit trail |
 
 The `docs/context/` path is version-controlled so spec reviews happen in pull requests. The `.context/` runtime artifacts are gitignored to prevent churn from pipeline state files.
 

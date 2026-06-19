@@ -413,9 +413,9 @@ elif [ -d "$PROJECT_DIR/.github" ]; then
 fi
 
 # Check for active pipeline
-if [ -f "$PROJECT_DIR/.context/.pipeline-state" ]; then
+if [ -f "$PROJECT_DIR/.anw/.pipeline-state" ]; then
   # shellcheck source=/dev/null
-  source "$PROJECT_DIR/.context/.pipeline-state"
+  source "$PROJECT_DIR/.anw/.pipeline-state"
   CONTEXT="${CONTEXT}\n🔄 Active pipeline: ${PIPELINE} (${ID}) — step ${CURRENT_STEP} (${STATUS})\n"
 fi
 

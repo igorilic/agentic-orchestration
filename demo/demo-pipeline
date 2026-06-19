@@ -134,9 +134,9 @@ demo_github_feature() {
   ${YELLOW}AC-2${NC}: Given invalid password, When POST /auth/login, Then 401
   ${YELLOW}AC-3${NC}: Given duplicate email, When POST /auth/signup, Then 409
 
-  ${DIM}Saved: .context/specs/requirements.md${NC}"
+  ${DIM}Saved: docs/context/specs/requirements.md${NC}"
 
-  info "Review: .context/specs/requirements.md"
+  info "Review: docs/context/specs/requirements.md"
   pause_for_audience
 
   # Step 2: GitHub Issue
@@ -168,9 +168,9 @@ demo_github_feature() {
     Test: sign, verify, expiry, invalid tokens
     Files: src/services/jwt.ts
 
-  ${DIM}Saved: .context/specs/auth-todo.md${NC}"
+  ${DIM}Saved: docs/context/specs/auth-todo.md${NC}"
 
-  info "Review: .context/specs/auth-todo.md"
+  info "Review: docs/context/specs/auth-todo.md"
   pause_for_audience
 
   # Step 4-6: TDD Loop (show 2 of 4 steps)
@@ -267,7 +267,7 @@ demo_github_issue() {
   echo -e "  ${DIM}#43: Parameterize WHERE clause inputs${NC}"
   echo -e "  ${DIM}#44: Add input sanitization to ORDER BY${NC}"
   echo ""
-  success "Issue context saved: .context/specs/issue-${issue_id}-issue-context.md"
+  success "Issue context saved: docs/context/specs/issue-${issue_id}-issue-context.md"
   pause_for_audience
 
   # Step 2: Troubleshooter
@@ -294,10 +294,10 @@ demo_github_issue() {
   2. Whitelist ORDER BY column names
   3. Add integration tests with injection payloads
 
-  ${DIM}Saved: .context/specs/issue-${issue_id}-bugfix.md${NC}
-  ${DIM}Saved: .context/specs/issue-${issue_id}-todo.md${NC}"
+  ${DIM}Saved: docs/context/specs/issue-${issue_id}-bugfix.md${NC}
+  ${DIM}Saved: docs/context/specs/issue-${issue_id}-todo.md${NC}"
 
-  info "Review: .context/specs/issue-${issue_id}-bugfix.md"
+  info "Review: docs/context/specs/issue-${issue_id}-bugfix.md"
   pause_for_audience
 
   # Step 3: Architect
@@ -317,7 +317,7 @@ demo_github_issue() {
     Test: reject non-column names, reject SQL keywords
     Files: src/lib/query-builder.ts, src/lib/sanitize.ts"
 
-  info "Review: .context/specs/issue-${issue_id}-todo.md"
+  info "Review: docs/context/specs/issue-${issue_id}-todo.md"
   pause_for_audience
 
   # TDD step 1 (the key one — reproduce the bug)
@@ -395,7 +395,7 @@ demo_gitlab_feature() {
   ${GREEN}FR-3${NC}: Support filtering by date range
   ${GREEN}FR-4${NC}: Max 10,000 rows per export
 
-  ${DIM}Saved: .context/specs/PROJ-789-requirements.md${NC}"
+  ${DIM}Saved: docs/context/specs/PROJ-789-requirements.md${NC}"
   pause_for_audience
 
   pstep 2 "Test Planning"
@@ -406,7 +406,7 @@ demo_gitlab_feature() {
   - Integration: Export endpoint with real DB
   - Edge: Empty results, special characters, large datasets
 
-  ${DIM}Saved: .context/specs/PROJ-789-testplan.md${NC}"
+  ${DIM}Saved: docs/context/specs/PROJ-789-testplan.md${NC}"
   pause_for_audience
 
   pstep 3 "Architecture & Planning"
@@ -416,7 +416,7 @@ demo_gitlab_feature() {
   Step 2: Export API endpoint
   Step 3: Date range filtering
 
-  ${DIM}Saved: .context/specs/PROJ-789-todo.md${NC}"
+  ${DIM}Saved: docs/context/specs/PROJ-789-todo.md${NC}"
   pause_for_audience
 
   echo ""
@@ -512,7 +512,7 @@ demo_error_resume() {
   echo -e "  ${BOLD}Step${NC}:      4.2 (running)"
   echo -e "  ${BOLD}Branch${NC}:    fix/issue-42"
   echo -e "  ${BOLD}Exit Code${NC}: 1"
-  echo -e "  ${BOLD}Audit Log${NC}: .context/.pipeline-audit.log"
+  echo -e "  ${BOLD}Audit Log${NC}: .anw/.pipeline-audit.log"
   echo ""
   info "State preserved. To resume: ${BOLD}ai-native-workflow run resume${NC}"
   pause_for_audience

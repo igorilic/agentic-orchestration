@@ -26,7 +26,7 @@ Jira tickets, and spec documents into clear, testable requirements.
 ## Workflow
 1. Gather raw requirements from the input source (Jira, GitHub, GitLab, specs.md, or user)
 2. Identify ambiguities, gaps, contradictions
-3. Cross-reference with `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
+3. Cross-reference with `docs/context/ARCHITECTURE.md` and `docs/context/CONVENTIONS.md`
 4. If critical info missing: STOP and ask specific questions
 5. Create `docs/context/specs/<id>-requirements.md` with:
    - Problem Statement, User Stories, Functional Requirements

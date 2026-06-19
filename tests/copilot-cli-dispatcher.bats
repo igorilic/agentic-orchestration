@@ -17,8 +17,8 @@ setup() {
   "$INSTALLER" install project "$SANDBOX" >/dev/null 2>&1
   DISPATCHER="$SANDBOX/.github/hooks/copilot-cli-dispatcher.sh"
   # Standard directories for confidence gate
-  mkdir -p "$SANDBOX/.git/aw" "$SANDBOX/.context/specs"
-  LOG="$SANDBOX/.context/specs/PROJ-1-confidence.jsonl"
+  mkdir -p "$SANDBOX/.git/aw" "$SANDBOX/.anw/specs"
+  LOG="$SANDBOX/.anw/specs/PROJ-1-confidence.jsonl"
 }
 
 teardown() {

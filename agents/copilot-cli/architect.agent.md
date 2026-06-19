@@ -15,7 +15,7 @@ Analyze requirements, design solutions, break work into small testable
 committable steps for the tdd-developer agent.
 
 ## Workflow
-1. Read `.context/ARCHITECTURE.md` and `.context/CONVENTIONS.md`
+1. Read `docs/context/ARCHITECTURE.md` and `docs/context/CONVENTIONS.md`
 2. Scan codebase for existing patterns
 3. If unclear: STOP, present options with tradeoffs, ask
 4. Create spec at `docs/context/specs/<id>-spec.md`
@@ -26,7 +26,7 @@ committable steps for the tdd-developer agent.
 8. Emit confidence event — substitute `<id>` with the actual spec id you just used (e.g. `PROJ-123`). After writing the spec, append a `spec` event to the confidence log:
 
 ```bash
-LOG=".context/specs/<id>-confidence.jsonl"
+LOG=".anw/specs/<id>-confidence.jsonl"
 mkdir -p "$(dirname "$LOG")"
 
 # Build ac_items JSON from spec's AC section.

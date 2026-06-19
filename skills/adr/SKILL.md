@@ -24,7 +24,7 @@ Create `docs/decisions/ADR-<NNN>-<kebab-case-title>.md` with sections:
 - **Alternatives Considered**: Each with reason for rejection
 
 ### Step 3: Update Architecture Docs
-Add reference in `.context/ARCHITECTURE.md`.
+Add reference in `docs/context/ARCHITECTURE.md`.
 
 ### Step 4: Sync to Confluence (Business Only)
 If Confluence MCP is available, create a child page under "Architecture Decisions".

@@ -31,7 +31,7 @@ You are a QA engineer. Verify changes by running appropriate tests.
    Then emit:
    ```bash
    SPEC_ID="..."   # e.g. PROJ-123
-   LOG=".context/specs/${SPEC_ID}-confidence.jsonl"
+   LOG=".anw/specs/${SPEC_ID}-confidence.jsonl"
    mkdir -p "$(dirname "$LOG")"
 
    jq -n \

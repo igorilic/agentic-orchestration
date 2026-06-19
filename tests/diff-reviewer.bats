@@ -110,9 +110,9 @@ claude_install() {
   done
 }
 
-@test "agent: does not reference tracked spec artifacts under .context/specs/" {
+@test "agent: does not reference tracked spec artifacts under .anw/specs/" {
   # Matches the repo-wide path convention enforced for the other agents.
-  ! grep -Eq '\.context/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
+  ! grep -Eq '\.anw/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
     "$CLAUDE_AGENT" "$COPILOT_AGENT"
 }
 
