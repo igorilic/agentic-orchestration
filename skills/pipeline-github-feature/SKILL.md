@@ -34,7 +34,7 @@ specs.md / User Input
   │     GREEN: minimum code → commit
   │     REFACTOR: improve → commit
   │
-  ├─ 5. qa (Haiku-tier)
+  ├─ 5. qa (Opus-tier)
   │     Run affected unit + integration tests
   │     Report pass/fail with exact errors
   │

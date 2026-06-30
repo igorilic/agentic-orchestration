@@ -148,7 +148,7 @@ COPILOT_HOME=/tmp/aw-sandbox-copilot \
 | `agents/requirements-engineer.md` | Opus-tier — elicit & formalize requirements |
 | `agents/architect.md` | Opus-tier — design, spec, atomic plans |
 | `agents/tdd-developer.md` | Sonnet-tier — strict TDD implementation |
-| `agents/qa.md` | Haiku-tier — run affected tests |
+| `agents/qa.md` | Opus-tier — adversarial test + spec-gap & security hunt |
 | `agents/reviewer.md` | Sonnet-tier — per-step code review + triage |
 | `agents/diff-reviewer.md` | Opus-tier — whole-PR/MR diff review; posts inline comments + threads |
 | `agents/troubleshooter.md` | Opus-tier — incident diagnosis |

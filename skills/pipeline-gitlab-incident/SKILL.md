@@ -32,7 +32,7 @@ Jira Incident Ticket
   │     Step 1: write test that REPRODUCES the bug (RED)
   │     Step 2+: implement fix (GREEN → REFACTOR)
   │
-  ├─ 4. qa (Haiku-tier)
+  ├─ 4. qa (Opus-tier)
   │     Run affected tests → verify fix
   │     Ensure no regressions
   │

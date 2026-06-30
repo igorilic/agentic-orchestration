@@ -36,7 +36,7 @@ show_status() {
   check_file "$CLAUDE_DIR/agents/requirements-engineer.md" "agents/requirements-engineer (Opus)"
   check_file "$CLAUDE_DIR/agents/architect.md" "agents/architect (Opus)"
   check_file "$CLAUDE_DIR/agents/tdd-developer.md" "agents/tdd-developer (Sonnet)"
-  check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Haiku)"
+  check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Opus)"
   check_file "$CLAUDE_DIR/agents/reviewer.md" "agents/reviewer (Sonnet)"
   check_file "$CLAUDE_DIR/agents/diff-reviewer.md" "agents/diff-reviewer (Opus)"
   check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"

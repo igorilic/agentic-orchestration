@@ -56,7 +56,7 @@ All new work starts with `/plan`. The pipeline:
 1. **requirements-engineer** (Opus-tier) — elicits & formalizes requirements
 2. **architect** (Opus-tier) — designs spec + atomic todo plan
 3. **tdd-developer** (Sonnet-tier) — implements one step via TDD
-4. **qa** (Haiku-tier) — runs affected tests
+4. **qa** (Opus-tier) — adversarial test + spec-gap & security hunt
 5. **reviewer** (Sonnet-tier) — reviews code, user triages findings
 Max 3 fix loops per step, then remaining issues go to tech debt.
 
