@@ -27,7 +27,7 @@ For the full technical specification, see [PAPER.md](../PAPER.md).
 │  requirements-engineer (Opus-tier) → elicit, formalize reqs │
 │  architect             (Opus-tier) → design, spec, plan     │
 │  tdd-developer         (Sonnet-tier) → implement via TDD   │
-│  qa                    (Haiku-tier) → run affected tests    │
+│  qa                    (Opus-tier) → adversarial test + gaps│
 │  reviewer              (Sonnet-tier) → code review + triage │
 │  diff-reviewer         (Opus-tier) → PR/MR review + comment │
 │  troubleshooter        (Opus-tier) → incident investigation │
@@ -45,7 +45,7 @@ Jira Ticket
   │     Fetch Jira ticket → structured requirements
   │     → docs/context/specs/<id>-requirements.md
   │
-  ├─ 2. qa (Haiku-tier) — test planning
+  ├─ 2. qa (Opus-tier) — test planning
   │     Requirements → testing plan with scenarios
   │
   ├─ 3. architect (Opus-tier)
@@ -56,7 +56,7 @@ Jira Ticket
   ├─ 4. tdd-developer (Sonnet-tier) — per step
   │     RED → GREEN → REFACTOR → commit
   │
-  ├─ 5. qa (Haiku-tier) — test execution
+  ├─ 5. qa (Opus-tier) — test execution
   │     Run affected tests → pass/fail
   │     → emits qa event
   │
@@ -94,7 +94,7 @@ Jira Incident Ticket
   │     Step 1: reproduce bug as failing test
   │     Step 2+: implement fix
   │
-  ├─ 4. qa (Haiku-tier) → verify fix
+  ├─ 4. qa (Opus-tier) → verify fix
   │     → emits qa event
   │
   ├─ 5. reviewer (Sonnet-tier) → review MR
@@ -129,7 +129,7 @@ specs.md / User Input
   ├─ 4. tdd-developer (Sonnet-tier) — per step
   │     RED → GREEN → REFACTOR → commit
   │
-  ├─ 5. qa (Haiku-tier) → run affected tests
+  ├─ 5. qa (Opus-tier) → run affected tests
   │     → emits qa event
   │
   ├─ 6. reviewer (Sonnet-tier) — PR review
@@ -165,7 +165,7 @@ specs.md / User Input
   │     GREEN: minimum code → commits
   │     REFACTOR: improve → commits
   │
-  ├─ 3. qa (Haiku-tier)
+  ├─ 3. qa (Opus-tier)
   │     Runs only affected unit + integration tests
   │     Reports pass/fail with exact errors
   │     → emits qa event
@@ -187,7 +187,7 @@ specs.md / User Input
 | requirements-engineer | Opus-tier | Elicit & formalize requirements | No |
 | architect | Opus-tier | Design solutions, create plans | No |
 | tdd-developer | Sonnet-tier | Implement via strict TDD | Yes |
-| qa | Haiku-tier | Run tests, create test plans | No |
+| qa | Opus-tier | Run tests, hunt spec/impl gaps & security holes | No |
 | reviewer | Sonnet-tier | Per-step code review, quality gate | No |
 | diff-reviewer | Opus-tier | Whole-PR/MR diff review; posts inline comments + threads | No (posts review comments) |
 | troubleshooter | Opus-tier | Incident investigation, diagnosis | No |

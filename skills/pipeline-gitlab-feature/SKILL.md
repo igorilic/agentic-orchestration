@@ -19,7 +19,7 @@ Jira Ticket
   │     → docs/context/specs/<id>-requirements.md
   │     → User validates requirements
   │
-  ├─ 2. qa (Haiku-tier) — test planning
+  ├─ 2. qa (Opus-tier) — test planning
   │     Read requirements → create testing plan
   │     → Unit, integration, edge case scenarios
   │     → docs/context/specs/<id>-testplan.md
@@ -34,7 +34,7 @@ Jira Ticket
   │     GREEN: minimum code → commit
   │     REFACTOR: improve → commit
   │
-  ├─ 5. qa (Haiku-tier) — test execution
+  ├─ 5. qa (Opus-tier) — test execution
   │     Run affected unit + integration tests
   │     Report pass/fail with exact errors
   │

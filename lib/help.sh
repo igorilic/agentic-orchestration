@@ -99,7 +99,7 @@ show_help() {
       agents/requirements-engineer.md  Opus-tier — elicit requirements
       agents/architect.md       Opus-tier — design, spec, todo plan
       agents/tdd-developer.md   Sonnet-tier — strict TDD implementation
-      agents/qa.md              Haiku-tier — run affected tests
+      agents/qa.md              Opus-tier — adversarial test + gap hunt
       agents/reviewer.md        Sonnet-tier — code review + triage
       agents/troubleshooter.md  Opus-tier — incident diagnosis + fix plan
 
@@ -117,7 +117,7 @@ show_help() {
     requirements-engineer (Opus-tier)  → elicit & formalize requirements
     architect (Opus-tier)              → design, spec, atomic plan
     tdd-developer (Sonnet-tier)        → RED→GREEN→REFACTOR per step
-    qa (Haiku-tier)                    → run affected tests
+    qa (Opus-tier)                     → adversarial test + gap hunt
     reviewer (Sonnet-tier)             → code review, user triages
     troubleshooter (Opus-tier)         → incident investigation + diagnosis
 

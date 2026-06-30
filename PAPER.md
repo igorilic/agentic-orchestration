@@ -115,7 +115,7 @@ The architecture is governed by four principles:
 │  requirements-engineer (Opus-tier)   → elicit, formalize ACs   │
 │  architect             (Opus-tier)   → design, spec, plan      │
 │  tdd-developer         (Sonnet-tier) → implement via TDD       │
-│  qa                    (Haiku-tier)  → run affected tests      │
+│  qa                    (Opus-tier)   → adversarial test + gaps │
 │  reviewer              (Sonnet-tier) → per-step review         │
 │  diff-reviewer         (Opus-tier)   → whole-PR/MR review      │
 │  troubleshooter        (Opus-tier)   → incident investigation  │
@@ -135,7 +135,7 @@ The feature development pipeline follows a strict linear progression:
 
 3. **TDD-Developer** (Sonnet-tier) receives one step at a time from the todo plan and executes the RED→GREEN→REFACTOR cycle. It writes failing tests first (RED), implements the minimum code to pass (GREEN), refactors while keeping tests green, and commits at each phase. The PreToolUse hooks block any `git commit` that doesn't include test files in the staging area, or that fails the confidence gate's hard checks.
 
-4. **QA** (Haiku-tier) runs after each step completes, executing only the tests affected by the changed files. It detects the appropriate test runner from project files and reports exact pass/fail results without interpretation.
+4. **QA** (Opus-tier) runs after each step completes. It executes the tests affected by the changed files, then reads the spec adversarially — deriving the edge cases each acceptance criterion implies but does not state, and probing the implementation for spec/behaviour discrepancies and security holes the committed tests never exercised. It reports exact pass/fail results alongside every gap it can demonstrate with a throwaway probe (which it never commits). Closing those gaps is the developer's job; QA's job is to find them.
 
 5. **Reviewer** (Sonnet-tier) evaluates the changes against a checklist covering correctness, test quality, code quality, stack conventions, security, and performance. Findings are categorized as MUST FIX (automatic), SHOULD FIX (user decides), and SUGGESTION (user decides). The user triages each item as Fix, Tech Debt, or Ignore.
 
@@ -163,13 +163,13 @@ Model selection is based on the cognitive demands of each role:
 | Requirements-Engineer | Opus-tier | Elicits and disambiguates intent into testable acceptance criteria — high-stakes framing that the rest of the pipeline depends on |
 | Architect | Opus-tier | Requires deep codebase analysis, design reasoning, and creative problem decomposition |
 | TDD-Developer | Sonnet-tier | Needs strong coding ability but follows a prescribed plan — no design decisions |
-| QA | Haiku-tier | Executes test commands and reports output — minimal reasoning required |
+| QA | Opus-tier | Adversarial verification — derives unstated edge cases, hunts spec/implementation discrepancies and security holes, and proves each with a probe; reasoning over an untrusted diff, not a test-runner's job |
 | Reviewer | Sonnet-tier | Pattern matching against conventions and best practices — moderate reasoning |
 | Diff-Reviewer | Opus-tier | Whole-PR/MR review — security, logic, and landmine analysis across an entire diff |
 | Troubleshooter | Opus-tier | Requires cross-system correlation, root cause analysis, and creative diagnosis |
 | Explorer | Sonnet-tier | Generates and evaluates throwaway options for spikes — coding ability without ship-quality constraints |
 
-This tiering optimizes both cost and latency. The QA agent (Haiku-tier) returns results in seconds, while the Architect and Troubleshooter (Opus-tier) take longer but produce higher-quality reasoning for tasks where that matters.
+This tiering matches model strength to the cognitive demands of each role. The roles that follow a prescribed plan or checklist (TDD-Developer, Reviewer, Explorer) sit at Sonnet-tier; the roles that must reason from incomplete information — Requirements-Engineer, Architect, Troubleshooter, Diff-Reviewer, and QA — run at Opus-tier. QA is deliberately placed at the top tier: catching the discrepancy a developer's own tests were always going to miss is adversarial reasoning over an untrusted change, and a weaker model there simply rubber-stamps a green suite.
 
 The architecturally meaningful decision is the **tier**, not a specific model version. Agents are therefore configured with floating tier aliases (`opus`, `sonnet`, `haiku`) rather than pinned version identifiers, so each role automatically tracks the current best model of its tier as new releases ship — no per-release maintenance, and no quality left on the table. We avoid naming concrete versions in this paper for the same reason: with no controlled evaluation pinned to a particular model (see §5.3), a version number would imply a reproducibility claim the system does not make. Copilot CLI is the one exception in practice: its agent frontmatter accepts a `model` field but expects a concrete model identifier and offers no floating-alias equivalent, so the Copilot-side agents are the single place a specific version is pinned — and the price is that those identifiers must be bumped by hand as new models ship.
 

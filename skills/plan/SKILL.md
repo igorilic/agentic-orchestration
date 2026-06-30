@@ -3,7 +3,7 @@ name: plan
 description: >
   Entry point for all new work. Orchestrates the full agent pipeline:
   architect (Opus) designs spec+todo, tdd-developer (Sonnet) implements
-  via TDD, qa (Haiku) runs tests, reviewer (Sonnet) reviews code.
+  via TDD, qa (Opus) hunts spec/impl gaps, reviewer (Sonnet) reviews code.
   Triggers on: plan, new feature, start work, build feature.
 disable-model-invocation: true
 ---
@@ -14,7 +14,7 @@ disable-model-invocation: true
 architect (Opus) → spec.md + todo.md (atomic steps)
   ↓ per step:
 tdd-developer (Sonnet) → RED→GREEN→REFACTOR → commit
-qa (Haiku) → run affected tests
+qa (Opus) → adversarial test + spec-gap & security hunt
 reviewer (Sonnet) → present findings → user triages
   ↓ max 3 fix loops, then next step
 ```
