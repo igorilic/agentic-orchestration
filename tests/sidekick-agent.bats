@@ -32,6 +32,13 @@
 #   - F3: install-wiring tests now `run` the installer and assert exit 0
 #     (previously discarded via `>/dev/null 2>&1`), so a partially-broken
 #     install under `set -euo pipefail` can't show a false green.
+#
+# SDK-1 Step A-2: sidekick prompt BODY contract (frontmatter untouched).
+#   Adds body()-scoped assertions (mirroring frontmatter()'s scoping) for:
+#   a mechanical-only allowlist section, an explicit refuse-if-judgment
+#   clause, a forbidden-actions list (git/CI/migrations/deploys/test
+#   assertions/design), a no-Bash reminder ("parent runs, sidekick applies"),
+#   a hand-back-for-review note, and the OQ-1 no-literal-sentinel-prefix rule.
 
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 SIDEKICK_SRC="$BATS_TEST_DIRNAME/../agents/claude-code/sidekick.md"
@@ -62,6 +69,16 @@ frontmatter() {
   awk '
     /^---$/ { c++; next }
     c==1
+  ' "$1"
+}
+
+# Extract the prompt BODY (everything strictly after the second `---`
+# delimiter), so frontmatter content can never satisfy a body-only
+# assertion (and vice versa).
+body() {
+  awk '
+    /^---$/ { c++; next }
+    c>=2
   ' "$1"
 }
 
@@ -102,6 +119,57 @@ assert_tools_whitelist() {
   [ "$count" -eq 1 ]
   tools_line="$(grep -E '^tools:' <<<"$fm")"
   assert_tools_whitelist "$tools_line"
+}
+
+# ---------------------------------------------------------------------------
+# Prompt BODY contract (OQ-6 / Step A-2): mechanical-only, refuse-if-judgment,
+# forbidden actions. Scoped to the body (via body()) so a frontmatter-only
+# file (e.g. the A-1 skeleton) fails these for the right reason.
+# ---------------------------------------------------------------------------
+
+@test "sidekick body: contains a mechanical-only allowlist section" {
+  bd="$(body "$SIDEKICK_SRC")"
+  echo "$bd" | grep -qiE 'allow[- ]?list'
+  echo "$bd" | grep -qiE 'scaffold.*(file|template)'
+  echo "$bd" | grep -qiE 'lint|format|type-fix'
+  echo "$bd" | grep -qiE 'fixture'
+  echo "$bd" | grep -qiE 'mock'
+  echo "$bd" | grep -qiE 'find-replace|find/replace|find and replace'
+}
+
+@test "sidekick body: contains an explicit refuse-if-judgment clause" {
+  bd="$(body "$SIDEKICK_SRC")"
+  echo "$bd" | grep -qiE 'refuse'
+  echo "$bd" | grep -qiE 'judg?e?ment'
+  echo "$bd" | grep -qiE 'hand.?back'
+}
+
+@test "sidekick body: contains a forbidden-actions list (git/CI/migrations/deploys/test-assertions/design)" {
+  bd="$(body "$SIDEKICK_SRC")"
+  echo "$bd" | grep -qiE 'forbidden'
+  echo "$bd" | grep -qiE '\bgit\b'
+  echo "$bd" | grep -qiE '\bCI\b|CI/CD|continuous integration'
+  echo "$bd" | grep -qiE 'migration'
+  echo "$bd" | grep -qiE 'deploy'
+  echo "$bd" | grep -qiE 'test assertion'
+  echo "$bd" | grep -qiE 'design|architecture'
+}
+
+@test "sidekick body: no-Bash reminder — the parent runs tools, sidekick applies edits" {
+  bd="$(body "$SIDEKICK_SRC")"
+  echo "$bd" | grep -qiE '\bBash\b'
+  echo "$bd" | grep -qiE 'parent (runs|run)'
+}
+
+@test "sidekick body: hand-back-for-review note (parent vets/accepts output)" {
+  bd="$(body "$SIDEKICK_SRC")"
+  echo "$bd" | grep -qiE 'review'
+  echo "$bd" | grep -qiE 'vet|accept'
+}
+
+@test "sidekick body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
+  bd="$(body "$SIDEKICK_SRC")"
+  ! echo "$bd" | grep -qF '@@ANW|'
 }
 
 # ---------------------------------------------------------------------------
