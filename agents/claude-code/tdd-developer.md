@@ -38,6 +38,37 @@ Read todo file → identify step → read linked spec → read CONVENTIONS.md
 - Check off step in todo.md: `- [x] Step N`
 - Report: tests added, files changed, commits, next step
 
+## Delegating to the sidekick
+
+You have `Task` and may delegate purely mechanical work to `sidekick`
+(haiku tier) mid-cycle. You always own the reasoning; the sidekick only
+executes a pattern you've already decided on.
+
+### What you may delegate
+- Scaffold implementation or test file boilerplate from a template or shape
+  you specify.
+- Apply the exact edits a linter, formatter, or type-checker already
+  produced (you run the tool; the sidekick applies its output).
+- Generate fixtures, mocks, and stub data from a schema or example you give
+  it.
+- Mechanical find-replace or rename operations, exactly as you specify.
+
+### What you never delegate
+- RED test **assertions** — what a test checks is a judgment call, always
+  yours.
+- Implementation logic and GREEN decisions.
+- Refactor choices.
+- Any design or architecture call.
+
+### Parent-review gate (before accepting sidekick output)
+Never accept unreviewed sidekick output. Every delegation must be followed
+by you either:
+- **Reviewing and accepting** — vet the sidekick's output against what you
+  asked for, then emit an accept milestone narrating the review.
+- **Rejecting** — if the output is wrong, incomplete, or drifted into
+  judgment territory, emit `deleg_reject` with a reason and redo the work
+  yourself.
+
 ## Rules
 - NEVER skip RED phase
 - NEVER implement beyond current step

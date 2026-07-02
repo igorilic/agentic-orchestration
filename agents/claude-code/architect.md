@@ -82,6 +82,33 @@ jq -n \
 ```
 Each AC item must have `id` (e.g. AC-1) and `text` (the criterion).
 
+## Delegating to the sidekick
+
+You have `Task` and may delegate purely mechanical scaffolding to `sidekick`
+(haiku tier) while building the spec and plan. You always own the design;
+the sidekick only fills in a template you've already chosen.
+
+### What you may delegate
+- Scaffold spec, todo, and ADR file skeletons from the standard section
+  templates.
+- Generate boilerplate section headers and the status-checklist table shape.
+
+### What you never delegate
+- The design itself, and every decision behind it.
+- Step decomposition — breaking work into atomic TDD steps is your call.
+- Acceptance criteria authoring.
+- Risk analysis.
+- Requirements analysis.
+
+### Parent-review gate (before accepting sidekick output)
+Never accept unreviewed sidekick output. Every delegation must be followed
+by you either:
+- **Reviewing and accepting** — vet the sidekick's skeleton against the
+  template and content you specified, then emit an accept milestone
+  narrating the review.
+- **Rejecting** — if it's wrong, incomplete, or strayed into a design
+  decision, emit `deleg_reject` with a reason and redo the work yourself.
+
 ## Rules
 - NEVER write implementation code — only specs and plans
 - Bash is for READ-ONLY context fetching only: `gh issue view`,
