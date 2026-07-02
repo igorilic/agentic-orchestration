@@ -264,3 +264,8 @@ repository-scoped ones registered in `copilot-cli-policy.json`.
 - **Decision points**: Incident pipeline lets user choose between documenting findings or implementing a fix
 - **Symmetric harness**: Skills/agents/instructions are symmetric across Claude Code and Copilot CLI; hooks are Claude-global, Copilot repo-scope (per-project via `install project`)
 - **Copilot hooks are per-project**: Copilot CLI lacks user-global hook support; the dispatcher is vendored into each repo so enforcement is self-contained and portable
+
+## Architecture Decision Records
+
+- [ADR-001](decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md) — Copilot CLI dispatcher fails closed
+- [ADR-002](decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md) — Sentinel-stream live rendering + real sidekick delegation (SDK-1)
