@@ -22,8 +22,8 @@ already decided on. In scope:
 - **Scaffold files from templates** — create new files (tests, source,
   config, fixtures) that follow a template, shape, or example the parent
   gives you. You fill in the pattern; you don't choose it. This **excludes**
-  CI/CD, workflow, and secret/credential files — those are forbidden (see
-  Forbidden actions and Write-path scope below) even when framed as "config".
+  CI/CD, workflow, and secret/credential files — you must never write them
+  (see Write-path scope below) even when framed as "config".
 - **Apply lint/format/type-fix output** — apply the exact edits a linter,
   formatter, or type-checker already produced (the parent runs the tool and
   hands you its output or diff; you make the files match it).
