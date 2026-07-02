@@ -184,6 +184,23 @@ assert_forbidden_section() {
   echo "$sec" | grep -qiE 'design|architecture'
 }
 
+assert_write_path_section() {
+  local sec="$1"
+  echo "$sec" | grep -qiE '\.git/' &&
+  echo "$sec" | grep -qiE '\.github/workflows|CI/CD|workflow' &&
+  echo "$sec" | grep -qiE '\.env|secret|credential' &&
+  echo "$sec" | grep -qiE 'refuse' &&
+  echo "$sec" | grep -qiE 'explicitly named'
+}
+
+assert_no_overwrite_section() {
+  local sec="$1"
+  echo "$sec" | grep -qiE 'overwrite' &&
+  echo "$sec" | grep -qiE 'truncate|delete' &&
+  echo "$sec" | grep -qiE 'explicitly named' &&
+  echo "$sec" | grep -qiE 'scaffold'
+}
+
 # Assert a `tools:` line (e.g. "tools: Read, Write, Edit, Glob, Grep") is a
 # set-equals match against the exact five-tool whitelist, order-independent.
 # This is a positive whitelist check (not a Bash/Task blacklist): anything
@@ -237,6 +254,7 @@ assert_tools_whitelist() {
 
 @test "sidekick body: allowlist config bullet carves out CI/CD, workflow, and secret files (F3)" {
   sec="$(section "$SIDEKICK_SRC" "Mechanical-only allowlist")"
+  [ -n "$sec" ]
   echo "$sec" | grep -qiE '\bconfig\b'
   echo "$sec" | grep -qiE 'exclud'
   echo "$sec" | grep -qiE 'CI/CD|workflow'
@@ -258,20 +276,13 @@ assert_tools_whitelist() {
 @test "sidekick body: write-path scope refuses .git internals, CI/CD/workflow files, and secret files (F2)" {
   sec="$(section "$SIDEKICK_SRC" "Write-path scope")"
   [ -n "$sec" ]
-  echo "$sec" | grep -qiE '\.git/'
-  echo "$sec" | grep -qiE '\.github/workflows|CI/CD|workflow'
-  echo "$sec" | grep -qiE '\.env|secret|credential'
-  echo "$sec" | grep -qiE 'refuse'
-  echo "$sec" | grep -qiE 'explicitly named'
+  assert_write_path_section "$sec"
 }
 
 @test "sidekick body: no-destructive-overwrite guard on existing file contents (F4)" {
   sec="$(section "$SIDEKICK_SRC" "No destructive overwrites")"
   [ -n "$sec" ]
-  echo "$sec" | grep -qiE 'overwrite'
-  echo "$sec" | grep -qiE 'truncate|delete'
-  echo "$sec" | grep -qiE 'explicitly named'
-  echo "$sec" | grep -qiE 'scaffold'
+  assert_no_overwrite_section "$sec"
 }
 
 @test "sidekick body: no-Bash reminder — the parent runs tools, sidekick applies edits (scoped)" {
@@ -375,6 +386,26 @@ EOF
   gut_section "$SIDEKICK_SRC" "Mechanical-only allowlist" > "$mutant"
   sec="$(section "$mutant" "Mechanical-only allowlist")"
   run assert_allowlist_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "sidekick body: hardened write-path-scope check rejects a gutted Write-path scope section (heading kept, prose removed)" {
+  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant="$mutant_dir/sidekick.md"
+  gut_section "$SIDEKICK_SRC" "Write-path scope" > "$mutant"
+  sec="$(section "$mutant" "Write-path scope")"
+  run assert_write_path_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "sidekick body: hardened no-destructive-overwrite check rejects a gutted No destructive overwrites section (heading kept, prose removed)" {
+  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant="$mutant_dir/sidekick.md"
+  gut_section "$SIDEKICK_SRC" "No destructive overwrites" > "$mutant"
+  sec="$(section "$mutant" "No destructive overwrites")"
+  run assert_no_overwrite_section "$sec"
   rm -rf "$mutant_dir"
   [ "$status" -ne 0 ]
 }
