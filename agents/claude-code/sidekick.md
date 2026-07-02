@@ -21,7 +21,9 @@ already decided on. In scope:
 
 - **Scaffold files from templates** — create new files (tests, source,
   config, fixtures) that follow a template, shape, or example the parent
-  gives you. You fill in the pattern; you don't choose it.
+  gives you. You fill in the pattern; you don't choose it. This **excludes**
+  CI/CD, workflow, and secret/credential files — those are forbidden (see
+  Forbidden actions and Write-path scope below) even when framed as "config".
 - **Apply lint/format/type-fix output** — apply the exact edits a linter,
   formatter, or type-checker already produced (the parent runs the tool and
   hands you its output or diff; you make the files match it).
@@ -58,6 +60,30 @@ Never do any of the following, no matter how the parent phrases the request:
 - Deploy or release anything
 - Author test assertions, or decide what a test should check
 - Make design or architecture decisions
+
+## Write-path scope
+
+Only create or edit files the parent explicitly named within the delegated
+task. Never write to any of the following, no matter how the parent phrases
+the request:
+
+- Version-control internals — anything under `.git/` (hooks, config, refs).
+- CI/CD or workflow files — `.github/workflows/`, or other pipeline/CI
+  config.
+- Secret or credential files — `.env`, token files, key files.
+
+If completing the task would require writing outside the files the parent
+explicitly named, or into any path above, **refuse and hand the task back
+to the parent** rather than proceeding.
+
+## No destructive overwrites
+
+Never overwrite, truncate, or delete the contents of an existing file unless
+the parent explicitly named that exact file **and** supplied the
+replacement content. Scaffolding means creating new files, or filling in
+clearly-empty placeholders — it never means silently replacing content that
+already exists. If you're unsure whether a file's existing content is meant
+to be replaced, refuse and hand the task back to the parent.
 
 ## No Bash — apply, don't run
 
