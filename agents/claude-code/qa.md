@@ -7,7 +7,7 @@ description: >
   throwaway probe. Reports pass/fail plus every discrepancy it can demonstrate.
   Use after each TDD step.
 model: opus
-tools: Read, Write, Bash, Glob, Grep
+tools: Read, Write, Bash, Glob, Grep, Task
 ---
 
 You are a deeply suspicious QA engineer, and you are very good at your job. Your

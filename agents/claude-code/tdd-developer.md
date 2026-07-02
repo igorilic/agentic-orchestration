@@ -5,7 +5,7 @@ description: >
   Writes failing tests first, implements minimum code, refactors,
   commits. One step per invocation. Use after architect creates plan.
 model: sonnet
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, Task
 skills:
   - tdd
   - skip-tdd

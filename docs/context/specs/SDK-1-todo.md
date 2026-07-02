@@ -187,7 +187,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 
 - [x] A-1  Sidekick skeleton + Task dispatch smoke GATE — **GO** (smoke test passed: smoke-parent→Task→sidekick created hello.txt; verified 2026-07-01)
 - [x] A-2  Sidekick mechanical-only prompt body
-- [ ] A-3  Task tool on the 3 heavy agents
+- [x] A-3  Task tool on the 3 heavy agents
 - [ ] A-4  Per-agent allowlist + parent-review gate
 - [ ] A-5  Sentinel-emission contract (redacted prefix)
 - [ ] B-1  Port renderer → lib/render-stream.sh + golden

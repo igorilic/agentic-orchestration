@@ -5,7 +5,7 @@ description: >
   Use when starting any new feature, ticket, bug fix, or improvement.
   Must run BEFORE any code is written.
 model: opus
-tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch
+tools: Read, Write, Edit, Bash, Glob, Grep, WebSearch, WebFetch, Task
 skills:
   - ticket
   - adr
