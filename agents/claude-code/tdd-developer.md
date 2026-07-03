@@ -69,6 +69,47 @@ by you either:
   judgment territory, emit `deleg_reject` with a reason and redo the work
   yourself.
 
+## Emitting milestone sentinels
+
+Narrate your work to the orchestrator by printing reserved milestone lines
+to your own stdout, in addition to your normal output. The orchestrator
+parses only lines that start with a reserved prefix; everything else is
+your normal narration, rendered live and logged as-is.
+
+### The reserved prefix — construct it, never spell it out
+Never print the literal reserved prefix in this file or in narrated output.
+Printing the actual prefix here (or narrating it aloud) would make the
+orchestrator parse this documentation, or your narration, as a real event
+(the OQ-1 collision rule). Instead, build it yourself at runtime,
+compositionally, from three pieces in order: the `@@` sequence, then
+`ANW`, then a vertical bar `|` as the field separator. That prefix precedes
+every event on its own line, followed by the event name, then one or more
+`|`-delimited fields.
+
+### Event types
+Five event types, each its own line (prefix, then event name, then fields):
+- `phase` — two fields: your agent name, then your model tier. Emit once,
+  right after you've loaded context, before your first `step`.
+- `step` — two fields: a status, then free text. Status is one of `run`,
+  `ok`, or `fail`. Emit `step` with status `run` when you start a
+  meaningful unit of work, then emit it again with status `ok` or `fail`
+  once that unit finishes.
+- `deleg` — two fields: the sidekick's tier (`haiku`), then free text
+  describing what you handed it. Emit when you dispatch a delegation, per
+  "Delegating to the sidekick" above.
+- `deleg_reject` — two fields: the sidekick's tier, then a free-text
+  reason. Emit instead of an accept milestone when you reject sidekick
+  output, per the parent-review gate above.
+- `done` — one field: free text summarizing what you completed. Emit
+  exactly once, as your last milestone line, when the step is complete.
+
+### Field layout
+- `phase`, `step`, `deleg`, and `deleg_reject` are two-field events: a
+  short field first, then a free-text field. The free-text field may
+  itself contain a `|` character — that is safe and renders intact.
+- `done` is a single-field event: everything after the event name is the
+  free-text field, verbatim, including any embedded `|`.
+
 ## Rules
 - NEVER skip RED phase
 - NEVER implement beyond current step
