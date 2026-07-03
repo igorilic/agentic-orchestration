@@ -8,11 +8,12 @@
   - Todo: `docs/context/specs/SDK-1-todo.md`
   - ADR: `docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md`
   - Spike (de-risked): `spikes/sdk-1-renderer/FINDINGS.md`
-  - Phase: in progress — A-1 done (gate GO, smoke-tested), A-2 done (contract hardened via qa+reviewer)
-  - Steps: 2 / 14 (Track A: 5 · Track B: 9). A-1 GO/NO-GO gate passed; B depends on A.
+  - Phase: in progress — A-1 done (gate GO, smoke-tested), A-2 done (contract hardened via qa+reviewer), A-4 done (delegation allowlist + review gate, tests hardened for polarity via qa+reviewer fix loop)
+  - Steps: 4 / 14 (Track A: 5 · Track B: 9). A-1 GO/NO-GO gate passed; B depends on A.
   - Driver: tdd-developer
   - Scope: GitHub/Claude pipeline only; GitLab/Copilot, replay, whitepaper figure, hard review-gate deferred
-  - Tech debt (deferred from A-2 qa/reviewer): F5 — tighten sidekick "apply lint/format/type-fix output" wording (type-checkers emit diagnostics, not edits); F6 — add sidekick warning against reading/echoing secret file contents
+  - Tech debt (deferred from A-2 qa/reviewer): F5 — tighten "apply lint/format/type-fix output" wording in BOTH `sidekick.md` and `tdd-developer.md:50` (type-checkers emit diagnostics, not edits — the imprecise phrasing was propagated from sidekick's allowlist into tdd-developer's own allowlist bullet); F6 — add sidekick warning against reading/echoing secret file contents
+  - Tech debt (deferred from A-4 qa/reviewer fix loop): F2 — the 3 heavy agents' delegation allowlists (OQ-3) aren't carved against the sidekick's forbidden write-paths (OQ-6) — a parent can delegate a task the sidekick is contractually bound to refuse (e.g. scaffold a CI workflow, a `.git`-touching rename). Not a security hole (the sidekick's own refusal is the safety net), but a spec-coherence gap → architect/spec follow-up; F3 — the parent-review-gate clause names accept/reject of *produced* sidekick output but not the sidekick *refusal-with-no-artifact* path → OQ-4/A-5/orchestrator follow-up
 
 - **COP-2** — Install Copilot CLI hooks per-project (TDD + confidence gates)
   - Requirements: `docs/context/specs/COP-2-requirements.md`
