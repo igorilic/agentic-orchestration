@@ -60,6 +60,36 @@
 #     gate's governing sentence replaced with an inverted decoy that still
 #     contains every token the OLD checks looked for) and a regression test
 #     per agent asserts the hardened checks reject it.
+#
+# SDK-1 Step A-5: sentinel-emission contract (spec OQ-1, the frozen sentinel
+# grammar). Each of the 3 MVP heavy agents' BODY must carry a `## Emitting
+# milestone sentinels` section documenting the five event types (`phase`,
+# `step`, `deleg`, `deleg_reject`, `done`) and the `run|ok|fail` step
+# statuses, using the compositional/redacted-prefix convention the spec's
+# OQ-1 decision requires: the literal `@@ANW|` token must never appear
+# anywhere in the file (a printed literal would self-trigger a fake event
+# when the orchestrator parses this agent's own stdout). Applies the A-4
+# lessons proactively:
+#   - Every assertion is scoped to the new section via the SAME
+#     section()/gut_section() awk-slicer helpers A-4 already defined (no
+#     re-definition), so content in another section (e.g. the Delegating
+#     section's allowlist) can never satisfy a sentinel-grammar assertion.
+#   - A gutted-section mutation guard (heading kept, content removed) per
+#     agent, reusing gut_section() verbatim.
+#   - A polarity-inversion mutation guard per agent: OQ-1's redaction rule
+#     ("never print the literal prefix") is the may/never aspect here,
+#     mirroring A-4 F1's review-gate anchor. The check is anchored on the
+#     exact governing sentence (`SENTINEL_REDACTION_SENTENCE`), not
+#     independent "never"/"literal"/"prefix" tokens, so a mutant that flips
+#     the rule to "you may print it" while leaving the five event-type
+#     keywords intact elsewhere in the section (which a presence-only check
+#     would still accept) is correctly rejected.
+#   - The OQ-1 collision rule itself — no literal `@@ANW|` substring
+#     anywhere in the body — is asserted per agent, mirroring
+#     tests/sidekick-agent.bats's "sidekick body: contains no literal
+#     sentinel prefix" test verbatim (same `body()` scope, same `grep -qF`).
+#   - reviewer.md / requirements-engineer.md are asserted to gain NO
+#     sentinel-emission section, mirroring A-4's no-Delegating-section guard.
 
 AGENTS_DIR="$BATS_TEST_DIRNAME/../agents/claude-code"
 
@@ -529,6 +559,198 @@ EOF
   rm -rf "$mutant_dir"
   [ "$allowlist_status" -ne 0 ]
   [ "$gate_status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Step A-5: sentinel-emission contract (spec OQ-1, frozen sentinel grammar).
+# Scoped via the SAME section()/gut_section() helpers A-4 defined above.
+# ---------------------------------------------------------------------------
+
+SENTINEL_HEADING="Emitting milestone sentinels"
+
+# The exact governing sentence every agent's redaction clause must contain,
+# verbatim (mirrors A-4's anchor on "Never accept unreviewed sidekick
+# output."). Anchoring on the full sentence — not independent "never" /
+# "literal" / "prefix" tokens — closes the same polarity-inversion bypass
+# A-4's F1 fix closed for the review-gate clause: a mutant that flips the
+# rule to "you may print the literal prefix" but leaves the individual
+# grammar keywords (phase/step/deleg/deleg_reject/done/run/ok/fail) intact
+# elsewhere in the section would still fool a presence-only check.
+SENTINEL_REDACTION_SENTENCE="Never print the literal reserved prefix in this file or in narrated output."
+
+# Assert the section documents all five event types and the three step
+# statuses. Presence-only by design (mirrors assert_section_contains_all
+# usage elsewhere in this file); the redaction-clause anchor below is what
+# specifically guards the may/never polarity.
+assert_sentinel_section() {
+  local sec="$1"
+  assert_section_contains_all "$sec" \
+    '\bphase\b' '\bstep\b' '\bdeleg\b' '\bdeleg_reject\b' '\bdone\b' \
+    '\brun\b' '\bok\b' '\bfail\b'
+}
+
+# Assert the section's redaction rule is the exact governing sentence
+# (fixed-string match), not a "never"/"literal" keyword soup a
+# polarity-inverted mutant could still satisfy.
+assert_sentinel_redaction_clause() {
+  local sec="$1"
+  echo "$sec" | grep -qF "$SENTINEL_REDACTION_SENTENCE"
+}
+
+# Build a mutant copy of $1 with ONLY the governing redaction sentence
+# flipped to its polarity-inverted opposite — grammar keywords elsewhere in
+# the section are left untouched, so a presence-only check on the five
+# event types would still pass on this mutant; only the anchored
+# redaction-clause check must reject it.
+invert_sentinel_mutant() {
+  local src="$1" dst="$2"
+  awk -v old="$SENTINEL_REDACTION_SENTENCE" \
+      -v new="You may print the literal reserved prefix directly in this file or in narrated output whenever it helps illustrate the grammar." '
+    index($0, old) { sub(old, new); print; next }
+    { print }
+  ' "$src" > "$dst"
+}
+
+# --- Sentinel grammar section exists + documents the frozen grammar -------
+
+@test "tdd-developer body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
+  sec="$(section "$TDD_DEVELOPER" "$SENTINEL_HEADING")"
+  [ -n "$sec" ]
+  assert_sentinel_section "$sec"
+  assert_sentinel_redaction_clause "$sec"
+}
+
+@test "qa body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
+  sec="$(section "$QA" "$SENTINEL_HEADING")"
+  [ -n "$sec" ]
+  assert_sentinel_section "$sec"
+  assert_sentinel_redaction_clause "$sec"
+}
+
+@test "architect body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
+  sec="$(section "$ARCHITECT" "$SENTINEL_HEADING")"
+  [ -n "$sec" ]
+  assert_sentinel_section "$sec"
+  assert_sentinel_redaction_clause "$sec"
+}
+
+# --- No sentinel-emission section outside the 3 MVP heavy agents ----------
+
+@test "reviewer body: no Emitting milestone sentinels section (sentinel emission not granted)" {
+  sec="$(section "$REVIEWER" "$SENTINEL_HEADING")"
+  [ -z "$sec" ]
+}
+
+@test "requirements-engineer body: no Emitting milestone sentinels section (sentinel emission not granted)" {
+  sec="$(section "$REQUIREMENTS_ENGINEER" "$SENTINEL_HEADING")"
+  [ -z "$sec" ]
+}
+
+# ---------------------------------------------------------------------------
+# Collision rule (OQ-1): no literal sentinel prefix anywhere in the body of
+# any of the 3 agent files. Mirrors tests/sidekick-agent.bats's "sidekick
+# body: contains no literal sentinel prefix" test verbatim (same body()
+# scope, same grep -qF).
+# ---------------------------------------------------------------------------
+
+@test "tdd-developer body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
+  bd="$(body "$TDD_DEVELOPER")"
+  ! echo "$bd" | grep -qF '@@ANW|'
+}
+
+@test "qa body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
+  bd="$(body "$QA")"
+  ! echo "$bd" | grep -qF '@@ANW|'
+}
+
+@test "architect body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
+  bd="$(body "$ARCHITECT")"
+  ! echo "$bd" | grep -qF '@@ANW|'
+}
+
+# ---------------------------------------------------------------------------
+# Mutation guards: gutted section (heading kept, content removed). Reuses
+# gut_section() verbatim from the A-4 helpers above.
+# ---------------------------------------------------------------------------
+
+@test "tdd-developer: hardened sentinel-grammar check rejects a gutted Emitting milestone sentinels section" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/tdd-developer.md"
+  gut_section "$TDD_DEVELOPER" "$SENTINEL_HEADING" > "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "qa: hardened sentinel-grammar check rejects a gutted Emitting milestone sentinels section" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/qa.md"
+  gut_section "$QA" "$SENTINEL_HEADING" > "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "architect: hardened sentinel-grammar check rejects a gutted Emitting milestone sentinels section" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/architect.md"
+  gut_section "$ARCHITECT" "$SENTINEL_HEADING" > "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Mutation guards: polarity-inverted redaction clause. Grammar keywords
+# elsewhere in the section are left untouched by invert_sentinel_mutant(),
+# so only the anchored redaction-clause check may catch it (the A-4 F1
+# lesson applied to OQ-1's may/never rule) — the grammar_status assertion
+# below proves a presence-only check would have been fooled.
+# ---------------------------------------------------------------------------
+
+@test "tdd-developer: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/tdd-developer.md"
+  invert_sentinel_mutant "$TDD_DEVELOPER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_redaction_clause "$sec"
+  redaction_status="$status"
+  run assert_sentinel_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$redaction_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+@test "qa: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/qa.md"
+  invert_sentinel_mutant "$QA" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_redaction_clause "$sec"
+  redaction_status="$status"
+  run assert_sentinel_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$redaction_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+@test "architect: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/architect.md"
+  invert_sentinel_mutant "$ARCHITECT" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_redaction_clause "$sec"
+  redaction_status="$status"
+  run assert_sentinel_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$redaction_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
 }
 
 # ---------------------------------------------------------------------------
