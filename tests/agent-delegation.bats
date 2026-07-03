@@ -236,53 +236,61 @@ invert_delegation_mutant() {
 # asserts every allowlist item from the spec's OQ-3 table is present WITHIN
 # it, plus at least one item the agent explicitly keeps (never delegates).
 
+# A-4 F1: each check is now scoped to its OWN `### ` sub-list via
+# subsection() — the allowlist-keyword patterns run ONLY against "What you
+# may delegate", and the forbidden-keyword patterns ONLY against "What you
+# never delegate" — so an inverted mutant (keywords present but under the
+# wrong heading) fails, where the old whole-section flat grep passed.
+
 assert_tdd_developer_allowlist() {
-  local sec="$1"
-  echo "$sec" | grep -qiE 'scaffold' &&
-  echo "$sec" | grep -qiE 'boilerplate|template' &&
-  echo "$sec" | grep -qiE 'lint|format|type-fix' &&
-  echo "$sec" | grep -qiE 'fixture' &&
-  echo "$sec" | grep -qiE 'mock' &&
-  echo "$sec" | grep -qiE 'find-replace|find/replace|find and replace' &&
-  echo "$sec" | grep -qiE 'assertion' &&
-  echo "$sec" | grep -qiE 'refactor'
+  local sec="$1" may never
+  may="$(subsection "$sec" "What you may delegate")"
+  never="$(subsection "$sec" "What you never delegate")"
+  assert_section_contains_all "$may" \
+    'scaffold' 'boilerplate|template' 'lint|format|type-fix' 'fixture' \
+    'mock' 'find-replace|find/replace|find and replace' &&
+  assert_section_contains_all "$never" 'assertion' 'refactor'
 }
 
 assert_qa_allowlist() {
-  local sec="$1"
-  echo "$sec" | grep -qiE 'probe' &&
-  echo "$sec" | grep -qiE 'skeleton' &&
-  echo "$sec" | grep -qiE 'boundary' &&
-  echo "$sec" | grep -qiE 'test.data|test-data' &&
-  echo "$sec" | grep -qiE 'pass.fail|pass/fail' &&
-  echo "$sec" | grep -qiE 'security'
+  local sec="$1" may never
+  may="$(subsection "$sec" "What you may delegate")"
+  never="$(subsection "$sec" "What you never delegate")"
+  assert_section_contains_all "$may" \
+    'probe' 'skeleton' 'boundary' 'test.data|test-data' &&
+  assert_section_contains_all "$never" 'pass.fail|pass/fail' 'security'
 }
 
 assert_architect_allowlist() {
-  local sec="$1"
-  echo "$sec" | grep -qiE 'scaffold' &&
-  echo "$sec" | grep -qiE 'spec' &&
-  echo "$sec" | grep -qiE 'todo' &&
-  echo "$sec" | grep -qiE 'ADR' &&
-  echo "$sec" | grep -qiE 'skeleton|template' &&
-  echo "$sec" | grep -qiE 'status.checklist|status-checklist' &&
-  echo "$sec" | grep -qiE 'design' &&
-  echo "$sec" | grep -qiE 'requirements'
+  local sec="$1" may never
+  may="$(subsection "$sec" "What you may delegate")"
+  never="$(subsection "$sec" "What you never delegate")"
+  assert_section_contains_all "$may" \
+    'scaffold' 'spec' 'todo' 'ADR' 'skeleton|template' \
+    'status.checklist|status-checklist' &&
+  assert_section_contains_all "$never" 'design' 'requirements'
 }
 
 # --- Parent-review-gate assertion (OQ-4, soft prompt-level contract) ------
 # Same clause shape is required in all 3 agents' own sections: vet before
 # accepting, emit an accept milestone on accept, emit deleg_reject + redo on
 # reject, never accept unreviewed output.
+#
+# A-4 F1: scoped to the "Parent-review gate" sub-list (not the whole
+# Delegating section) AND anchored on the literal governing sentence "Never
+# accept unreviewed sidekick output." (verbatim in all 3 agent files)
+# instead of independent `vet` / `never accept` tokens — a mutant that
+# rewrites the gate to "always accept, no vetting" behind an unrelated
+# decoy "never accept" substring elsewhere in the section no longer fools
+# this check, because the exact governing sentence itself must be intact.
 
 assert_review_gate_section() {
-  local sec="$1"
-  echo "$sec" | grep -qiE 'vet' &&
-  echo "$sec" | grep -qiE 'before accepting' &&
-  echo "$sec" | grep -qiE 'accept milestone' &&
-  echo "$sec" | grep -qiE 'deleg_reject' &&
-  echo "$sec" | grep -qiE 'redo' &&
-  echo "$sec" | grep -qiE 'never accept'
+  local sec="$1" gate
+  gate="$(subsection "$sec" "Parent-review gate (before accepting sidekick output)")"
+  [ -n "$gate" ] || return 1
+  assert_section_contains_all "$gate" \
+    'Never accept unreviewed sidekick output\.' \
+    'accept milestone' 'deleg_reject' 'redo'
 }
 
 # ---------------------------------------------------------------------------
