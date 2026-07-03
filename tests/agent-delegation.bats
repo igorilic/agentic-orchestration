@@ -34,6 +34,32 @@
 # kept, content removed) and asserts the scoped check rejects it.
 # reviewer.md and requirements-engineer.md are asserted to gain NO
 # delegation section — delegation stays scoped to the 3 MVP agents.
+#
+# A-4 fix loop (F1 — polarity, not just presence): qa + reviewer both proved
+# the section()-scoped assertions above pin keyword *presence* within the
+# `## Delegating to the sidekick` section, not *polarity* — a fully
+# polarity-inverted section (allowlist items relabeled "never delegate";
+# forbidden items promoted to "may delegate"; the gate rewritten to "always
+# accept, no vetting" while keeping a decoy "never accept" substring
+# elsewhere) satisfies every one of the old flat `&&`-chains because all the
+# required keywords are still present SOMEWHERE in the section — just under
+# the wrong heading. Hardening:
+#   - `subsection()`: a second-level awk slicer (mirrors section(), one
+#     `### ` boundary down) so allowlist assertions can be scoped to
+#     exactly the "What you may delegate" / "What you never delegate"
+#     sub-list, and the gate assertion to exactly the "Parent-review gate"
+#     sub-list — never a sibling sub-list within the same `## ` section.
+#   - `assert_section_contains_all()`: the shared helper the 4 near-identical
+#     `&&`-chains now funnel through (allowlist × 3 agents + the gate).
+#   - The gate check is additionally anchored on the literal sentence
+#     "Never accept unreviewed sidekick output." (verbatim in all 3 files)
+#     instead of independent `vet` / `never accept` tokens an inverted
+#     mutant can satisfy via an unrelated decoy sentence.
+#   - `invert_delegation_mutant()`: builds a full polarity-inverted copy of
+#     a real agent file (may/never sub-list bodies swapped, heading kept;
+#     gate's governing sentence replaced with an inverted decoy that still
+#     contains every token the OLD checks looked for) and a regression test
+#     per agent asserts the hardened checks reject it.
 
 AGENTS_DIR="$BATS_TEST_DIRNAME/../agents/claude-code"
 
@@ -119,6 +145,90 @@ gut_section() {
     skip { next }
     { print }
   ' "$src"
+}
+
+# Extract one `### <heading>` sub-section from a `## `-section's TEXT (as
+# produced by section()): the heading line itself plus every line up to
+# (not including) the next `### ` heading. Mirrors section()'s slicing
+# logic one level down, so an assertion can be scoped to e.g. the "What you
+# may delegate" sub-list without also matching "What you never delegate" or
+# the Parent-review-gate clause living in the SAME `## ` section (the A-4 F1
+# fix: presence-only assertions couldn't tell which sub-list a keyword was
+# actually under).
+subsection() {
+  local text="$1" want="### $2"
+  awk -v want="$want" '
+    /^### / {
+      if ($0 == want) { infield=1 } else { infield=0 }
+      if (infield) print
+      next
+    }
+    infield { print }
+  ' <<<"$text"
+}
+
+# Assert every regex pattern in $2.. is found (grep -qiE, ANDed) within
+# text $1. The shared home for the 4 near-identical `&&`-chains below
+# (3 per-agent allowlists + the review-gate clause).
+assert_section_contains_all() {
+  local text="$1"
+  shift
+  local pattern
+  for pattern in "$@"; do
+    echo "$text" | grep -qiE "$pattern" || return 1
+  done
+  return 0
+}
+
+# Build a full mutant copy of $1 with its `## Delegating to the sidekick`
+# section polarity-inverted, writing the result to $2. Reproduces the A-4 F1
+# counter-example qa/reviewer found: the "What you may delegate" and "What
+# you never delegate" sub-list BODY content is swapped (headings stay put,
+# so every allowlist item ends up mislabeled under the wrong heading), and
+# the gate's literal governing sentence ("Never accept unreviewed sidekick
+# output.") is replaced with an inverted "always accept, no vetting" decoy
+# that still contains every individual keyword the OLD flat checks looked
+# for (vet, accept milestone, deleg_reject, redo, and a decoy "never
+# accept" substring) — so the mutant fools presence-only checks while being
+# semantically inverted.
+invert_delegation_mutant() {
+  local src="$1" dst="$2" sec may never may_file never_file
+  sec="$(section "$src" "$DELEGATION_HEADING")"
+  may="$(subsection "$sec" "What you may delegate")"
+  never="$(subsection "$sec" "What you never delegate")"
+  may_file="$(mktemp /tmp/aw-agent-delegation-may-XXXXXX)"
+  never_file="$(mktemp /tmp/aw-agent-delegation-never-XXXXXX)"
+  printf '%s\n' "$may" | tail -n +2 > "$may_file"
+  printf '%s\n' "$never" | tail -n +2 > "$never_file"
+  # Bodies are injected via getline-from-file (not an awk -v string) because
+  # macOS's /usr/bin/awk (BWK awk, not gawk) rejects embedded newlines in a
+  # -v value ("newline in string").
+  awk -v may_hdr="### What you may delegate" \
+      -v never_hdr="### What you never delegate" \
+      -v never_file="$never_file" \
+      -v may_file="$may_file" \
+      -v gate_old="Never accept unreviewed sidekick output." \
+      -v gate_new="Always accept unreviewed sidekick output without vetting — you never accept delays." '
+    $0 == may_hdr {
+      print
+      while ((getline line < never_file) > 0) print line
+      close(never_file)
+      skip=1
+      next
+    }
+    $0 == never_hdr {
+      print
+      while ((getline line < may_file) > 0) print line
+      close(may_file)
+      skip=1
+      next
+    }
+    /^### / || /^## / { skip=0 }
+    skip { next }
+    index($0, gate_old) { sub(gate_old, gate_new); print; next }
+    { print }
+  ' "$src" > "$dst"
+  rm -f "$may_file" "$never_file"
 }
 
 # --- Per-agent allowlist assertions (OQ-3: allowlist differs per agent) ----
@@ -350,6 +460,59 @@ EOF
   mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
   mutant="$mutant_dir/architect.md"
   gut_section "$ARCHITECT" "$DELEGATION_HEADING" > "$mutant"
+  sec="$(section "$mutant" "$DELEGATION_HEADING")"
+  run assert_architect_allowlist "$sec"
+  allowlist_status="$status"
+  run assert_review_gate_section "$sec"
+  gate_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$allowlist_status" -ne 0 ]
+  [ "$gate_status" -ne 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# Step A-4 fix loop (F1): inversion-mutant regression guards. A gutted
+# section (all content removed) is the A-2-style probe; a POLARITY-INVERTED
+# section (all keywords still present, just relabeled/flipped) is the
+# distinct F1 counter-example qa/reviewer found — presence-only checks are
+# fooled by it. Each test below builds the full inverted mutant via
+# invert_delegation_mutant() (real file, only the Delegating section
+# touched) and asserts the hardened, subsection-scoped/anchored checks
+# reject it for BOTH the allowlist and the review-gate clause.
+# ---------------------------------------------------------------------------
+
+@test "tdd-developer: hardened delegation checks reject a polarity-inverted Delegating section (may/never swapped, gate inverted)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/tdd-developer.md"
+  invert_delegation_mutant "$TDD_DEVELOPER" "$mutant"
+  sec="$(section "$mutant" "$DELEGATION_HEADING")"
+  run assert_tdd_developer_allowlist "$sec"
+  allowlist_status="$status"
+  run assert_review_gate_section "$sec"
+  gate_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$allowlist_status" -ne 0 ]
+  [ "$gate_status" -ne 0 ]
+}
+
+@test "qa: hardened delegation checks reject a polarity-inverted Delegating section (may/never swapped, gate inverted)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/qa.md"
+  invert_delegation_mutant "$QA" "$mutant"
+  sec="$(section "$mutant" "$DELEGATION_HEADING")"
+  run assert_qa_allowlist "$sec"
+  allowlist_status="$status"
+  run assert_review_gate_section "$sec"
+  gate_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$allowlist_status" -ne 0 ]
+  [ "$gate_status" -ne 0 ]
+}
+
+@test "architect: hardened delegation checks reject a polarity-inverted Delegating section (may/never swapped, gate inverted)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/architect.md"
+  invert_delegation_mutant "$ARCHITECT" "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
   run assert_architect_allowlist "$sec"
   allowlist_status="$status"
