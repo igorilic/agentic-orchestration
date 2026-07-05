@@ -90,6 +90,43 @@
 #     sentinel prefix" test verbatim (same `body()` scope, same `grep -qF`).
 #   - reviewer.md / requirements-engineer.md are asserted to gain NO
 #     sentinel-emission section, mirroring A-4's no-Delegating-section guard.
+#
+# SDK-1 Step A-6: full-pipeline narration + verdict producer (spec OQ-1
+# emission-scope matrix / AC-14). Closes the gap A-3..A-5 left: only the 3
+# delegating agents narrated, so the live view went dark during
+# `requirements-engineer`/`reviewer`, and `verdict` (parsed + rendered by
+# render.sh) had no producer. Emission scope != delegation scope:
+#   - `reviewer.md` and `requirements-engineer.md` each gain a NARRATION-ONLY
+#     `## Emitting milestone sentinels` section (phase/step/done + run/ok/
+#     fail only — no deleg/deleg_reject vocabulary, since neither agent
+#     delegates). Asserted via the NEW, narrower `assert_narration_section`/
+#     `assert_narration_field_order` helpers below — NOT
+#     `assert_sentinel_section`/`assert_sentinel_field_order`, which
+#     additionally require deleg/deleg_reject and stay scoped to the 3
+#     delegating agents.
+#   - This DELIBERATELY REVERSES the A-5 invariant that reviewer/
+#     requirements-engineer carry NO sentinel section — the two "no
+#     Emitting milestone sentinels section" tests are replaced by positive
+#     narration assertions. The "no Delegating to the sidekick section" and
+#     "no Task tool" tests for these two agents are KEPT UNCHANGED:
+#     narration is not delegation.
+#   - `qa.md`'s existing sentinel section is extended, and `reviewer.md`'s
+#     new section additionally documents, the `verdict|<band>|<score>` event
+#     (band ∈ GREEN|YELLOW|RED, band-before-score, matching
+#     render.sh:259-271) via the new `assert_verdict_clause` helper,
+#     field-order-anchored on `VERDICT_ORDER_PHRASE` (mirrors
+#     `STEP_ORDER_PHRASE`/`PHASE_ORDER_PHRASE`/`DELEG_REJECT_ORDER_PHRASE`).
+#     `architect.md`/`tdd-developer.md` are asserted to NOT document
+#     `verdict` (`assert_no_verdict`) — its producers are exactly qa +
+#     reviewer.
+#   - Every new/extended assertion reuses the established section-scoped,
+#     mutation-resistant conventions: `gut_section()` guards,
+#     `invert_sentinel_mutant()` polarity guards (extended to the two new
+#     narration sections), and `invert_field_order_mutant()` (extended to
+#     also flip the verdict band/score phrase — a no-op on files that don't
+#     document verdict). The `! grep -qF '@@ANW|'` body-wide collision guard
+#     is extended to reviewer.md/requirements-engineer.md, since both now
+#     document the grammar and carry the same self-trigger risk.
 
 AGENTS_DIR="$BATS_TEST_DIRNAME/../agents/claude-code"
 
@@ -663,6 +700,12 @@ assert_sentinel_field_order() {
 # two whole physical lines (not one -v string) because it straddles a
 # markdown hard-wrap and macOS's BWK awk rejects embedded newlines in a -v
 # value (same constraint invert_delegation_mutant() documents above).
+#
+# A-6 addition: also flips the `verdict` band/score order phrase
+# (VERDICT_ORDER_PHRASE). Files without a verdict clause (architect,
+# tdd-developer, requirements-engineer) simply never match verdict_old, so
+# this is a no-op there — the same helper is reused unmodified for qa's
+# extended section and reviewer's new section.
 invert_field_order_mutant() {
   local src="$1" dst="$2"
   awk -v phase_old="your agent name, then your model tier" \
@@ -672,11 +715,14 @@ invert_field_order_mutant() {
       -v deleg1_old="two fields: the sidekick's tier, then a free-text" \
       -v deleg1_new="two fields: a free-text reason, then the sidekick's tier." \
       -v deleg2_old="reason. Emit instead of an accept milestone when you reject sidekick" \
-      -v deleg2_new="Emit instead of an accept milestone when you reject sidekick" '
+      -v deleg2_new="Emit instead of an accept milestone when you reject sidekick" \
+      -v verdict_old="a band, then a free-text score" \
+      -v verdict_new="a free-text score, then a band" '
     index($0, phase_old)  { sub(phase_old, phase_new); print; next }
     index($0, step_old)   { sub(step_old, step_new); print; next }
     index($0, deleg1_old) { sub(deleg1_old, deleg1_new); print; next }
     index($0, deleg2_old) { sub(deleg2_old, deleg2_new); print; next }
+    index($0, verdict_old) { sub(verdict_old, verdict_new); print; next }
     { print }
   ' "$src" > "$dst"
 }
@@ -713,6 +759,71 @@ assert_sentinel_prefix_construction() {
   ! echo "$sec" | grep -qF '@@ANW|'
 }
 
+# ---------------------------------------------------------------------------
+# Step A-6: full-pipeline narration (spec OQ-1 emission-scope matrix / AC-14).
+# `reviewer` and `requirements-engineer` don't delegate (no `Task`, no
+# `## Delegating to the sidekick` section — unchanged from A-4/A-5), but they
+# DO narrate `phase`/`step`/`done` so the live view never goes dark during
+# their phases. This is a DELIBERATELY narrower helper than
+# assert_sentinel_section(): it does NOT require `deleg`/`deleg_reject`,
+# because these two agents never emit them. Do not reuse
+# assert_sentinel_section() here — it would wrongly demand delegation
+# vocabulary from agents that structurally cannot delegate.
+# ---------------------------------------------------------------------------
+
+# Assert the section documents the three narration event types and the three
+# step statuses. Mirrors assert_sentinel_section()'s presence-only design,
+# minus the deleg/deleg_reject requirement.
+assert_narration_section() {
+  local sec="$1"
+  assert_section_contains_all "$sec" \
+    '\bphase\b' '\bstep\b' '\bdone\b' \
+    '\brun\b' '\bok\b' '\bfail\b'
+}
+
+# Assert the section's phase/step field-order anchors (narration events
+# only — no DELEG_REJECT_ORDER_PHRASE, since narration-only sections never
+# describe deleg_reject). Reuses the same PHASE_ORDER_PHRASE/STEP_ORDER_PHRASE
+# constants assert_sentinel_field_order() uses, so a single frozen phrase
+# governs both the delegating and narration-only checks.
+assert_narration_field_order() {
+  local sec="$1" flat
+  flat="$(normalize_ws "$sec")"
+  grep -qF "$PHASE_ORDER_PHRASE" <<<"$flat" &&
+  grep -qF "$STEP_ORDER_PHRASE" <<<"$flat"
+}
+
+# ---------------------------------------------------------------------------
+# Step A-6: `verdict` producer (scoped to qa + reviewer only, per the
+# emission-scope matrix). Field-order-anchored: band before score, mirroring
+# the PHASE_ORDER_PHRASE/STEP_ORDER_PHRASE/DELEG_REJECT_ORDER_PHRASE anchors
+# above, applied to the new `verdict|<band>|<score>` grammar
+# (render.sh:259-271).
+# ---------------------------------------------------------------------------
+
+VERDICT_ORDER_PHRASE="a band, then a free-text score"
+
+# Assert the section documents `verdict`, all three bands, and the
+# band-before-score field order (fixed-string, order-sensitive — same
+# technique as assert_sentinel_field_order()).
+assert_verdict_clause() {
+  local sec="$1" flat
+  flat="$(normalize_ws "$sec")"
+  echo "$sec" | grep -qiE '\bverdict\b' &&
+  echo "$sec" | grep -qE 'GREEN' &&
+  echo "$sec" | grep -qE 'YELLOW' &&
+  echo "$sec" | grep -qE 'RED' &&
+  grep -qF "$VERDICT_ORDER_PHRASE" <<<"$flat"
+}
+
+# Assert the section does NOT document `verdict` at all — scoped to
+# architect/tdd-developer, whose verdict producers are exactly qa + reviewer
+# (AC-14: "architect and tdd-developer do not document verdict").
+assert_no_verdict() {
+  local sec="$1"
+  ! echo "$sec" | grep -qiE '\bverdict\b'
+}
+
 # --- Sentinel grammar section exists + documents the frozen grammar -------
 
 @test "tdd-developer body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -742,16 +853,62 @@ assert_sentinel_prefix_construction() {
   assert_sentinel_prefix_construction "$sec"
 }
 
-# --- No sentinel-emission section outside the 3 MVP heavy agents ----------
+# ---------------------------------------------------------------------------
+# Step A-6 (AC-14, reverses the A-5 invariant on purpose): reviewer and
+# requirements-engineer gain a NARRATION-ONLY Emitting milestone sentinels
+# section — phase/step/done only, no deleg/deleg_reject vocabulary — closing
+# the emission-scope gap (the live view no longer goes dark during their
+# phases). Uses assert_narration_section()/assert_narration_field_order(),
+# NOT assert_sentinel_section()/assert_sentinel_field_order() (those
+# additionally require deleg/deleg_reject and stay scoped to the 3
+# delegating agents).
+# ---------------------------------------------------------------------------
 
-@test "reviewer body: no Emitting milestone sentinels section (sentinel emission not granted)" {
+@test "reviewer body: Emitting milestone sentinels section narrates phase/step/done (scoped, narration-only)" {
   sec="$(section "$REVIEWER" "$SENTINEL_HEADING")"
-  [ -z "$sec" ]
+  [ -n "$sec" ]
+  assert_narration_section "$sec"
+  assert_sentinel_redaction_clause "$sec"
+  assert_narration_field_order "$sec"
+  assert_sentinel_prefix_construction "$sec"
 }
 
-@test "requirements-engineer body: no Emitting milestone sentinels section (sentinel emission not granted)" {
+@test "requirements-engineer body: Emitting milestone sentinels section narrates phase/step/done (scoped, narration-only)" {
   sec="$(section "$REQUIREMENTS_ENGINEER" "$SENTINEL_HEADING")"
-  [ -z "$sec" ]
+  [ -n "$sec" ]
+  assert_narration_section "$sec"
+  assert_sentinel_redaction_clause "$sec"
+  assert_narration_field_order "$sec"
+  assert_sentinel_prefix_construction "$sec"
+}
+
+# ---------------------------------------------------------------------------
+# Step A-6: `verdict` producer scoped to exactly qa + reviewer (AC-14).
+# ---------------------------------------------------------------------------
+
+@test "qa body: Emitting milestone sentinels section documents verdict (band before score)" {
+  sec="$(section "$QA" "$SENTINEL_HEADING")"
+  assert_verdict_clause "$sec"
+}
+
+@test "reviewer body: Emitting milestone sentinels section documents verdict (band before score)" {
+  sec="$(section "$REVIEWER" "$SENTINEL_HEADING")"
+  assert_verdict_clause "$sec"
+}
+
+@test "architect body: Emitting milestone sentinels section does not document verdict" {
+  sec="$(section "$ARCHITECT" "$SENTINEL_HEADING")"
+  assert_no_verdict "$sec"
+}
+
+@test "tdd-developer body: Emitting milestone sentinels section does not document verdict" {
+  sec="$(section "$TDD_DEVELOPER" "$SENTINEL_HEADING")"
+  assert_no_verdict "$sec"
+}
+
+@test "requirements-engineer body: Emitting milestone sentinels section does not document verdict" {
+  sec="$(section "$REQUIREMENTS_ENGINEER" "$SENTINEL_HEADING")"
+  assert_no_verdict "$sec"
 }
 
 # ---------------------------------------------------------------------------
@@ -773,6 +930,19 @@ assert_sentinel_prefix_construction() {
 
 @test "architect body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
   bd="$(body "$ARCHITECT")"
+  ! echo "$bd" | grep -qF '@@ANW|'
+}
+
+# A-6: collision guard extended to the two newly-narrating files (both now
+# document the grammar and so carry the same self-trigger risk).
+
+@test "reviewer body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
+  bd="$(body "$REVIEWER")"
+  ! echo "$bd" | grep -qF '@@ANW|'
+}
+
+@test "requirements-engineer body: contains no literal sentinel prefix (OQ-1 redaction rule)" {
+  bd="$(body "$REQUIREMENTS_ENGINEER")"
   ! echo "$bd" | grep -qF '@@ANW|'
 }
 
@@ -807,6 +977,29 @@ assert_sentinel_prefix_construction() {
   gut_section "$ARCHITECT" "$SENTINEL_HEADING" > "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
   run assert_sentinel_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+# A-6: same gutted-section mutation guard for the two newly-narrating files,
+# via assert_narration_section() (their narrower, deleg-free presence check).
+
+@test "reviewer: hardened narration check rejects a gutted Emitting milestone sentinels section" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/reviewer.md"
+  gut_section "$REVIEWER" "$SENTINEL_HEADING" > "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_narration_section "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "requirements-engineer: hardened narration check rejects a gutted Emitting milestone sentinels section" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/requirements-engineer.md"
+  gut_section "$REQUIREMENTS_ENGINEER" "$SENTINEL_HEADING" > "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_narration_section "$sec"
   rm -rf "$mutant_dir"
   [ "$status" -ne 0 ]
 }
@@ -861,6 +1054,39 @@ assert_sentinel_prefix_construction() {
   [ "$grammar_status" -eq 0 ]
 }
 
+# A-6: same polarity-inversion guard for the two newly-narrating files (both
+# now carry the redaction clause, so both need the same F1-style guard),
+# using assert_narration_section() in place of assert_sentinel_section() as
+# the "grammar keywords still present" control.
+
+@test "reviewer: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/reviewer.md"
+  invert_sentinel_mutant "$REVIEWER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_redaction_clause "$sec"
+  redaction_status="$status"
+  run assert_narration_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$redaction_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+@test "requirements-engineer: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/requirements-engineer.md"
+  invert_sentinel_mutant "$REQUIREMENTS_ENGINEER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_redaction_clause "$sec"
+  redaction_status="$status"
+  run assert_narration_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$redaction_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
 # ---------------------------------------------------------------------------
 # A-5 fix loop (F2): field-order-reversed mutation guards. Grammar keywords
 # elsewhere in the section are left untouched by invert_field_order_mutant(),
@@ -909,6 +1135,65 @@ assert_sentinel_prefix_construction() {
   rm -rf "$mutant_dir"
   [ "$order_status" -ne 0 ]
   [ "$grammar_status" -eq 0 ]
+}
+
+# A-6: same field-order-reversed mutation guard for the two newly-narrating
+# files, via assert_narration_field_order()/assert_narration_section() (no
+# DELEG_REJECT_ORDER_PHRASE involved — invert_field_order_mutant() simply
+# never matches deleg_reject text in these two files).
+
+@test "reviewer: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/reviewer.md"
+  invert_field_order_mutant "$REVIEWER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_narration_field_order "$sec"
+  order_status="$status"
+  run assert_narration_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$order_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+@test "requirements-engineer: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/requirements-engineer.md"
+  invert_field_order_mutant "$REQUIREMENTS_ENGINEER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_narration_field_order "$sec"
+  order_status="$status"
+  run assert_narration_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$order_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# A-6: `verdict` field-order-reversed mutation guards (band/score swapped),
+# scoped to qa's extended section and reviewer's new section — the only two
+# files that document verdict at all.
+# ---------------------------------------------------------------------------
+
+@test "qa: hardened verdict clause rejects a field-order-reversed mutant (band/score swapped)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/qa.md"
+  invert_field_order_mutant "$QA" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_verdict_clause "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
+}
+
+@test "reviewer: hardened verdict clause rejects a field-order-reversed mutant (band/score swapped)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/reviewer.md"
+  invert_field_order_mutant "$REVIEWER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_verdict_clause "$sec"
+  rm -rf "$mutant_dir"
+  [ "$status" -ne 0 ]
 }
 
 # ---------------------------------------------------------------------------
