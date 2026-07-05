@@ -2,7 +2,7 @@
 
 > Spec: `docs/context/specs/SDK-1-spec.md`
 > ADR: `docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md`
-> Driver: tdd-developer. Total: 5 (Track A) + 9 (Track B, incl. integration) = 14 steps.
+> Driver: tdd-developer. Total: 6 (Track A) + 9 (Track B, incl. integration) = 15 steps.
 
 Two tracks. The **sentinel grammar is frozen in the spec (OQ-1)** and is the shared contract:
 Track A teaches agents to *emit* it; Track B *renders + persists* it.
@@ -11,6 +11,12 @@ Track A teaches agents to *emit* it; Track B *renders + persists* it.
 match the frozen grammar and can proceed in parallel with Track A. The **integration step B9**
 and all real-world value require Track A merged (agents actually emitting sentinels/delegations).
 **A-1 is a hard GO/NO-GO gate** for the delegation half — do not build A-2..A-5 until it passes.
+**A-6 is independent of the A-1 gate** — it adds narration + `verdict`, no `Task`/sidekick dispatch —
+and can land any time after A-5. **No Track B step *hard*-depends on A-6:** the renderer persists
+whatever it is fed, and B-1..B-9 run against committed fixtures. B-9's e2e fixture *may optionally* be
+widened to the full five-agent stream + verdicts to exercise A-6 end-to-end, but the true dependency is
+the **real live view / full-pipeline fidelity** — without A-6 the live view goes dark during
+`requirements-engineer` and `reviewer`, and `verdict` has no producer.
 
 Each step: one RED test runnable today (`bats tests/<file>.bats`), one TDD cycle (~30 min), one
 commit (or test+impl as two commits per local TDD style). The renderer mechanics are already
@@ -18,7 +24,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 
 ---
 
-## Track A — Sidekick delegation capability
+## Track A — Sidekick delegation + full-pipeline sentinel emission (6 steps)
 
 ### Step A-1: Sidekick agent skeleton + `Task`→sidekick dispatch smoke test (GATE)
 - **Test**:
@@ -76,6 +82,53 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - **Commit**: `test(agents): assert sentinel-emission contract + no literal prefix` then
   `docs(agents): teach heavy agents to emit milestone sentinels`.
 
+### Step A-6: Full-pipeline narration + verdict for the non-delegating agents
+> Closes the emission-scope gap qa + reviewer flagged on A-5 (spec OQ-1 emission-scope matrix +
+> AC-14): A-3..A-5 taught **only** the 3 delegating agents to narrate, so the live view goes dark
+> during `requirements-engineer` and `reviewer`, and the `verdict` event (parsed by the renderer,
+> emitted by the demo from qa + reviewer) had **no producer**. Emission ≠ delegation: this step adds
+> narration to the two non-delegating agents and the `verdict` producer to qa + reviewer, WITHOUT
+> granting either a `Task`/sidekick (delegation scope is untouched — OQ-3 stands).
+- **Test**: `tests/agent-delegation.bats` (extend), reusing the established
+  `section()`/`subsection()`/`gut_section()` slicers + the `SENTINEL_REDACTION_SENTENCE` anchor +
+  the `! grep -F '@@ANW|'` collision guard verbatim (no new mechanics):
+  - **Narration (all-agent emission):** `reviewer.md` and `requirements-engineer.md` each gain a
+    `## Emitting milestone sentinels` section documenting `phase`/`step`/`done` + the `run｜ok｜fail`
+    statuses. Assert with a **narration-only** helper (e.g. `assert_narration_section`: phase/step/
+    done/run/ok/fail) — do NOT reuse `assert_sentinel_section`, which also requires
+    `deleg`/`deleg_reject` and stays scoped to the 3 delegating agents. Each is section-scoped and
+    carries the exact `SENTINEL_REDACTION_SENTENCE`.
+  - **Verdict producer (scoped to qa + reviewer):** add an `assert_verdict_clause` helper anchoring
+    the `verdict｜<band>｜<score>` grammar **field-order-anchored** (band before score) with
+    `<band>` ∈ `GREEN｜YELLOW｜RED` (matches `render.sh:259-271`); assert it inside `qa.md`'s existing
+    sentinel section (extended) and `reviewer.md`'s new section, and assert `architect.md` +
+    `tdd-developer.md` do **NOT** document `verdict` (verdict scope = the 2 producing agents,
+    mirroring the existing 3-vs-2 scoping tests).
+  - **Reversed invariant (deliberate, called out):** the two existing tests *"reviewer body: no
+    Emitting milestone sentinels section"* and *"requirements-engineer body: no Emitting milestone
+    sentinels section"* are **replaced** by the positive narration assertions above — this REVERSES
+    the A-5 invariant on purpose. The *"reviewer/requirements-engineer body: no Delegating to the
+    sidekick section"* and the no-`Task`-tool tests are **kept unchanged** (delegation scope is
+    untouched; narration ≠ delegation).
+  - **Collision guard extended:** add the body-wide `! echo "$bd" | grep -qF '@@ANW|'` no-literal-
+    prefix test for `reviewer.md` + `requirements-engineer.md` (both now document the grammar).
+  - **Mutation guards (reuse the A-5 patterns):** a `gut_section` guard for each new narration
+    section (heading kept, content removed → assertion fails) and an `invert_sentinel_mutant`
+    polarity guard for each new/extended redaction clause (reviewer, requirements-engineer, and qa's
+    verdict addition) — same section-scoped, mutation-resistant, field-order-anchored style as A-4/A-5.
+- **Implement**: add a **narration-only** `## Emitting milestone sentinels` section (redacted-prefix
+  grammar; `phase`/`step`/`done` only; no Delegating section) to `reviewer.md` and
+  `requirements-engineer.md`; add the `verdict｜<band>｜<score>` event (band ∈ GREEN｜YELLOW｜RED) to
+  `qa.md`'s existing sentinel section and to `reviewer.md`'s new section. **No `tools:` / `Task`
+  changes** — narration adds no delegation, so A-6 does not depend on the A-1 dispatch gate.
+- **Files**: `agents/claude-code/{reviewer,requirements-engineer,qa}.md` (modified),
+  `tests/agent-delegation.bats` (modified).
+  > Coordination: a concurrent A-5 F2/F3 loop is hardening `qa.md`'s sentinel section +
+  > `tests/agent-delegation.bats`. A-6 lands **after** A-5 is merged; rebase onto the final A-5
+  > helpers rather than assuming the names above.
+- **Commit**: `test(agents): assert full-pipeline narration + verdict producer (reverses A-5 invariant)`
+  then `docs(agents): narrate phase/step/done for all agents + emit verdict from qa & reviewer`.
+
 ---
 
 ## Track B — Live milestone visualization
@@ -116,8 +169,8 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - **Test**: `tests/render-stream.bats` (extend): run the renderer with
   `AW_SPEC_ID=SDK-1 AW_PIPELINE_STEP=4.2 AW_AGENT=tdd-developer AW_TIER=sonnet` over a fixture that
   includes a `deleg`; assert milestones.jsonl gains lines with those injected fields correct, the
-  delegation line has `event=delegation` + `delegated_to=haiku` + `parent_text` set to the active
-  milestone.
+  delegation line has `event=deleg` + `delegated_to=haiku` + `parent_text` set to the active
+  milestone (canonical event token per the OQ-2 vocab reconciliation — was `delegation`).
 - **Implement**: wire `lib/render-stream.sh` to call `append_milestone` for each finalized event,
   reading injected context from env; `source lib/milestones.sh`.
 - **Files**: `lib/render-stream.sh` (modified), `tests/render-stream.bats` (modified),
@@ -190,6 +243,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] A-3  Task tool on the 3 heavy agents
 - [x] A-4  Per-agent allowlist + parent-review gate
 - [ ] A-5  Sentinel-emission contract (redacted prefix)
+- [ ] A-6  Full-pipeline narration (all agents) + verdict producer (qa & reviewer)
 - [ ] B-1  Port renderer → lib/render-stream.sh + golden
 - [ ] B-2  Renderer arity validation
 - [ ] B-3  append_milestone JSONL writer

@@ -76,10 +76,30 @@ agent (claude --agent=… -p)  ──prints sentinels to stdout──►  orches
   live view.
 - **Event types** (agent-emitted): `phase`, `step`, `deleg`, `deleg_reject`, `verdict`, `done`.
   Reserved internal-only tokens (renderer machinery, never emitted by agents): `__TICK__`, `__EOF__`.
+- **Emission scope vs. delegation scope (kept deliberately separate):** *who narrates* is NOT the
+  same as *who may delegate*. **All five** pipeline agents narrate `phase`/`step`/`done` so the live
+  view never goes dark during any phase. Only the **3 delegating** agents (OQ-3) additionally emit
+  `deleg`/`deleg_reject`. Only `qa` and `reviewer` additionally emit `verdict`. **OQ-3's 3-agent limit
+  governs the sidekick/`Task` grant only — it does NOT restrict who narrates.**
+
+  | Agent | `phase`/`step`/`done` (narration) | `deleg`/`deleg_reject` (delegation) | `verdict` |
+  |-------|:---:|:---:|:---:|
+  | `requirements-engineer` | yes | — | — |
+  | `architect` | yes | yes | — |
+  | `tdd-developer` | yes | yes | — |
+  | `qa` | yes | yes | yes |
+  | `reviewer` | yes | — | yes |
+
+  Narration for the two non-delegating agents (`requirements-engineer`, `reviewer`) and the `verdict`
+  event for `qa`/`reviewer` are taught in **todo Step A-6**; the 3 delegating agents' narration +
+  delegation events are Steps A-4/A-5.
 - **Two-field events** — `phase|<agent>|<tier>`, `step|<status>|<text>`, `deleg|<tier>|<text>`,
   `deleg_reject|<tier>|<text>`, `verdict|<band>|<score>`: short field first, free-text field is
   `"${payload#*|}"` (everything after the first remaining `|`). Embedded `|` in the free-text field
-  is **safe** (spike-verified).
+  is **safe** (spike-verified). For `verdict`, `<band>` ∈ `GREEN | YELLOW | RED` (case-insensitive on
+  input; the renderer uppercases the band, `render.sh:259-271`) and `<score>` is the free-text second
+  field; `verdict` is emitted **only** by `qa` and `reviewer` — it now has a producer, closing the A-5
+  gap where it was parsed + rendered but no agent was taught to emit it.
 - **Single-field events** — `done|<text>`: text is the **raw remainder after the event type**
   (`rest`), **never** `f1`/`f2` (spike bug fix). New single-field event types MUST use `rest`.
 - **`status`** ∈ `run | ok | fail`. **`delegated`** is expressed as a `deleg` event carrying the
@@ -105,12 +125,12 @@ agent (claude --agent=… -p)  ──prints sentinels to stdout──►  orches
 | Field | Type | Source | Notes |
 |-------|------|--------|-------|
 | `ts` | string | orchestrator | ISO-8601 UTC |
-| `event` | string | sentinel | `phase｜milestone｜delegation｜delegation_reject｜verdict｜done` |
+| `event` | string | sentinel | `phase｜step｜deleg｜deleg_reject｜verdict｜done` (canonical — reconciled to OQ-1's tokens; see note below) |
 | `spec_id` | string | orchestrator | pipeline id (agents don't know it — the key reason the orchestrator writes) |
 | `pipeline_step` | string | orchestrator | e.g. `4.2` from `save_state` |
 | `agent` | string | orchestrator | current agent name |
 | `tier` | string | orchestrator | parent tier for milestones; sidekick tier for delegations |
-| `status` | string｜null | sentinel | `run｜ok｜fail` for milestone events; null otherwise |
+| `status` | string｜null | sentinel | `run｜ok｜fail` for `step` events; null otherwise |
 | `text` | string | sentinel | free-text field |
 | `delegated_to` | string｜null | sentinel | sidekick tier on delegation events; null otherwise |
 | `parent_text` | string｜null | orchestrator | active milestone text a delegation hangs under; null otherwise |
@@ -118,6 +138,15 @@ agent (claude --agent=… -p)  ──prints sentinels to stdout──►  orches
 `spec_id`, `pipeline_step`, `agent`, `tier`, `parent_text` are injected by the orchestrator (it
 knows run context the dumb agent does not); `event`, `status`, `text`, `delegated_to` come from the
 parsed sentinel.
+
+**Vocabulary reconciliation (fixed a spec-internal drift):** an earlier draft of this table used
+`milestone｜delegation｜delegation_reject` for the `event` field while OQ-1 (and `render.sh`, the
+shipped A-3/A-4/A-5 agent contracts, and `tests/agent-delegation.bats`) use `step｜deleg｜deleg_reject`.
+The **canonical** vocabulary is OQ-1's terse tokens; the persisted `event` field carries the sentinel
+event type **verbatim**, with no translation layer. Changed here — `milestone`→`step`,
+`delegation`→`deleg`, `delegation_reject`→`deleg_reject` (`phase`, `verdict`, `done` were already
+identical in both). Todo Step B-4's renderer-persist assertion is updated to `event=deleg` to match,
+so Track B's B-3 writer + B-4 renderer speak the one canonical vocab.
 
 ### OQ-3 — Per-agent delegation allowlists
 
@@ -130,7 +159,11 @@ accept/reject decision, and **vets sidekick output before accepting**. Sidekick 
 | `qa` | scaffold throwaway probe skeletons; generate boundary-value input tables/fixtures; mechanical test-data generation | what to probe, pass/fail judgment, security reasoning, the adversarial hunt |
 | `architect` | scaffold spec/todo/ADR file skeletons from the standard section templates; generate boilerplate headers & the status-checklist table | the design, step decomposition, AC authoring, risk analysis |
 
-`reviewer` and `requirements-engineer` get **no** sidekick (mostly reasoning) — deferred.
+`reviewer` and `requirements-engineer` get **no** sidekick/`Task` grant (mostly reasoning — sidekick
+**delegation** for them is deferred). This is a **delegation-scope** limit only: both still **narrate**
+`phase`/`step`/`done`, and `reviewer` also emits `verdict`, via the same sentinel channel — with **no**
+`## Delegating to the sidekick` section and **no** `deleg`/`deleg_reject` events. See OQ-1's
+emission-scope matrix; taught in todo Step A-6.
 
 ### OQ-4 — Parent-review gate enforcement (decision: soft contract, auditable)
 
@@ -214,7 +247,9 @@ accept/reject decision, and **vets sidekick output before accepting**. Sidekick 
 - **AC-9** — `sidekick.md` exists with `model: haiku` and tools exactly `Read, Write, Edit, Glob,
   Grep` (no `Bash`, no `Task`); the installer glob copies it with zero installer changes.
 - **AC-10** — `tdd-developer`, `qa`, `architect` each carry `Task` in `tools:` and a documented
-  delegation allowlist + parent-review-gate + sentinel-emission contract in their bodies.
+  delegation allowlist + parent-review-gate + sentinel-emission contract in their bodies. (These are
+  the delegating agents; full-pipeline narration + the `verdict` producer for the two non-delegating
+  agents is AC-14.)
 - **AC-11** — A live `Task`→`sidekick` dispatch smoke test against the installed Claude CLI succeeds
   before any downstream step depends on delegation (GO/NO-GO gate).
 - **AC-12** — `scripts/milestones-summary.sh` on a fixture JSONL reports total delegations,
@@ -230,6 +265,18 @@ accept/reject decision, and **vets sidekick output before accepting**. Sidekick 
   another section's assertion. Each such test is additionally proven **mutation-resistant**: a
   mutant with that section's content gutted (heading kept, body removed) from an otherwise-real copy
   of the file must fail the assertion.
+- **AC-14** — Full-pipeline emission (no dark phases; `verdict` has a producer): all five pipeline
+  agents carry a sentinel-emission contract. `requirements-engineer` and `reviewer` each gain a
+  `## Emitting milestone sentinels` section narrating `phase｜step｜done` (with `run｜ok｜fail`
+  statuses), **narration-only** — neither gains a `## Delegating to the sidekick` section nor emits
+  `deleg`/`deleg_reject` (delegation scope is unchanged per OQ-3). `qa` and `reviewer` additionally
+  document + emit `verdict｜<band>｜<score>` (band ∈ `GREEN｜YELLOW｜RED`, band-before-score),
+  matching `render.sh:259-271`; `architect` and `tdd-developer` do **not** document `verdict` (its
+  producers are exactly `qa` + `reviewer`). Each new or extended sentinel section is asserted with the
+  established **section-scoped, mutation-resistant, field-order-anchored** conventions (redaction
+  anchored on the governing sentence; `! grep -F` literal-prefix collision guard extended to the two
+  newly-narrating files). This **deliberately reverses** the earlier SDK-1 A-5 invariant that
+  `reviewer`/`requirements-engineer` carry NO sentinel section.
 
 ## Technical Design
 
@@ -265,7 +312,9 @@ accept/reject decision, and **vets sidekick output before accepting**. Sidekick 
   later).
 - Replay / status re-render from JSONL; Obsidian session-report embedding.
 - Whitepaper figure from a real run (illustrative only — PAPER is a design whitepaper).
-- Sidekick for `reviewer` / `requirements-engineer`.
+- Sidekick **delegation** for `reviewer` / `requirements-engineer` (they narrate `phase`/`step`/`done`
+  and `reviewer` emits `verdict` per A-6, but hold no `Task`/sidekick grant — delegation for them
+  stays deferred).
 - **Hard** enforcement of the parent-review gate (confidence-gate hook integration).
 - Dollar-cost measurement; multi-level delegation nesting.
 </content>
