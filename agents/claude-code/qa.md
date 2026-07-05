@@ -181,7 +181,7 @@ prefix precedes every event on its own line, followed by the event name,
 then one or more `|`-delimited fields.
 
 ### Event types
-Five event types, each its own line (prefix, then event name, then fields):
+Six event types, each its own line (prefix, then event name, then fields):
 - `phase` — two fields: your agent name, then your model tier. Emit once,
   right after you've loaded context, before your first `step`.
 - `step` — two fields: a status, then free text. Status is one of `run`,
@@ -194,13 +194,17 @@ Five event types, each its own line (prefix, then event name, then fields):
 - `deleg_reject` — two fields: the sidekick's tier, then a free-text
   reason. Emit instead of an accept milestone when you reject sidekick
   output, per the parent-review gate above.
+- `verdict` — two fields: a band, then a free-text score. Band is one of
+  `GREEN`, `YELLOW`, or `RED`. Emit once, after you've finished your
+  adversarial hunt for the step, summarizing your overall confidence.
 - `done` — one field: free text summarizing what you completed. Emit
   exactly once, as your last milestone line, when the step is complete.
 
 ### Field layout
-- `phase`, `step`, `deleg`, and `deleg_reject` are two-field events: a
-  short field first, then a free-text field. The free-text field may
-  itself contain a `|` character — that is safe and renders intact.
+- `phase`, `step`, `deleg`, `deleg_reject`, and `verdict` are two-field
+  events: a short field first, then a free-text field. The free-text
+  field may itself contain a `|` character — that is safe and renders
+  intact.
 - `done` is a single-field event: everything after the event name is the
   free-text field, verbatim, including any embedded `|`.
 

@@ -102,6 +102,53 @@ jq -n \
   >> "$LOG"
 ```
 
+## Emitting milestone sentinels
+
+Narrate your work to the orchestrator by printing reserved milestone lines
+to your own stdout, in addition to your normal output. The orchestrator
+parses only lines that start with a reserved prefix; everything else is
+your normal narration, rendered live and logged as-is.
+
+### The reserved prefix — construct it, never spell it out
+Never print the literal reserved prefix in this file or in narrated output.
+Printing the actual prefix here (or narrating it aloud) would make the
+orchestrator parse this documentation, or your narration, as a real event
+(the OQ-1 collision rule). Instead, build it yourself at runtime,
+compositionally, from three pieces in order: the `@@` sequence, then
+`ANW`, then a vertical bar `|` as the field separator. Join the three
+pieces directly, with no spaces and in exact case: the parser matches the
+whole prefix as one case-sensitive literal (redacted here as `@@ANW·|`, a
+middle dot standing in for the join point — never the real prefix), so a
+misread like `@@ ANW |` or `@@anw|` silently produces no event at all. That
+prefix precedes every event on its own line, followed by the event name,
+then one or more `|`-delimited fields.
+
+### Event types
+You narrate `phase`/`step`/`done` like every pipeline agent, so the live
+view never goes dark during your review. You hold no `Task`/sidekick
+grant, so you never emit `deleg` or `deleg_reject` — those events are
+scoped to the delegating agents only. You additionally emit `verdict`,
+since you own the final review verdict for the step. Four event types,
+each its own line (prefix, then event name, then fields):
+- `phase` — two fields: your agent name, then your model tier. Emit once,
+  right after you've loaded context, before your first `step`.
+- `step` — two fields: a status, then free text. Status is one of `run`,
+  `ok`, or `fail`. Emit `step` with status `run` when you start a
+  meaningful unit of work, then emit it again with status `ok` or `fail`
+  once that unit finishes.
+- `verdict` — two fields: a band, then a free-text score. Band is one of
+  `GREEN`, `YELLOW`, or `RED`. Emit once, right after your final review
+  pass for the step, summarizing the overall outcome.
+- `done` — one field: free text summarizing what you completed. Emit
+  exactly once, as your last milestone line, when the step is complete.
+
+### Field layout
+- `phase`, `step`, and `verdict` are two-field events: a short field
+  first, then a free-text field. The free-text field may itself contain a
+  `|` character — that is safe and renders intact.
+- `done` is a single-field event: everything after the event name is the
+  free-text field, verbatim, including any embedded `|`.
+
 ## Rules
 - NEVER modify code (tool list does not grant Write/Edit — enforced)
 - Be specific: file, line, suggested fix
