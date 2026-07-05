@@ -611,6 +611,76 @@ invert_sentinel_mutant() {
   ' "$src" > "$dst"
 }
 
+# ---------------------------------------------------------------------------
+# A-5 fix loop (F2 — field order, not just presence): qa + reviewer both
+# proved assert_sentinel_section() pins keyword *presence* (phase, step,
+# deleg_reject, agent, tier, status, text, reason all appear SOMEWHERE in the
+# section) but never *order* — a mutant that reverses a described field
+# order (`step` to "text, then status", or `phase` to "tier, then agent")
+# still contains every one of those keywords, so it still satisfies the old
+# presence-only `&&`-chain even though the grammar it describes is now
+# backwards. Hardening mirrors A-4 F1's anchored-sentence technique (and
+# this file's own SENTINEL_REDACTION_SENTENCE guard), applied to field order
+# instead of may/never polarity: fixed-string anchors on the EXACT ordering
+# phrase each event type's bullet uses.
+# ---------------------------------------------------------------------------
+
+# Collapse embedded newlines / runs of whitespace to single spaces. The
+# deleg_reject order phrase straddles a markdown hard-wrap in the source
+# ("...a free-text\n  reason."), so a single-line grep -F needs the text
+# normalized first to match regardless of exactly where the source wraps.
+normalize_ws() {
+  tr '\n' ' ' <<<"$1" | tr -s ' '
+}
+
+# The three field-order anchor phrases (frozen wording, verbatim in all 3
+# agent files): the exact clause each bullet uses to state which field comes
+# first. A field-order-reversed mutant fails these order-sensitive
+# fixed-string checks even though it still satisfies assert_sentinel_section
+# ()'s bag-of-keywords check.
+PHASE_ORDER_PHRASE="your agent name, then your model tier"
+STEP_ORDER_PHRASE="a status, then free text"
+DELEG_REJECT_ORDER_PHRASE="the sidekick's tier, then a free-text reason"
+
+# Assert the section's three field-order anchor phrases are present
+# verbatim (fixed-string, order-sensitive) — mirrors
+# assert_sentinel_redaction_clause()'s fixed-string technique, applied to
+# field order instead of the may/never redaction rule.
+assert_sentinel_field_order() {
+  local sec="$1" flat
+  flat="$(normalize_ws "$sec")"
+  grep -qF "$PHASE_ORDER_PHRASE" <<<"$flat" &&
+  grep -qF "$STEP_ORDER_PHRASE" <<<"$flat" &&
+  grep -qF "$DELEG_REJECT_ORDER_PHRASE" <<<"$flat"
+}
+
+# Build a mutant copy of $1 with the three field-order phrases REVERSED,
+# writing the result to $2. Heading, event-type keywords, and everything
+# else are left untouched, so every keyword assert_sentinel_section() checks
+# for (phase/step/deleg_reject/run/ok/fail/done/deleg) is still present
+# SOMEWHERE in the section — only the order of the two named fields per
+# bullet is flipped. The deleg_reject order phrase is matched/rewritten as
+# two whole physical lines (not one -v string) because it straddles a
+# markdown hard-wrap and macOS's BWK awk rejects embedded newlines in a -v
+# value (same constraint invert_delegation_mutant() documents above).
+invert_field_order_mutant() {
+  local src="$1" dst="$2"
+  awk -v phase_old="your agent name, then your model tier" \
+      -v phase_new="your model tier, then your agent name" \
+      -v step_old="a status, then free text" \
+      -v step_new="free text, then a status" \
+      -v deleg1_old="two fields: the sidekick's tier, then a free-text" \
+      -v deleg1_new="two fields: a free-text reason, then the sidekick's tier." \
+      -v deleg2_old="reason. Emit instead of an accept milestone when you reject sidekick" \
+      -v deleg2_new="Emit instead of an accept milestone when you reject sidekick" '
+    index($0, phase_old)  { sub(phase_old, phase_new); print; next }
+    index($0, step_old)   { sub(step_old, step_new); print; next }
+    index($0, deleg1_old) { sub(deleg1_old, deleg1_new); print; next }
+    index($0, deleg2_old) { sub(deleg2_old, deleg2_new); print; next }
+    { print }
+  ' "$src" > "$dst"
+}
+
 # --- Sentinel grammar section exists + documents the frozen grammar -------
 
 @test "tdd-developer body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -618,6 +688,7 @@ invert_sentinel_mutant() {
   [ -n "$sec" ]
   assert_sentinel_section "$sec"
   assert_sentinel_redaction_clause "$sec"
+  assert_sentinel_field_order "$sec"
 }
 
 @test "qa body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -625,6 +696,7 @@ invert_sentinel_mutant() {
   [ -n "$sec" ]
   assert_sentinel_section "$sec"
   assert_sentinel_redaction_clause "$sec"
+  assert_sentinel_field_order "$sec"
 }
 
 @test "architect body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -632,6 +704,7 @@ invert_sentinel_mutant() {
   [ -n "$sec" ]
   assert_sentinel_section "$sec"
   assert_sentinel_redaction_clause "$sec"
+  assert_sentinel_field_order "$sec"
 }
 
 # --- No sentinel-emission section outside the 3 MVP heavy agents ----------
@@ -750,6 +823,56 @@ invert_sentinel_mutant() {
   grammar_status="$status"
   rm -rf "$mutant_dir"
   [ "$redaction_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
+# A-5 fix loop (F2): field-order-reversed mutation guards. Grammar keywords
+# elsewhere in the section are left untouched by invert_field_order_mutant(),
+# so the OLD presence-only assert_sentinel_section() still passes on this
+# mutant (proven by grammar_status below) — only the new order-anchored
+# assert_sentinel_field_order() may catch it.
+# ---------------------------------------------------------------------------
+
+@test "tdd-developer: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/tdd-developer.md"
+  invert_field_order_mutant "$TDD_DEVELOPER" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_field_order "$sec"
+  order_status="$status"
+  run assert_sentinel_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$order_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+@test "qa: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/qa.md"
+  invert_field_order_mutant "$QA" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_field_order "$sec"
+  order_status="$status"
+  run assert_sentinel_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$order_status" -ne 0 ]
+  [ "$grammar_status" -eq 0 ]
+}
+
+@test "architect: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/architect.md"
+  invert_field_order_mutant "$ARCHITECT" "$mutant"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_sentinel_field_order "$sec"
+  order_status="$status"
+  run assert_sentinel_section "$sec"
+  grammar_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$order_status" -ne 0 ]
   [ "$grammar_status" -eq 0 ]
 }
 
