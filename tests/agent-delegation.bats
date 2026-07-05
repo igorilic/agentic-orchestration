@@ -681,6 +681,38 @@ invert_field_order_mutant() {
   ' "$src" > "$dst"
 }
 
+# ---------------------------------------------------------------------------
+# A-5 fix loop (F3 — prefix construction: adjacency + case). qa + reviewer
+# both flagged that "the `@@` sequence, then `ANW`, then a vertical bar `|`"
+# never states the three pieces are joined DIRECTLY (no spaces) in EXACT
+# CASE — the parser (spikes/sdk-1-renderer/render.sh's
+# `[[ "$line" == @@ANW\|* ]]`) is an exact-match, case-sensitive glob, so a
+# misread like `@@ ANW |` or `@@anw|` silently produces no event at all.
+# ---------------------------------------------------------------------------
+
+# The clarifying clause every section's redaction subsection must carry,
+# stating the pieces concatenate directly with no spaces and in exact case.
+SENTINEL_PREFIX_ADJACENCY_CLAUSE="directly, with no spaces and in exact case"
+
+# The redacted visual anchor (middle dot breaks the literal, so the OQ-1
+# collision guard `! grep -qF '@@ANW|'` still finds zero matches) — copied
+# verbatim from the spec's own redaction example (SDK-1-spec.md ~L89-90:
+# "write it as `@@ANW·|`").
+SENTINEL_PREFIX_REDACTED_ANCHOR="@@ANW·|"
+
+# Assert the section states the adjacency/case clause AND shows the redacted
+# visual anchor, AND that doing so never regresses the OQ-1 literal-prefix
+# collision guard — belt-and-suspenders alongside the standalone "no literal
+# prefix" tests below: the middle dot means `@@ANW·|` can never satisfy a
+# `grep -qF '@@ANW|'` check.
+assert_sentinel_prefix_construction() {
+  local sec="$1" flat
+  flat="$(normalize_ws "$sec")"
+  grep -qF "$SENTINEL_PREFIX_ADJACENCY_CLAUSE" <<<"$flat" &&
+  grep -qF "$SENTINEL_PREFIX_REDACTED_ANCHOR" <<<"$sec" &&
+  ! echo "$sec" | grep -qF '@@ANW|'
+}
+
 # --- Sentinel grammar section exists + documents the frozen grammar -------
 
 @test "tdd-developer body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -689,6 +721,7 @@ invert_field_order_mutant() {
   assert_sentinel_section "$sec"
   assert_sentinel_redaction_clause "$sec"
   assert_sentinel_field_order "$sec"
+  assert_sentinel_prefix_construction "$sec"
 }
 
 @test "qa body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -697,6 +730,7 @@ invert_field_order_mutant() {
   assert_sentinel_section "$sec"
   assert_sentinel_redaction_clause "$sec"
   assert_sentinel_field_order "$sec"
+  assert_sentinel_prefix_construction "$sec"
 }
 
 @test "architect body: Emitting milestone sentinels section documents the frozen grammar (scoped)" {
@@ -705,6 +739,7 @@ invert_field_order_mutant() {
   assert_sentinel_section "$sec"
   assert_sentinel_redaction_clause "$sec"
   assert_sentinel_field_order "$sec"
+  assert_sentinel_prefix_construction "$sec"
 }
 
 # --- No sentinel-emission section outside the 3 MVP heavy agents ----------
