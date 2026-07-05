@@ -122,9 +122,13 @@ Printing the actual prefix here (or narrating it aloud) would make the
 orchestrator parse this documentation, or your narration, as a real event
 (the OQ-1 collision rule). Instead, build it yourself at runtime,
 compositionally, from three pieces in order: the `@@` sequence, then
-`ANW`, then a vertical bar `|` as the field separator. That prefix precedes
-every event on its own line, followed by the event name, then one or more
-`|`-delimited fields.
+`ANW`, then a vertical bar `|` as the field separator. Join the three
+pieces directly, with no spaces and in exact case: the parser matches the
+whole prefix as one case-sensitive literal (redacted here as `@@ANW·|`, a
+middle dot standing in for the join point — never the real prefix), so a
+misread like `@@ ANW |` or `@@anw|` silently produces no event at all. That
+prefix precedes every event on its own line, followed by the event name,
+then one or more `|`-delimited fields.
 
 ### Event types
 Five event types, each its own line (prefix, then event name, then fields):
