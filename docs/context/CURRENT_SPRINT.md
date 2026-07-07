@@ -8,8 +8,8 @@
   - Todo: `docs/context/specs/SDK-1-todo.md`
   - ADR: `docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md`
   - Spike (de-risked): `spikes/sdk-1-renderer/FINDINGS.md`
-  - Phase: in progress — A-1 done (gate GO, smoke-tested), A-2 done (contract hardened via qa+reviewer), A-4 done (delegation allowlist + review gate, tests hardened for polarity via qa+reviewer fix loop)
-  - Steps: 4 / 14 (Track A: 5 · Track B: 9). A-1 GO/NO-GO gate passed; B depends on A.
+  - Phase: **Track A complete** (A-1→A-6): sidekick delegation capability + full-pipeline sentinel emission. Every step qa+reviewer-hardened (section-scoped, mutation/field-order/polarity-guarded tests). Next: Track B (live renderer + milestones JSONL).
+  - Steps: 6 / 15 (Track A: 6 ✓ · Track B: 9). A-1 GO/NO-GO gate passed; Track B depends on A only at B-9 integration.
   - Driver: tdd-developer
   - Scope: GitHub/Claude pipeline only; GitLab/Copilot, replay, whitepaper figure, hard review-gate deferred
   - Tech debt (deferred from A-2 qa/reviewer): F5 — tighten "apply lint/format/type-fix output" wording in BOTH `sidekick.md` and `tdd-developer.md:50` (type-checkers emit diagnostics, not edits — the imprecise phrasing was propagated from sidekick's allowlist into tdd-developer's own allowlist bullet); F6 — add sidekick warning against reading/echoing secret file contents
