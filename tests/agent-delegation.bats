@@ -794,6 +794,99 @@ assert_narration_field_order() {
 }
 
 # ---------------------------------------------------------------------------
+# A-6 fix loop (F1 — event PRESENCE via bullet injection, not just section
+# heading absence). qa + reviewer both proved AC-14's clause that reviewer/
+# requirements-engineer "nor emits `deleg`/`deleg_reject`" was only
+# half-enforced: the "no Delegating to the sidekick section" tests above only
+# guard against the wrong SECTION appearing, and assert_narration_section()
+# only checks phase/step/done PRESENCE — nothing asserted the absence of
+# `deleg`/`deleg_reject` EVENT BULLETS from these two agents' `## Emitting
+# milestone sentinels` section itself. Injecting real `deleg`/`deleg_reject`
+# event bullets into reviewer's/requirements-engineer's narration section
+# satisfied every assertion in this file before this fix.
+#
+# The obvious fix (a bag-of-words absence check for the tokens `deleg`/
+# `deleg_reject` anywhere in the section) is itself wrong: both files
+# legitimately contain those bare words in their prose negation sentence
+# ("...so you never emit `deleg` or `deleg_reject`...") — a token-presence
+# check would false-fail on the CORRECT, unmutated file. The fix is
+# bullet-line-anchored instead: it matches the exact leading pattern a real
+# event bullet uses (mirrors qa.md's own `- \`deleg\` — two fields: ...` /
+# `- \`deleg_reject\` — two fields: ...` bullets), so a real event bullet is
+# caught while the prose sentence — never anchored at bullet-start — is not.
+# ---------------------------------------------------------------------------
+
+# Assert the section carries NO `deleg`/`deleg_reject` EVENT BULLET, anchored
+# on the bullet-list leading pattern real event bullets use (e.g.
+# "- `deleg` — two fields: ..."). Deliberately NOT a bag-of-words check — see
+# the block comment above for why a token-presence absence check is wrong
+# here.
+assert_no_deleg_bullet() {
+  local sec="$1"
+  ! echo "$sec" | grep -qE '^- `deleg`' &&
+  ! echo "$sec" | grep -qE '^- `deleg_reject`'
+}
+
+# Build a mutant copy of $1 with `deleg`/`deleg_reject` EVENT BULLETS
+# injected immediately after the named `## <heading>` line, writing the
+# result to $2. Nothing else in the section is touched, so the OLD
+# presence-only assert_narration_section() check — which never looks for
+# their absence — still passes on this mutant; only the new
+# assert_no_deleg_bullet() may catch it.
+inject_deleg_bullet_mutant() {
+  local src="$1" dst="$2" heading="$3"
+  awk -v want="## $heading" '
+    $0 == want {
+      print
+      print "- `deleg` — two fields: the sidekick tier, then free text describing what you handed it."
+      print "- `deleg_reject` — two fields: the sidekick tier, then a free-text reason."
+      next
+    }
+    { print }
+  ' "$src" > "$dst"
+}
+
+@test "reviewer body: Emitting milestone sentinels section emits no deleg/deleg_reject event bullets (AC-14 narration-only)" {
+  sec="$(section "$REVIEWER" "$SENTINEL_HEADING")"
+  [ -n "$sec" ]
+  assert_no_deleg_bullet "$sec"
+}
+
+@test "requirements-engineer body: Emitting milestone sentinels section emits no deleg/deleg_reject event bullets (AC-14 narration-only)" {
+  sec="$(section "$REQUIREMENTS_ENGINEER" "$SENTINEL_HEADING")"
+  [ -n "$sec" ]
+  assert_no_deleg_bullet "$sec"
+}
+
+@test "reviewer: hardened deleg-bullet check rejects an injected deleg/deleg_reject mutant (old narration check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/reviewer.md"
+  inject_deleg_bullet_mutant "$REVIEWER" "$mutant" "$SENTINEL_HEADING"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_no_deleg_bullet "$sec"
+  bullet_status="$status"
+  run assert_narration_section "$sec"
+  narration_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$bullet_status" -ne 0 ]
+  [ "$narration_status" -eq 0 ]
+}
+
+@test "requirements-engineer: hardened deleg-bullet check rejects an injected deleg/deleg_reject mutant (old narration check still passes on it)" {
+  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant="$mutant_dir/requirements-engineer.md"
+  inject_deleg_bullet_mutant "$REQUIREMENTS_ENGINEER" "$mutant" "$SENTINEL_HEADING"
+  sec="$(section "$mutant" "$SENTINEL_HEADING")"
+  run assert_no_deleg_bullet "$sec"
+  bullet_status="$status"
+  run assert_narration_section "$sec"
+  narration_status="$status"
+  rm -rf "$mutant_dir"
+  [ "$bullet_status" -ne 0 ]
+  [ "$narration_status" -eq 0 ]
+}
+
+# ---------------------------------------------------------------------------
 # Step A-6: `verdict` producer (scoped to qa + reviewer only, per the
 # emission-scope matrix). Field-order-anchored: band before score, mirroring
 # the PHASE_ORDER_PHRASE/STEP_ORDER_PHRASE/DELEG_REJECT_ORDER_PHRASE anchors
