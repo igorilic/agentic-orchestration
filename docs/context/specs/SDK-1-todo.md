@@ -244,7 +244,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] A-4  Per-agent allowlist + parent-review gate
 - [x] A-5  Sentinel-emission contract (redacted prefix) — hardened (field-order + prefix adjacency/case guards)
 - [x] A-6  Full-pipeline narration (all agents) + verdict producer (qa & reviewer) — no-deleg guard added
-- [ ] B-1  Port renderer → lib/render-stream.sh + golden
+- [x] B-1  Port renderer → lib/render-stream.sh + golden
 - [ ] B-2  Renderer arity validation
 - [ ] B-3  append_milestone JSONL writer
 - [ ] B-4  Renderer persists injected milestone fields
