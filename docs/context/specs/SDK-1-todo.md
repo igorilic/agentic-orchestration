@@ -246,7 +246,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] A-6  Full-pipeline narration (all agents) + verdict producer (qa & reviewer) — no-deleg guard added
 - [x] B-1  Port renderer → lib/render-stream.sh + golden
 - [x] B-2  Renderer arity validation
-- [ ] B-3  append_milestone JSONL writer
+- [x] B-3  append_milestone JSONL writer
 - [ ] B-4  Renderer persists injected milestone fields
 - [ ] B-5  agent_tier lookup
 - [ ] B-6  run_agent_streamed errexit/PIPESTATUS pipe (behavior-preserving)
