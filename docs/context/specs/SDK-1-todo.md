@@ -247,7 +247,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] B-1  Port renderer → lib/render-stream.sh + golden
 - [x] B-2  Renderer arity validation
 - [x] B-3  append_milestone JSONL writer
-- [ ] B-4  Renderer persists injected milestone fields
+- [x] B-4  Renderer persists injected milestone fields
 - [ ] B-5  agent_tier lookup
 - [ ] B-6  run_agent_streamed errexit/PIPESTATUS pipe (behavior-preserving)
 - [ ] B-7  Attach renderer + milestones, remove spinner, debug log
