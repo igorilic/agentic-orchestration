@@ -186,16 +186,36 @@ handle_event() {
   [[ "$line" == @@ANW\|* ]] || return 0
 
   # Parse: strip @@ANW| prefix, split into evtype | f1 | f2 (f2 = remainder)
-  local payload="${line#@@ANW|}"
-  local evtype="${payload%%|*}"
-  payload="${payload#*|}"
+  local raw="${line#@@ANW|}"
+  local evtype="${raw%%|*}"
+
+  # SDK-1 Step B-2 (OQ-1 arity validation): has_arg / has_arg2 record whether
+  # a field is genuinely PRESENT (a "|" separator was seen), not merely
+  # whether the derived variable happens to be non-empty. This matters
+  # because bash's "${var#*|}" and "${var%%|*}" leave a string UNCHANGED
+  # when the pattern (a "|") isn't found — so a line with a missing field
+  # (e.g. "@@ANW|step|run", no third field) would otherwise silently reuse
+  # the status keyword AS the free-text field ("⏺ run" — the exact
+  # mis-render documented as spike gap #1 in FINDINGS.md). Computing
+  # presence explicitly lets every event handler drop malformed/arity-short
+  # lines instead of mis-rendering them, per the spec's OQ-1 decision.
+  local has_arg=false
+  [[ "$raw" == *"|"* ]] && has_arg=true
+
+  local payload=""
+  $has_arg && payload="${raw#*|}"
   local rest="$payload"   # raw remainder after evtype — correct value for
                            # genuinely single-field event types (e.g. done).
                            # Do NOT use f1/f2 for single-field events: both
                            # are lossy the moment the text itself contains a
                            # "|" (BUG FOUND IN SPIKE, see below).
+
+  local has_arg2=false
+  [[ "$payload" == *"|"* ]] && has_arg2=true
+
   local f1="${payload%%|*}"
-  local f2="${payload#*|}"
+  local f2=""
+  $has_arg2 && f2="${payload#*|}"
   # f1/f2 are correct ONLY for genuinely-two-field events (status|text,
   # tier|text, band|score) where f2 is "everything after the first |" and
   # may itself safely contain more "|" characters (verified: step|ok|text
@@ -209,6 +229,10 @@ handle_event() {
   case "$evtype" in
 
     phase)
+      # Arity guard: requires both agent (f1) and tier (f2). A malformed
+      # phase line is dropped before any state mutation (no finalize, no
+      # header print) so it never disturbs the active-spinner/line state.
+      $has_arg2 || return 0
       # f1=agent  f2=tier
       [ -n "$ACTIVE_TEXT" ] && finalize_active ok
       local tc
@@ -218,6 +242,10 @@ handle_event() {
       ;;
 
     step)
+      # Arity guard: requires both status (f1) and text (f2) — a "step"
+      # with no text field (e.g. "@@ANW|step|run") is dropped rather than
+      # rendering the status keyword itself as the milestone text.
+      $has_arg2 || return 0
       # f1=status(run|ok|fail)  f2=text
       local status="$f1"
       local text="$f2"
@@ -245,10 +273,18 @@ handle_event() {
             printf "  ${RED}✗${NC} %s\n" "$display"
           fi
           ;;
+        *)
+          # Arity/vocab guard: status outside run|ok|fail is dropped.
+          return 0
+          ;;
       esac
       ;;
 
     deleg)
+      # Arity guard: requires both sidekick tier (f1) and text (f2). A
+      # malformed deleg line is dropped before finalize_active so it never
+      # disturbs the active-spinner/line state.
+      $has_arg2 || return 0
       # f1=sidekick_tier  f2=sidekick action description
       # Finalise the active step as [DELEGATED], then print the nested ↳ line.
       if [ -n "$ACTIVE_TEXT" ]; then
@@ -258,12 +294,16 @@ handle_event() {
       ;;
 
     deleg_reject)
+      # Arity guard: requires both sidekick tier (f1) and reason (f2).
+      $has_arg2 || return 0
       # f1=sidekick_tier  f2=rejection reason
       # Print rejection line. No state change — ACTIVE step is unchanged.
       printf "      ${RED}❌ sidekick · %s:${NC} %s\n" "$f1" "$f2"
       ;;
 
     verdict)
+      # Arity guard: requires both band (f1) and score (f2).
+      $has_arg2 || return 0
       # f1=band(GREEN|YELLOW|RED)  f2=score
       local vc band_upper
       band_upper=$(printf '%s' "$f1" | tr '[:lower:]' '[:upper:]')
@@ -278,12 +318,23 @@ handle_event() {
       ;;
 
     done)
+      # Arity guard: requires the single free-text field (has_arg). Without
+      # it, "${payload#*|}" would leave $rest unchanged at the evtype's own
+      # trailing remainder — dropping avoids echoing "done" back as if it
+      # were the summary text.
+      $has_arg || return 0
       # Single-field event: summary text is everything after "done|".
       # Use $rest (the raw post-evtype remainder), not f1/f2 — see note
       # above main parse block. f1/f2 truncate/drop content the moment
       # this text contains an embedded "|" character.
       [ -n "$ACTIVE_TEXT" ] && finalize_active ok
       printf "\n${GREEN}✓${NC} ${BOLD}%s${NC}\n\n" "$rest"
+      ;;
+
+    *)
+      # SDK-1 B-2: unknown event type — dropped (never crashes; the case
+      # falls through cleanly under set -euo pipefail).
+      return 0
       ;;
 
   esac
