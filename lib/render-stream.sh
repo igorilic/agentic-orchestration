@@ -103,6 +103,22 @@ if ! $IS_TTY; then
   RED='' GREEN='' YELLOW='' CYAN='' MAGENTA='' BOLD='' DIM='' NC=''
 fi
 
+# ── Milestones persistence (SDK-1 Step B-4) ─────────────────────────────────
+# ponytail: source lib/milestones.sh the same way common.sh is resolved above
+# (relative to this script, not the caller's cwd) so append_milestone works
+# regardless of where the orchestrator invokes the renderer from.
+# shellcheck source=lib/milestones.sh disable=SC1091
+source "$_RENDER_STREAM_DIR/milestones.sh"
+
+# ponytail: identity (spec_id/pipeline_step/agent/tier) is orchestrator-
+# injected env per spec OQ-2 — authoritative over anything a `phase` sentinel
+# line carries (the agent doesn't know its own spec_id/pipeline_step). Read
+# once at startup rather than re-reading env on every event.
+AW_SPEC_ID="${AW_SPEC_ID:-}"
+AW_PIPELINE_STEP="${AW_PIPELINE_STEP:-}"
+AW_AGENT="${AW_AGENT:-}"
+AW_TIER="${AW_TIER:-}"
+
 # ── Spinner frames (LOCAL — identical to lib/pipeline-core.sh:150; kept
 #    local rather than sourcing pipeline-core.sh, which is the orchestrator
 #    and carries set/trap side effects) ───────────────────────────────────
@@ -110,8 +126,15 @@ SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
 SPINNER_IDX=0
 
 # ── Renderer state ───────────────────────────────────────────────────────────
-ACTIVE_TEXT=""   # text of current in-progress step; empty = no active step
-ACTIVE_START=0   # epoch second when the current step started
+ACTIVE_TEXT=""       # text of current in-progress step; empty = no active step
+ACTIVE_START=0       # epoch second when the current step started
+DELEG_PARENT_TEXT=""  # SDK-1 B-4: the parent step's text a deleg hangs under.
+                       # Captured from ACTIVE_TEXT at deleg-time, BEFORE
+                       # finalize_active clears it — deleg_reject (which per
+                       # the grammar does NOT touch ACTIVE_TEXT) reuses this
+                       # same tracked value so its milestone still records
+                       # the right parent even though ACTIVE_TEXT is empty
+                       # by then.
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -178,6 +201,20 @@ finalize_active() {
   ACTIVE_START=0
 }
 
+record_milestone() {
+  # SDK-1 Step B-4: thin wrapper over append_milestone closing over the
+  # env-injected identity so each event handler below doesn't repeat it.
+  # Args: <event> <status> <text> <delegated_to> <parent_text>
+  # ponytail: `|| true` — a milestone-write failure (e.g. AW_SPEC_ID unset,
+  # as in the B-1/B-2 golden tests, which reject via append_milestone's own
+  # spec_id guard) must never crash the renderer; rendering is the primary
+  # job, milestones.jsonl is a side-write. No arity re-validation here — B-2
+  # already dropped malformed lines before any handle_event case reaches
+  # this call.
+  append_milestone "$1" "$AW_SPEC_ID" "$AW_PIPELINE_STEP" "$AW_AGENT" "$AW_TIER" \
+    "$2" "$3" "$4" "$5" || true
+}
+
 # ── Event handler ─────────────────────────────────────────────────────────────
 handle_event() {
   local line="$1"
@@ -239,6 +276,9 @@ handle_event() {
       tc=$(tier_color "$f2")
       printf "\n${BOLD}${MAGENTA}▸${NC} ${BOLD}%s${NC} · ${tc}${BOLD}%s${NC}\n" \
         "$f1" "$f2"
+      # No free-text field on phase — agent/tier (f1/f2) are display-only;
+      # the milestone's agent/tier come from the env-injected identity above.
+      record_milestone phase "" "" "" ""
       ;;
 
     step)
@@ -256,6 +296,7 @@ handle_event() {
           ACTIVE_START=$(date +%s)
           SPINNER_IDX=0
           # render_active will be called by the main loop after event processing
+          record_milestone step run "$text" "" ""
           ;;
         ok)
           local display="${text:-$ACTIVE_TEXT}"
@@ -264,6 +305,7 @@ handle_event() {
           else
             printf "  ${GREEN}⏺${NC} %s\n" "$display"
           fi
+          record_milestone step ok "$display" "" ""
           ;;
         fail)
           local display="${text:-$ACTIVE_TEXT}"
@@ -272,6 +314,7 @@ handle_event() {
           else
             printf "  ${RED}✗${NC} %s\n" "$display"
           fi
+          record_milestone step fail "$display" "" ""
           ;;
         *)
           # Arity/vocab guard: status outside run|ok|fail is dropped.
@@ -286,11 +329,16 @@ handle_event() {
       # disturbs the active-spinner/line state.
       $has_arg2 || return 0
       # f1=sidekick_tier  f2=sidekick action description
+      # Capture the parent's text BEFORE finalize_active clears ACTIVE_TEXT —
+      # deleg_reject (below) does not touch ACTIVE_TEXT and reuses this same
+      # tracked value, per the state-var note where it's declared.
+      DELEG_PARENT_TEXT="$ACTIVE_TEXT"
       # Finalise the active step as [DELEGATED], then print the nested ↳ line.
       if [ -n "$ACTIVE_TEXT" ]; then
         finalize_active delegated
       fi
       printf "      ${DIM}↳ sidekick · %s:${NC} %s\n" "$f1" "$f2"
+      record_milestone deleg "" "$f2" "$f1" "$DELEG_PARENT_TEXT"
       ;;
 
     deleg_reject)
@@ -299,6 +347,7 @@ handle_event() {
       # f1=sidekick_tier  f2=rejection reason
       # Print rejection line. No state change — ACTIVE step is unchanged.
       printf "      ${RED}❌ sidekick · %s:${NC} %s\n" "$f1" "$f2"
+      record_milestone deleg_reject "" "$f2" "$f1" "$DELEG_PARENT_TEXT"
       ;;
 
     verdict)
@@ -315,6 +364,9 @@ handle_event() {
       esac
       printf "  ${DIM}verdict:${NC} ${vc}${BOLD}%s${NC} ${DIM}(%s)${NC}\n" \
         "$f1" "$f2"
+      # No OQ-2 column for band/score individually — record the rendered
+      # "<band> (<score>)" form as text so nothing is lost.
+      record_milestone verdict "" "$f1 ($f2)" "" ""
       ;;
 
     done)
@@ -329,6 +381,7 @@ handle_event() {
       # this text contains an embedded "|" character.
       [ -n "$ACTIVE_TEXT" ] && finalize_active ok
       printf "\n${GREEN}✓${NC} ${BOLD}%s${NC}\n\n" "$rest"
+      record_milestone done "" "$rest" "" ""
       ;;
 
     *)
