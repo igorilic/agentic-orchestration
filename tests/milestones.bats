@@ -143,6 +143,15 @@ teardown() {
   [ ! -d ".anw" ]
 }
 
+@test "append_milestone: empty event returns 1 without killing a strict-mode caller" {
+  # F1: required-arg failure must be recoverable (return 1), not ${var:?} which
+  # exits the caller mid-pipeline and bypasses its `|| recover`.
+  run bash -c "set -euo pipefail; source '$MILESTONES_LIB'; append_milestone '' SDK-1 s a t st tx d p || echo RECOVERED; echo DONE"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *RECOVERED* ]]
+  [[ "$output" == *DONE* ]]
+}
+
 # ---------------------------------------------------------------------------
 # No install-side-effects: this file is source-file-only, must never touch
 # the real ~/.copilot (mirrors tests/agent-delegation.bats's guard).

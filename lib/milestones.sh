@@ -27,8 +27,8 @@
 # `|`, double quotes, or backslashes and still round-trip byte-intact;
 # `jq --arg` handles all JSON escaping, so no caller-side quoting is needed.
 append_milestone() {
-  local event="${1:?append_milestone: event is required}"
-  local spec_id="${2:?append_milestone: spec_id is required}"
+  local event="${1:-}"
+  local spec_id="${2:-}"
   local pipeline_step="${3:-}"
   local agent="${4:-}"
   local tier="${5:-}"
@@ -36,6 +36,11 @@ append_milestone() {
   local text="${7:-}"
   local delegated_to="${8:-}"
   local parent_text="${9:-}"
+
+  # ponytail: return 1 (not ${var:?}, which would kill a strict-mode caller
+  # mid-pipeline and bypass its `|| recover`) — consistent with the spec_id
+  # guard below. Empty spec_id falls through to that regex, which rejects it.
+  [ -n "$event" ] || { echo "append_milestone: event is required" >&2; return 1; }
 
   # Guard the path we build from spec_id — mirrors the confidence-gate's
   # active-spec regex (lib/install-project.sh) so a malformed/malicious
