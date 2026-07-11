@@ -180,6 +180,34 @@ spinner_stop() {
   SPINNER_PID=""
 }
 
+# SDK-1 Step B-5: agent name -> model tier, for the orchestrator to inject
+# AW_TIER (renderer badge, milestones.jsonl `tier` field).
+#
+# Reads the agent's own frontmatter (`model:` line in
+# agents/claude-code/<agent>.md) instead of a hardcoded case statement — the
+# tier already lives there, so a second copy would drift the moment someone
+# edits an agent's model without remembering this lookup (ponytail: single
+# source of truth). Pure: no side effects, safe to call from any context.
+#
+# Prefers _ANW_SCRIPT_DIR (set by the main dispatcher, honors the BREW-1
+# symlink resolution) and falls back to resolving relative to this file so
+# it also works when pipeline-core.sh is sourced standalone (e.g. tests).
+agent_tier() {
+  local agent="$1"
+  # ponytail: sonnet is the pipeline's most common tier (tdd-developer,
+  # reviewer) — used whenever the agent file is missing/unreadable or its
+  # model: line is absent.
+  local default_tier="sonnet"
+  local script_dir="${_ANW_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  local agent_file="$script_dir/agents/claude-code/${agent}.md"
+
+  [ -f "$agent_file" ] || { echo "$default_tier"; return; }
+
+  local tier
+  tier="$(grep -m1 '^model:' "$agent_file" | sed 's/^model:[[:space:]]*//')"
+  echo "${tier:-$default_tier}"
+}
+
 run_copilot_agent() {
   local agent="$1"
   local prompt="$2"
