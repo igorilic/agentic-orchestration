@@ -25,6 +25,7 @@
 RENDERER="$BATS_TEST_DIRNAME/../lib/render-stream.sh"
 FIXTURE="$BATS_TEST_DIRNAME/fixtures/sdk-1/basic.sentinels"
 GOLDEN="$BATS_TEST_DIRNAME/fixtures/sdk-1/basic.golden"
+MALFORMED="$BATS_TEST_DIRNAME/fixtures/sdk-1/malformed.sentinels"
 
 setup() {
   TMP_OUT="$(mktemp)"
@@ -64,4 +65,85 @@ teardown() {
   grep -qF "❌ sidekick · Haiku:" "$TMP_OUT"                # deleg_reject
   grep -qF "verdict: GREEN (94)" "$TMP_OUT"                # verdict
   grep -qF "✓ All done | finished" "$TMP_OUT"              # done
+}
+
+# ---------------------------------------------------------------------------
+# SDK-1 Step B-2: arity validation (OQ-1 hardening).
+#
+# The production renderer must DROP malformed / arity-short sentinel lines
+# instead of mis-rendering them (spike gap #1, spikes/sdk-1-renderer/FINDINGS.md
+# "Left as-is" item 1: "@@ANW|step|run" with no text field silently rendered
+# as "⏺ run" — the status keyword mis-displayed as the milestone text). Per
+# spec OQ-1's "Arity validation" decision: unknown event types and any known
+# event missing its required field(s) (phase=2, step=2, deleg=2,
+# deleg_reject=2, verdict=2, done=1 free-text) are dropped, not rendered.
+# Dropping is line-local — a valid line elsewhere in the same stream must
+# still render, and no malformed input may crash the renderer.
+#
+# tests/fixtures/sdk-1/malformed.sentinels uses the LITERAL "@@ANW|" prefix
+# (renderer input, not agent-visible prose) and interleaves one valid line
+# among 8 malformed ones covering every case below.
+# ---------------------------------------------------------------------------
+
+@test "render-stream --plain: step|run with no text field is not rendered as a status keyword" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "run" "$TMP_OUT"
+}
+
+@test "render-stream --plain: step with an out-of-enum status is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "Some malformed status text" "$TMP_OUT"
+  ! grep -qF "pending" "$TMP_OUT"
+}
+
+@test "render-stream --plain: unknown event type is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "bogus" "$TMP_OUT"
+  ! grep -qF "x" "$TMP_OUT"
+}
+
+@test "render-stream --plain: phase missing its tier field is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "▸" "$TMP_OUT"
+  ! grep -qF "architect" "$TMP_OUT"
+}
+
+@test "render-stream --plain: deleg missing its text field is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "↳" "$TMP_OUT"
+}
+
+@test "render-stream --plain: deleg_reject missing its text field is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "❌" "$TMP_OUT"
+}
+
+@test "render-stream --plain: verdict missing its score field is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "verdict:" "$TMP_OUT"
+}
+
+@test "render-stream --plain: done missing its text field is dropped" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  ! grep -qF "✓" "$TMP_OUT"
+}
+
+@test "render-stream --plain: a valid line interleaved among malformed ones still renders (dropping is line-local)" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  grep -qF "  ⏺ Valid step renders fine" "$TMP_OUT"
+}
+
+@test "render-stream --plain: malformed stream renders ONLY the one valid line" {
+  bash "$RENDERER" --plain < "$MALFORMED" > "$TMP_OUT"
+  [ "$(cat "$TMP_OUT")" = "  ⏺ Valid step renders fine" ]
+}
+
+@test "render-stream --plain: an all-malformed stream does not crash and exits 0" {
+  run bash -c "grep -v 'Valid step renders fine' '$MALFORMED' | bash '$RENDERER' --plain"
+  [ "$status" -eq 0 ]
+}
+
+@test "render-stream --plain: B-1 golden regression is unaffected by arity validation" {
+  bash "$RENDERER" --plain < "$FIXTURE" > "$TMP_OUT"
+  diff "$TMP_OUT" "$GOLDEN"
 }

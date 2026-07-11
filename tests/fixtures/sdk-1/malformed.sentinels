@@ -1,0 +1,9 @@
+@@ANW|phase|architect
+@@ANW|step|run
+@@ANW|step|pending|Some malformed status text
+@@ANW|deleg|Haiku
+@@ANW|deleg_reject|Haiku
+@@ANW|verdict|GREEN
+@@ANW|done
+@@ANW|bogus|x
+@@ANW|step|ok|Valid step renders fine
