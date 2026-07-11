@@ -26,6 +26,8 @@ RENDERER="$BATS_TEST_DIRNAME/../lib/render-stream.sh"
 FIXTURE="$BATS_TEST_DIRNAME/fixtures/sdk-1/basic.sentinels"
 GOLDEN="$BATS_TEST_DIRNAME/fixtures/sdk-1/basic.golden"
 MALFORMED="$BATS_TEST_DIRNAME/fixtures/sdk-1/malformed.sentinels"
+DELEG_FIXTURE="$BATS_TEST_DIRNAME/fixtures/sdk-1/delegation.sentinels"
+MILESTONES_LOG=".anw/specs/SDK-1-milestones.jsonl"
 
 setup() {
   TMP_OUT="$(mktemp)"
@@ -33,6 +35,26 @@ setup() {
 
 teardown() {
   rm -f "$TMP_OUT"
+  # SDK-1 Step B-4: only the milestone-persistence tests below set SANDBOX
+  # (via run_deleg_render) — clean it up here so every other test's
+  # setup/teardown stays untouched.
+  if [ -n "${SANDBOX:-}" ]; then
+    cd "$BATS_TEST_DIRNAME" || true
+    rm -rf "$SANDBOX"
+    unset SANDBOX
+  fi
+}
+
+# SDK-1 Step B-4: runs the renderer over delegation.sentinels with the
+# orchestrator-injected identity env, inside a throwaway sandbox cwd (mirrors
+# tests/milestones.bats) so the writer's relative .anw/specs/ path never
+# touches the real project tree. Leaves cwd IN the sandbox so callers can
+# read $MILESTONES_LOG with a relative path; teardown() cds back out.
+run_deleg_render() {
+  SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/aw-render-milestones-XXXXXX")"
+  cd "$SANDBOX"
+  AW_SPEC_ID=SDK-1 AW_PIPELINE_STEP=4.2 AW_AGENT=tdd-developer AW_TIER=sonnet \
+    bash "$RENDERER" --plain < "$DELEG_FIXTURE" > "$TMP_OUT"
 }
 
 @test "render-stream --plain: exits 0 on the basic fixture" {
@@ -146,4 +168,44 @@ teardown() {
 @test "render-stream --plain: B-1 golden regression is unaffected by arity validation" {
   bash "$RENDERER" --plain < "$FIXTURE" > "$TMP_OUT"
   diff "$TMP_OUT" "$GOLDEN"
+}
+
+# ---------------------------------------------------------------------------
+# SDK-1 Step B-4: renderer persists milestones as each sentinel is finalized.
+#
+# lib/render-stream.sh sources lib/milestones.sh and calls append_milestone
+# for each well-formed event, injecting spec_id/pipeline_step/agent/tier from
+# the orchestrator env (identity is authoritative from env, per spec OQ-2 —
+# not re-derived from the phase sentinel's own agent/tier fields). B-2's
+# arity validation already dropped malformed lines before they reach a
+# finalize point, so no milestone is ever written for a dropped line.
+# ---------------------------------------------------------------------------
+
+@test "render-stream --plain: persists milestones with orchestrator-injected spec_id/pipeline_step/agent/tier" {
+  run_deleg_render
+  [ -f "$MILESTONES_LOG" ]
+  [ "$(jq -r '.spec_id' "$MILESTONES_LOG" | sort -u)" = "SDK-1" ]
+  [ "$(jq -r '.pipeline_step' "$MILESTONES_LOG" | sort -u)" = "4.2" ]
+  [ "$(jq -r '.agent' "$MILESTONES_LOG" | sort -u)" = "tdd-developer" ]
+  [ "$(jq -r '.tier' "$MILESTONES_LOG" | sort -u)" = "sonnet" ]
+}
+
+@test "render-stream --plain: deleg milestone carries event=deleg, delegated_to=haiku, parent_text=the active parent step's text" {
+  run_deleg_render
+  [ "$(jq -r 'select(.event=="deleg") | .delegated_to' "$MILESTONES_LOG")" = "haiku" ]
+  [ "$(jq -r 'select(.event=="deleg") | .text' "$MILESTONES_LOG")" = "Generated class stubs" ]
+  [ "$(jq -r 'select(.event=="deleg") | .parent_text' "$MILESTONES_LOG")" = "Implementing feature" ]
+}
+
+@test "render-stream --plain: step milestone carries its status" {
+  run_deleg_render
+  [ "$(jq -r 'select(.event=="step") | .status' "$MILESTONES_LOG")" = "run" ]
+  [ "$(jq -r 'select(.event=="step") | .text' "$MILESTONES_LOG")" = "Implementing feature" ]
+}
+
+@test "render-stream --plain: no milestones written when AW_SPEC_ID is unset (B-1/B-2 tests stay side-effect-free)" {
+  SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/aw-render-milestones-XXXXXX")"
+  cd "$SANDBOX"
+  bash "$RENDERER" --plain < "$FIXTURE" > "$TMP_OUT"
+  [ ! -d ".anw" ]
 }
