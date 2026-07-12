@@ -208,15 +208,17 @@ agent_tier() {
   echo "${tier:-$default_tier}"
 }
 
-# SDK-1 Step B-6: run_agent_streamed — errexit/pipefail-safe streaming pipe.
+# SDK-1 Step B-6/B-7: run_agent_streamed — errexit/pipefail-safe streaming
+# pipe.
 #
 # Runs <cmd...>, merging stderr into stdout and piping the combined stream
-# through `cat` (a passthrough placeholder for now — SDK-1 Step B-7 swaps
-# `cat` for the sentinel renderer; no other change needed here). Returns
-# the AGENT's own exit code (PIPESTATUS[0]), never cat's.
+# through `tee <debug_log>` (raw-stream audit capture, AC-8) into the
+# sentinel renderer (lib/render-stream.sh, identity injected via AW_* env).
+# Returns the AGENT's own exit code (PIPESTATUS[0]), never a downstream
+# stage's — adding pipe stages after "$@" never changes index 0.
 #
-# Why `if cmd | cat; then ... else ...; fi` and not the more obvious
-# `cmd | cat || true; return "${PIPESTATUS[0]}"`: under `set -euo pipefail`
+# Why `if cmd | ... ; then ... else ...; fi` and not the more obvious
+# `cmd | ... || true; return "${PIPESTATUS[0]}"`: under `set -euo pipefail`
 # (ai-native-workflow:25), a *simple command* that fails trips errexit
 # immediately — before the next line can read ${PIPESTATUS[0]} — so the
 # pipe has to run somewhere errexit doesn't apply. `|| true` looks like
@@ -230,9 +232,18 @@ agent_tier() {
 # itself one of bash's built-in errexit exemptions, and nothing else runs
 # between the pipe finishing and the `else` branch reading PIPESTATUS, so
 # it's captured intact in both branches.
+#
+# Args: <debug_log> <render_script> <spec_id> <pipeline_step> <agent> <tier> -- <cmd...>
+# The leading 6 args describe the downstream stage; "$@" (after `shift 6`)
+# is the agent invocation itself (e.g. `claude --agent=... -p ...`).
 run_agent_streamed() {
+  local debug_log="$1" render="$2" spec_id="$3" pipeline_step="$4" agent="$5" tier="$6"
+  shift 6
   local exit_code
-  if "$@" 2>&1 | cat; then
+  if "$@" 2>&1 | tee "$debug_log" \
+       | AW_SPEC_ID="$spec_id" AW_PIPELINE_STEP="$pipeline_step" AW_AGENT="$agent" AW_TIER="$tier" \
+         bash "$render"
+  then
     exit_code=0
   else
     exit_code="${PIPESTATUS[0]}"
@@ -296,25 +307,39 @@ run_claude_agent() {
   dim "Prompt: $prompt"
   echo ""
 
-  spinner_start "$agent"
+  # SDK-1 Step B-7: resolve lib/render-stream.sh relative to this file's own
+  # directory (mirrors agent_tier()'s _ANW_SCRIPT_DIR resolution above) so
+  # this works whether pipeline-core.sh is sourced by the main dispatcher or
+  # standalone (tests).
+  local script_dir="${_ANW_SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  local render="$script_dir/lib/render-stream.sh"
 
-  # ponytail: LAST_AGENT_OUTPUT is empty because output now streams
-  # straight through run_agent_streamed (SDK-1 Step B-6) instead of being
-  # captured to a file first. That leaves handle_agent_questions' QUESTION:
-  # re-prompt (--allowed-questions) inert on this path — there's nothing
-  # for it to scan. B-7's current scope only tees the raw stream to a
-  # debug log for the AC-8 audit trail; it does NOT repopulate
-  # LAST_AGENT_OUTPUT. Fixing this requires B-7 to be extended to also
-  # restore LAST_AGENT_OUTPUT from that same tee'd capture (tracked in the
-  # todo plan). Known B-6 gap, not silently patched here.
-  LAST_AGENT_OUTPUT=""
+  # ponytail: one debug log per spec+agent under .anw/specs/, mirroring the
+  # <id>-milestones.jsonl naming convention. Captures the FULL raw stream
+  # (sentinel + non-sentinel) so AC-8's audit gap (previously only the last
+  # 20 lines, and only on failure) is closed on every run. Overwritten on
+  # each re-run of the same agent for the same spec (tee truncates, no -a);
+  # upgrade to a timestamped/appended path if multi-run audit history is
+  # ever needed — not required by AC-8, which only asks that the
+  # non-sentinel stream be captured, not indefinitely retained.
+  local debug_log=".anw/specs/${AW_SPEC_ID:-unknown}-${agent}-debug.log"
+  mkdir -p "$(dirname "$debug_log")"
 
+  # SDK-1 Step B-7: the generic per-agent spinner is gone from this path —
+  # the renderer owns the active-line spinner now (replace, not coexist;
+  # spikes/sdk-1-renderer/FINDINGS.md "Spinner conflict" proved two
+  # independent \r-writers on the same line corrupt each other).
   local exit_code=0
-  run_agent_streamed claude --agent="$agent" \
+  run_agent_streamed "$debug_log" "$render" "${AW_SPEC_ID:-}" "${AW_PIPELINE_STEP:-}" "$agent" "$(agent_tier "$agent")" \
+    claude --agent="$agent" \
     --dangerously-skip-permissions \
     -p "$prompt" || exit_code=$?
 
-  spinner_stop
+  # SDK-1 Step B-7: restore LAST_AGENT_OUTPUT from the same tee'd capture
+  # used for the debug log above — closes the B-6 regression where
+  # handle_agent_questions' QUESTION: scan (--allowed-questions) went dead
+  # because streaming left nothing in LAST_AGENT_OUTPUT to scan.
+  LAST_AGENT_OUTPUT="$(cat "$debug_log" 2>/dev/null || true)"
 
   if [ "$exit_code" -ne 0 ]; then
     audit_log "AGENT_ERROR" "Agent=$agent ExitCode=$exit_code"
