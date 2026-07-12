@@ -154,3 +154,48 @@ EOF
   [ "$status" -eq 0 ]
   grep -qF "[AGENT_OK] Agent=tdd-developer completed" "$SANDBOX/audit.log"
 }
+
+# ---------------------------------------------------------------------------
+# SDK-1 Step B-6 follow-up (qa/reviewer F2): the 3 tests above only ever vary
+# the AGENT's exit code -- the downstream stage (`cat`) always succeeds, so
+# under `pipefail` its exit status IS the agent's exit status and `$?` reads
+# the same as `${PIPESTATUS[0]}` by coincidence. That means those 3 tests
+# stay green even if run_agent_streamed's else-branch is reverted from
+# `exit_code="${PIPESTATUS[0]}"` back to the buggy `exit_code=$?` (both
+# gates reproduced this). This test breaks the coincidence: the AGENT
+# succeeds but the DOWNSTREAM stage (the `cat` passthrough Step B-7 will
+# replace with the renderer) fails -- exactly the shape of a B-7 renderer
+# crash. Only `${PIPESTATUS[0]}` gets this right.
+# ---------------------------------------------------------------------------
+
+@test "run_claude_agent (streamed): agent exits 0 but downstream (cat) fails -- returns 0 (PIPESTATUS[0], the agent's code), not the downstream's" {
+  STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/aw-fake-claude-XXXXXX")"
+  cp "$FAKE_CLAUDE" "$STUB_BIN/claude"
+  chmod +x "$STUB_BIN/claude"
+  # A failing `cat` stub, shadowing the real one via PATH order below. Drains
+  # stdin through the real /bin/cat first so the agent side never sees
+  # SIGPIPE, then exits non-zero -- simulating a downstream stage that
+  # consumes the whole stream but fails afterward.
+  cat > "$STUB_BIN/cat" << 'STUB_EOF'
+#!/bin/sh
+/bin/cat >/dev/null
+exit 42
+STUB_EOF
+  chmod +x "$STUB_BIN/cat"
+  SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/aw-pipeline-audit-XXXXXX")"
+
+  SCRIPT="$SANDBOX/probe.sh"
+  cat > "$SCRIPT" << EOF
+set -euo pipefail
+AUDIT_LOG="$SANDBOX/audit.log"
+# shellcheck source=lib/common.sh disable=SC1091
+source "$COMMON_LIB"
+# shellcheck source=lib/pipeline-core.sh disable=SC1091
+source "$PIPELINE_CORE"
+run_claude_agent tdd-developer "do a thing"
+EOF
+
+  run env PATH="$STUB_BIN:$PATH" FAKE_CLAUDE_EXIT_CODE=0 bash "$SCRIPT"
+  [ "$status" -eq 0 ]
+  grep -qF "[AGENT_OK] Agent=tdd-developer completed" "$SANDBOX/audit.log"
+}
