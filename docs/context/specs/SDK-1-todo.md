@@ -259,7 +259,7 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] B-4  Renderer persists injected milestone fields
 - [x] B-5  agent_tier lookup
 - [x] B-6  run_agent_streamed errexit/PIPESTATUS pipe (behavior-preserving) — restores AGENT_OK/AGENT_ERROR reachability (was dead code on bare failure)
-- [ ] B-7  Attach renderer + milestones, remove spinner, debug log
+- [x] B-7  Attach renderer + milestones, remove spinner, debug log — restores LAST_AGENT_OUTPUT; surfaced a pre-existing (out-of-scope) bug in handle_agent_questions' interactive answer loop
 - [ ] B-8  milestones-summary cost/quality script
 - [ ] B-9  Integration: end-to-end streamed step with delegation
 </content>
