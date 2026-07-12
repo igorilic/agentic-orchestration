@@ -208,6 +208,42 @@ agent_tier() {
   echo "${tier:-$default_tier}"
 }
 
+# SDK-1 Step B-6: run_agent_streamed — errexit/pipefail-safe streaming pipe.
+#
+# Runs <cmd...>, merging stderr into stdout and piping the combined stream
+# through `cat` (a passthrough placeholder for now — SDK-1 Step B-7 swaps
+# `cat` for the sentinel renderer; no other change needed here). Returns
+# the AGENT's own exit code (PIPESTATUS[0]), never cat's.
+#
+# Why `if cmd | cat; then ... else ...; fi` and not the more obvious
+# `cmd | cat || true; return "${PIPESTATUS[0]}"`: under `set -euo pipefail`
+# (ai-native-workflow:25), a *simple command* that fails trips errexit
+# immediately — before the next line can read ${PIPESTATUS[0]} — so the
+# pipe has to run somewhere errexit doesn't apply. `|| true` looks like
+# that place (bash exempts the LHS of `||` from errexit), but it's a trap
+# of its own: once the piped command fails and `true` actually runs as the
+# RHS, `true`'s own (trivial, one-stage) execution OVERWRITES PIPESTATUS —
+# by the time the next line reads ${PIPESTATUS[0]}, it no longer reflects
+# the agent, it reflects `true` (always 0). Verified empirically:
+# `false | cat || true; echo "${PIPESTATUS[@]}"` prints `0`, not `1`. An
+# `if`/`else` doesn't have this problem — the condition following `if` is
+# itself one of bash's built-in errexit exemptions, and nothing else runs
+# between the pipe finishing and the `else` branch reading PIPESTATUS, so
+# it's captured intact in both branches.
+run_agent_streamed() {
+  local exit_code
+  if "$@" 2>&1 | cat; then
+    exit_code=0
+  else
+    exit_code="${PIPESTATUS[0]}"
+  fi
+  return "$exit_code"
+}
+
+# ponytail: run_copilot_agent below has the identical blocking-capture
+# landmine (spikes/sdk-1-renderer/FINDINGS.md "run_copilot_agent is a
+# near-duplicate") — same run_agent_streamed fix applies there later;
+# deferred, GitLab/Copilot pipeline is out of MVP scope for SDK-1.
 run_copilot_agent() {
   local agent="$1"
   local prompt="$2"
@@ -260,33 +296,30 @@ run_claude_agent() {
   dim "Prompt: $prompt"
   echo ""
 
-  local output_file
-  output_file=$(mktemp)
-
   spinner_start "$agent"
 
-  claude --agent="$agent" \
+  # ponytail: LAST_AGENT_OUTPUT can no longer be populated from a
+  # full-text buffer here — output streams straight through
+  # run_agent_streamed (SDK-1 Step B-6) instead of being captured to a file
+  # first. handle_agent_questions' QUESTION: re-prompt (--allowed-questions)
+  # has no text to scan until Step B-7 adds a tee-to-debug-log capture
+  # point (its own stated scope: "capture debug log"). Known B-6 -> B-7
+  # gap, not silently patched here.
+  LAST_AGENT_OUTPUT=""
+
+  local exit_code=0
+  run_agent_streamed claude --agent="$agent" \
     --dangerously-skip-permissions \
-    -p "$prompt" > "$output_file" 2>&1
-  local exit_code=$?
+    -p "$prompt" || exit_code=$?
 
   spinner_stop
 
-  # Show output and save for question detection
-  LAST_AGENT_OUTPUT=""
-  if [ -s "$output_file" ]; then
-    cat "$output_file"
-    LAST_AGENT_OUTPUT=$(cat "$output_file")
-  fi
-
   if [ "$exit_code" -ne 0 ]; then
     audit_log "AGENT_ERROR" "Agent=$agent ExitCode=$exit_code"
-    audit_log "AGENT_ERROR" "Output (last 20 lines): $(tail -20 "$output_file" 2>/dev/null)"
-    rm -f "$output_file"
     error "Agent $agent failed (exit code $exit_code)"
     return "$exit_code"
   fi
-  rm -f "$output_file"
+
   audit_log "AGENT_OK" "Agent=$agent completed"
   success "$agent completed"
 }
