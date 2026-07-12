@@ -298,13 +298,15 @@ run_claude_agent() {
 
   spinner_start "$agent"
 
-  # ponytail: LAST_AGENT_OUTPUT can no longer be populated from a
-  # full-text buffer here — output streams straight through
-  # run_agent_streamed (SDK-1 Step B-6) instead of being captured to a file
-  # first. handle_agent_questions' QUESTION: re-prompt (--allowed-questions)
-  # has no text to scan until Step B-7 adds a tee-to-debug-log capture
-  # point (its own stated scope: "capture debug log"). Known B-6 -> B-7
-  # gap, not silently patched here.
+  # ponytail: LAST_AGENT_OUTPUT is empty because output now streams
+  # straight through run_agent_streamed (SDK-1 Step B-6) instead of being
+  # captured to a file first. That leaves handle_agent_questions' QUESTION:
+  # re-prompt (--allowed-questions) inert on this path — there's nothing
+  # for it to scan. B-7's current scope only tees the raw stream to a
+  # debug log for the AC-8 audit trail; it does NOT repopulate
+  # LAST_AGENT_OUTPUT. Fixing this requires B-7 to be extended to also
+  # restore LAST_AGENT_OUTPUT from that same tee'd capture (tracked in the
+  # todo plan). Known B-6 gap, not silently patched here.
   LAST_AGENT_OUTPUT=""
 
   local exit_code=0

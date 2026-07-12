@@ -200,14 +200,23 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
   `refactor(pipeline): stream run_claude_agent through an errexit-safe pipe`.
 
 ### Step B-7: Attach renderer + milestones; remove generic spinner; capture debug log
+> Closes B-6/qa-F1: streaming (B-6) left `LAST_AGENT_OUTPUT` empty, which silently regressed
+> `--allowed-questions`/`handle_agent_questions` to dead code on `pipeline_github_feature` after
+> `requirements-engineer`/`architect` (see the `ponytail:` comment at `lib/pipeline-core.sh:301`).
+> This step's `tee` closes both gaps with one capture point, not just the debug-log half.
 - **Test**: `tests/pipeline-core-stream.bats` (extend) with a fake `claude` emitting sentinels:
   rendered milestones appear live; `.anw/specs/<id>-milestones.jsonl` is populated with injected
   `spec_id`/`pipeline_step`/`agent`/`tier`; non-sentinel lines are suppressed from the live view but
   present in the debug log (AC-8); assert **no** `spinner_start`/`spinner_stop` on the streamed path
   and no leftover feeder/ticker/spinner processes after the run (incl. a shim that dies mid-stream).
+  Also: a fake `claude` emitting a `QUESTION: ...` line through the streamed path with
+  `ALLOWED_QUESTIONS>0` set → assert `handle_agent_questions` detects it and re-prompts (reuse the
+  stub-override pattern from `tests/cli-confidence.bats:249` to isolate the assertion from the rest
+  of `run_claude_agent`'s dependencies).
 - **Implement**: swap the `cat` passthrough for `bash "$RENDER"` with injected env; remove
   `spinner_start`/`spinner_stop` from the streamed path (replace-not-coexist); `tee` the raw stream
-  to a debug log (closes the audit gap).
+  to a debug log (closes the audit gap) **and** restore `LAST_AGENT_OUTPUT` from that same tee'd
+  capture so `--allowed-questions`/`handle_agent_questions` works again on the streamed path.
 - **Files**: `lib/pipeline-core.sh` (modified), `tests/pipeline-core-stream.bats` (modified).
 - **Commit**: `test(pipeline): live render + milestones + suppressed non-sentinel output` then
   `feat(pipeline): live sentinel render replaces generic spinner`.
