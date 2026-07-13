@@ -398,14 +398,15 @@ run_claude_agent tdd-developer "do a thing"
 # handle_agent_questions' QUESTION: detection from a second real streamed
 # invocation.
 run_claude_agent() { echo "STUBBED_RERUN_CALLED agent=\$1"; }
-# ponytail: guarded with || true -- handle_agent_questions' interactive
-# answer-collection loop has a PRE-EXISTING bug (predates B-7, not part of
-# its scope): the inner \`read -r answer\` sits inside \`while ... done <<<
-# "\$questions"\`, so it inherits that here-string's stdin instead of real
-# input and hits EOF. B-7 only owns detection (LAST_AGENT_OUTPUT restored
-# from the tee'd debug-log capture) -- proven by the header/Q1 assertions
-# below, which run BEFORE the buggy read. Flagged for a follow-up fix, not
-# silently patched here (out of this step's scope).
+# ponytail: guarded with || true -- this single-question case happens to
+# stay green even on the PRE-EXISTING fd bug fixed below (the buggy inner
+# \`read -r answer\` hits EOF on the here-string only once a SECOND question
+# line exists to shift into; with exactly 1 question there's nothing left to
+# shift, so this test's header/Q1 assertions -- which run before that read
+# either way -- were never proof of a fix). See the fd-separation test below
+# for the actual regression coverage (odd/default question count, answer
+# mapping, no errexit abort). \`|| true\` is kept here defensively; it's a
+# no-op post-fix.
 handle_agent_questions || true
 EOF
 
@@ -413,4 +414,76 @@ EOF
   run env PATH="$STUB_BIN:$PATH" AW_SPEC_ID=SDK-1 bash "$SCRIPT" < "$SANDBOX/answer.txt"
   [[ "$output" == *"has 1 question(s)"* ]]
   [[ "$output" == *"What should the button say?"* ]]
+}
+
+# ---------------------------------------------------------------------------
+# B-7 close-out (F2): handle_agent_questions fd-separation.
+#
+# Root cause: the outer `while IFS= read -r question; do ... read -r answer
+# ... done <<< "$questions"` redirects the WHOLE loop's stdin to the
+# here-string, so the inner `read -r answer` (meant to read the real
+# terminal/pipe) instead reads the NEXT line of $questions -- shifting every
+# question into the following iteration's "answer" instead of prompting the
+# user. With an ODD question count (3, the documented `--allowed-questions`
+# default with no N given, see `ai-native-workflow:119`) the last iteration's
+# `read -r answer` then finds the here-string exhausted, fails, and --
+# because bare call sites (e.g. `lib/pipelines.sh`) invoke
+# `handle_agent_questions` without a `|| true` guard -- aborts the whole
+# pipeline under `set -euo pipefail`. (Even counts silently garble answers
+# instead of aborting: not exercised here, `|| true` on a bare call site is
+# the higher-severity failure mode.)
+#
+# Fix: give the outer loop its OWN fd (`done 3<<< "$questions"`,
+# `read -r question <&3`) so the inner `read -r answer` keeps the real
+# stdin. This test drives the fix with the documented default -- 3 real
+# questions from the fake `claude` shim, 3 real answers piped on stdin (no
+# `<&3`, no here-string) -- and asserts: no crash, exit 0, and each answer
+# lands next to ITS OWN question in the rebuilt follow-up prompt (not
+# shifted onto a neighboring question, not dropped).
+# ---------------------------------------------------------------------------
+
+@test "handle_agent_questions: 3 questions (odd, the documented default) each map to their own answer via a separate fd, no crash" {
+  STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/aw-fake-claude-3q-XXXXXX")"
+  cat > "$STUB_BIN/claude" << 'SHIM_EOF'
+#!/bin/sh
+printf 'QUESTION: What should the button say?\n'
+printf 'QUESTION: What color scheme?\n'
+printf 'QUESTION: Which icon library?\n'
+exit 0
+SHIM_EOF
+  chmod +x "$STUB_BIN/claude"
+  SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/aw-pipeline-audit-XXXXXX")"
+
+  SCRIPT="$SANDBOX/probe.sh"
+  cat > "$SCRIPT" << EOF
+set -euo pipefail
+cd "$SANDBOX"
+AUDIT_LOG="$SANDBOX/audit.log"
+ALLOWED_QUESTIONS=3
+# shellcheck source=lib/common.sh disable=SC1091
+source "$COMMON_LIB"
+# shellcheck source=lib/pipeline-core.sh disable=SC1091
+source "$PIPELINE_CORE"
+run_claude_agent tdd-developer "do a thing"
+# Stub the recursive re-run (reuses the stub-override pattern from
+# tests/cli-confidence.bats:249) so this test can inspect the rebuilt
+# follow-up prompt instead of triggering a second real streamed invocation.
+run_claude_agent() {
+  echo "STUBBED_RERUN_PROMPT_START"
+  echo "\$2"
+  echo "STUBBED_RERUN_PROMPT_END"
+}
+handle_agent_questions
+EOF
+
+  printf 'Launch it\nOcean blue\nLucide\n' > "$SANDBOX/answers.txt"
+  run env PATH="$STUB_BIN:$PATH" AW_SPEC_ID=SDK-1 bash "$SCRIPT" < "$SANDBOX/answers.txt"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"has 3 question(s)"* ]]
+
+  prompt="$(printf '%s\n' "$output" | awk '/STUBBED_RERUN_PROMPT_START/,/STUBBED_RERUN_PROMPT_END/')"
+  [[ "$prompt" == *$'Q: What should the button say?\nA: Launch it'* ]]
+  [[ "$prompt" == *$'Q: What color scheme?\nA: Ocean blue'* ]]
+  [[ "$prompt" == *$'Q: Which icon library?\nA: Lucide'* ]]
 }
