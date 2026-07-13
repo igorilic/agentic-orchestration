@@ -232,14 +232,30 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
   `feat(summary): add milestones cost/quality summary script`.
 
 ### Step B-9 (Integration): end-to-end streamed step on `pipeline_github_feature`
+> Closes B-7/reviewer-F0: `AW_SPEC_ID`/`AW_PIPELINE_STEP` were never exported anywhere in
+> `lib/pipelines.sh`, so `append_milestone`'s spec_id guard silently drops every write in
+> production — `milestones.jsonl` only ever existed under hand-injected test env. This step wires
+> the real env exports AND proves it with an integration test that drives the real pipeline path.
 - **Test**: `tests/sdk-1-integration.bats` (new): with a fake `claude` on `PATH` emitting a
   realistic one-step stream (`phase → step run/ok → deleg haiku → step ok "reviewed & accepted" →
   done`), drive the streamed `run_claude_agent` path for one pipeline step and assert:
   (1) live render output present; (2) a complete `.anw/specs/<id>-milestones.jsonl` including the
   delegation **and** its accept milestone; (3) agent exit semantics preserved (success + a forced
   failure case); (4) `scripts/milestones-summary.sh` reports 1 delegation, 1 accept, 0 reject.
-- **Implement**: only glue/wiring needed to make the end-to-end path run (no new behavior).
-- **Files**: `tests/sdk-1-integration.bats` (new), `tests/fixtures/sdk-1/e2e.sentinels` (new).
+  **Must drive the real `lib/pipelines.sh` path** (e.g. call `pipeline_github_feature` itself, or
+  the smallest real function/step within it that reaches `run_claude_agent`) — **not**
+  hand-injected `AW_SPEC_ID`/`AW_PIPELINE_STEP`/`AW_AGENT`/`AW_TIER` env set directly by the test,
+  which is how B-4/B-7's renderer-level tests isolate the renderer and would NOT catch this gap.
+  Assert `.anw/specs/<id>-milestones.jsonl` is non-empty after a real step run through that path.
+- **Implement**: only glue/wiring needed to make the end-to-end path run (no new behavior), plus:
+  (1) export `AW_SPEC_ID="$id"` once near the top of each pipeline function in `lib/pipelines.sh`
+  (e.g. `pipeline_github_feature`) so it's set for every `run_claude_agent` call within it;
+  (2) set `AW_PIPELINE_STEP="<step>"` at each individual `run_claude_agent` call site (e.g.
+  `AW_PIPELINE_STEP="4.$i" run_claude_agent "tdd-developer" "Step $i of $todo_file"`) so the
+  milestone line records which step actually produced it. Without both, `append_milestone`'s
+  spec_id guard keeps dropping every write in production, per the reviewer-F0 gap above.
+- **Files**: `lib/pipelines.sh` (modified), `tests/sdk-1-integration.bats` (new),
+  `tests/fixtures/sdk-1/e2e.sentinels` (new).
 - **Commit**: `test(sdk-1): end-to-end streamed step with delegation` then
   `feat(sdk-1): wire live streaming + delegation into github-feature`.
 
