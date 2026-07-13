@@ -277,5 +277,5 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] B-6  run_agent_streamed errexit/PIPESTATUS pipe (behavior-preserving) — restores AGENT_OK/AGENT_ERROR reachability (was dead code on bare failure)
 - [x] B-7  Attach renderer + milestones, remove spinner, debug log — restores LAST_AGENT_OUTPUT; surfaced a pre-existing (out-of-scope) bug in handle_agent_questions' interactive answer loop
 - [x] B-8  milestones-summary cost/quality script
-- [ ] B-9  Integration: end-to-end streamed step with delegation
+- [x] B-9  Integration: end-to-end streamed step with delegation — drives the real `ai-native-workflow run github-feature` entrypoint; RED before Part-1 wiring, GREEN after
 </content>
