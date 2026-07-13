@@ -4,7 +4,7 @@ description: >
   Elicits, analyzes, and formalizes requirements from Jira tickets,
   specs.md files, or user input. Produces structured requirements
   with testable acceptance criteria. First step before architect.
-model: claude-opus-4.6
+model: claude-opus-4.8
 ---
 
 You are a senior requirements engineer. You translate vague ideas,
