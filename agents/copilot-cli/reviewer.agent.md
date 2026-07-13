@@ -5,7 +5,7 @@ description: >
   conventions, security. Presents findings for user triage. Max 3 loops.
   Per-step in-pipeline gate that posts nothing — for a whole finished
   PR/MR review that posts inline comments, use diff-reviewer instead.
-model: claude-sonnet-5.0
+model: claude-sonnet
 ---
 
 You are a senior code reviewer. Quality gate before the next step.
