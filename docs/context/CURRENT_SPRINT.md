@@ -8,12 +8,13 @@
   - Todo: `docs/context/specs/SDK-1-todo.md`
   - ADR: `docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md`
   - Spike (de-risked): `spikes/sdk-1-renderer/FINDINGS.md`
-  - Phase: **Track A complete** (A-1→A-6): sidekick delegation capability + full-pipeline sentinel emission. Every step qa+reviewer-hardened (section-scoped, mutation/field-order/polarity-guarded tests). Next: Track B (live renderer + milestones JSONL).
-  - Steps: 6 / 15 (Track A: 6 ✓ · Track B: 9). A-1 GO/NO-GO gate passed; Track B depends on A only at B-9 integration.
+  - Phase: **Complete — all 16 steps done, ready for PR.** Track A (delegation + full-pipeline emission) + Track B (live renderer, milestones JSONL, orchestrator streaming). Every step qa+reviewer-hardened; branch `feat/sdk-1-sidekick-delegation`, 429/429 tests green, main clean.
+  - Steps: 16 / 16 (Track A: 6 ✓ · Track B: 10 ✓ — B-10 added for the B-7 issue_url capture fix). A-1 GO/NO-GO gate passed.
   - Driver: tdd-developer
   - Scope: GitHub/Claude pipeline only; GitLab/Copilot, replay, whitepaper figure, hard review-gate deferred
   - Tech debt (deferred from A-2 qa/reviewer): F5 — tighten "apply lint/format/type-fix output" wording in BOTH `sidekick.md` and `tdd-developer.md:50` (type-checkers emit diagnostics, not edits — the imprecise phrasing was propagated from sidekick's allowlist into tdd-developer's own allowlist bullet); F6 — add sidekick warning against reading/echoing secret file contents
   - Tech debt (deferred from A-4 qa/reviewer fix loop): F2 — the 3 heavy agents' delegation allowlists (OQ-3) aren't carved against the sidekick's forbidden write-paths (OQ-6) — a parent can delegate a task the sidekick is contractually bound to refuse (e.g. scaffold a CI workflow, a `.git`-touching rename). Not a security hole (the sidekick's own refusal is the safety net), but a spec-coherence gap → architect/spec follow-up; F3 — the parent-review-gate clause names accept/reject of *produced* sidekick output but not the sidekick *refusal-with-no-artifact* path → OQ-4/A-5/orchestrator follow-up
+  - Tech debt (deferred from Track B qa/reviewer): debug log (`<id>-<agent>-debug.log`) is clobbered per run — no multi-run audit history (add a step/timestamp suffix if retention is wanted); the renderer's TTY/FIFO/ticker path has no automated test coverage (verbatim spike port, de-risked manually — a pty test would close it); `run_triage`/`pipeline_finish` bare `run_claude_agent` calls write milestones with an empty `pipeline_step` (`AW_SPEC_ID` is inherited via export so data IS written — only step-attribution is blank)
 
 - **COP-2** — Install Copilot CLI hooks per-project (TDD + confidence gates)
   - Requirements: `docs/context/specs/COP-2-requirements.md`
