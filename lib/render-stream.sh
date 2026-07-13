@@ -128,6 +128,10 @@ SPINNER_IDX=0
 # ── Renderer state ───────────────────────────────────────────────────────────
 ACTIVE_TEXT=""       # text of current in-progress step; empty = no active step
 ACTIVE_START=0       # epoch second when the current step started
+STREAM_START=$(date +%s)  # B-7 close-out F1: epoch for the idle heartbeat's
+                           # elapsed time, captured once here rather than at
+                           # first tick — so elapsed reflects time since the
+                           # renderer started, not time since the first frame.
 DELEG_PARENT_TEXT=""  # SDK-1 B-4: the parent step's text a deleg hangs under.
                        # Captured from ACTIVE_TEXT at deleg-time, BEFORE
                        # finalize_active clears it — deleg_reject (which per
@@ -169,11 +173,22 @@ clear_line() {
 }
 
 render_active() {
-  # Redraw the spinner line in place (TTY only; no-op if no active step).
-  [ -z "$ACTIVE_TEXT" ] && return
+  # Redraw the spinner line in place (TTY only).
   if ! $IS_TTY; then return; fi
   local frame="${SPINNER_FRAMES[$((SPINNER_IDX % ${#SPINNER_FRAMES[@]}))]}"
   SPINNER_IDX=$(( SPINNER_IDX + 1 ))
+  if [ -z "$ACTIVE_TEXT" ]; then
+    # ponytail: idle heartbeat — no step is active (e.g. troubleshooter
+    # emits no sentinels at all, or any agent is still starting up), so
+    # draw a heartbeat line instead of leaving the screen blank. B-7
+    # removed the old generic spinner_start/spinner_stop (AC-7); this is
+    # the sentinel renderer's own replacement for that idle-time signal.
+    local elapsed
+    elapsed=$(elapsed_str "$STREAM_START")
+    printf "\r  ${MAGENTA}%s${NC} ${BOLD}▸ %s${NC} · %s ${DIM}(%s)${NC}   " \
+      "$frame" "${AW_AGENT:-agent}" "${AW_TIER:-}" "$elapsed"
+    return
+  fi
   local elapsed
   elapsed=$(elapsed_str "$ACTIVE_START")
   printf "\r  ${MAGENTA}%s${NC} %s ${DIM}(%s)${NC}   " \
