@@ -355,6 +355,23 @@ Generated with \`ai-native-workflow run gitlab-incident $jira_id\`"
 # ║              PIPELINE 3: GITHUB FEATURE                         ║
 # ╚══════════════════════════════════════════════════════════════════╝
 
+# extract_issue_url — pull the created GitHub issue URL out of
+# LAST_AGENT_OUTPUT (SDK-1 Step B-10).
+#
+# ponytail: reads the global LAST_AGENT_OUTPUT, not run_claude_agent's
+# stdout. Since B-7, run_claude_agent's stdout is the renderer's rendered
+# glyph stream (lib/render-stream.sh) plus its own header()/success() lines
+# (lib/common.sh), not the agent's raw text — piping that through `tail -1`
+# used to grab "✓ requirements-engineer completed" instead of the URL. The
+# raw agent text only survives in LAST_AGENT_OUTPUT (restored from the
+# tee'd debug log — see lib/pipeline-core.sh:342). Grep the URL PATTERN
+# out of it rather than trusting line position: requirements-engineer now
+# narrates @@ANW|... sentinel lines (AC-14), so a sentinel `done` line can
+# legitimately be the last line of a real run, with the URL buried earlier.
+extract_issue_url() {
+  printf '%s\n' "$LAST_AGENT_OUTPUT" | grep -oE 'https://github\.com/[^[:space:]]+/issues/[0-9]+' | tail -1
+}
+
 pipeline_github_feature() {
   local specs_file="${1:-}"
 
@@ -449,9 +466,14 @@ pipeline_github_feature() {
         issue_title=$(grep -m1 '^# ' "$CONTEXT_DIR/requirements.md" 2>/dev/null | sed 's/^# //' || echo "New feature request")
       fi
 
+      # SDK-1 Step B-10: run as a plain statement (not `$(... | tail -1)`) so
+      # LAST_AGENT_OUTPUT gets populated as usual, then pull the URL out of
+      # LAST_AGENT_OUTPUT via extract_issue_url() — see its doc comment
+      # above for why stdout can no longer be captured directly here.
+      AW_PIPELINE_STEP="2" run_claude_agent "requirements-engineer" \
+        "Format $CONTEXT_DIR/requirements.md as a GitHub issue body and create it using gh issue create. The title should be: feat: $issue_title. Add the label 'feature-request'. Output ONLY the issue URL."
       local issue_url
-      issue_url=$(AW_PIPELINE_STEP="2" run_claude_agent "requirements-engineer" \
-        "Format $CONTEXT_DIR/requirements.md as a GitHub issue body and create it using gh issue create. The title should be: feat: $issue_title. Add the label 'feature-request'. Output ONLY the issue URL." 2>&1 | tail -1)
+      issue_url=$(extract_issue_url)
 
       if [ -n "$issue_url" ]; then
         success "GitHub issue created: $issue_url"
