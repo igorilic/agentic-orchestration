@@ -378,17 +378,23 @@ handle_agent_questions() {
 
   local i=1
   local answers=""
-  while IFS= read -r question; do
+  # B-7 close-out F2: read questions off fd 3 (the here-string), not stdin,
+  # so the inner `read -r answer` below keeps the real stdin. Previously
+  # both reads shared the loop's stdin (the here-string), so `read -r
+  # answer` consumed the NEXT question line instead of a real answer --
+  # shifting answers onto the wrong question, and aborting on an odd
+  # question count (3, the documented default) once the here-string ran out.
+  while IFS= read -r question <&3; do
     local q_text="${question#QUESTION: }"
     echo -e "  ${BOLD}Q${i}:${NC} $q_text"
     ask "A${i}:"
     local answer
-    read -r answer
+    read -r answer        # real stdin
     answers="${answers}
 Q: ${q_text}
 A: ${answer}"
     i=$((i + 1))
-  done <<< "$questions"
+  done 3<<< "$questions"
 
   echo ""
   info "Re-running ${BOLD}$LAST_AGENT_NAME${NC} with your answers..."
