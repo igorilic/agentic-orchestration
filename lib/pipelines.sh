@@ -419,11 +419,21 @@ pipeline_github_feature() {
 
   write_active_spec "$id"
 
+  # SDK-1 Step B-9 (reviewer-F0): export the spec id once per pipeline run so
+  # every run_claude_agent call below has it in scope for the streamed
+  # renderer's milestones.jsonl identity (AW_SPEC_ID) — without this,
+  # append_milestone's spec_id guard silently drops every write in
+  # production (milestones.jsonl only ever existed under hand-injected test
+  # env, see tests/pipeline-core-stream.bats). Plain assignment (not just
+  # `local`) so it stays visible to run_claude_agent, a sibling function in
+  # the same shell process.
+  AW_SPEC_ID="$id"
+
   # --- Step 1: Requirements Engineering ---
   if ! should_skip_step 1; then
     pstep 1 "Requirements Engineering"
     save_state "github-feature" "$id" 1 "running"
-    run_claude_agent "requirements-engineer" "${req_prompt:-Continue requirements engineering for $id. Read existing files in $CONTEXT_DIR/ and complete requirements at $CONTEXT_DIR/requirements.md. $NI_SUFFIX}"
+    AW_PIPELINE_STEP="1" run_claude_agent "requirements-engineer" "${req_prompt:-Continue requirements engineering for $id. Read existing files in $CONTEXT_DIR/ and complete requirements at $CONTEXT_DIR/requirements.md. $NI_SUFFIX}"
     handle_agent_questions
     save_state "github-feature" "$id" 1 "done"
     wait_for_review "$CONTEXT_DIR/requirements.md"
@@ -440,7 +450,7 @@ pipeline_github_feature() {
       fi
 
       local issue_url
-      issue_url=$(run_claude_agent "requirements-engineer" \
+      issue_url=$(AW_PIPELINE_STEP="2" run_claude_agent "requirements-engineer" \
         "Format $CONTEXT_DIR/requirements.md as a GitHub issue body and create it using gh issue create. The title should be: feat: $issue_title. Add the label 'feature-request'. Output ONLY the issue URL." 2>&1 | tail -1)
 
       if [ -n "$issue_url" ]; then
@@ -456,7 +466,7 @@ pipeline_github_feature() {
   if ! should_skip_step 3; then
     pstep 3 "Architecture & Planning"
     save_state "github-feature" "$id" 3 "running"
-    run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/. $NI_SUFFIX Write the spec and todo files directly. If unclear, document assumptions in the spec."
+    AW_PIPELINE_STEP="3" run_claude_agent "architect" "Design solution using requirements from $CONTEXT_DIR/requirements.md. Create spec and todo in $CONTEXT_DIR/. $NI_SUFFIX Write the spec and todo files directly. If unclear, document assumptions in the spec."
     handle_agent_questions
     save_state "github-feature" "$id" 3 "done"
   fi
@@ -485,22 +495,28 @@ pipeline_github_feature() {
     if ! should_skip_step "4.$i"; then
       pstep "4.$i" "TDD: Implement Step $i/$total_steps"
       save_state "github-feature" "$id" "4.$i" "running"
-      run_claude_agent "tdd-developer" "Step $i of $todo_file"
+      AW_PIPELINE_STEP="4.$i" run_claude_agent "tdd-developer" "Step $i of $todo_file"
       save_state "github-feature" "$id" "4.$i" "dev-done"
     fi
 
     if ! should_skip_step "5.$i"; then
       pstep "5.$i" "QA: Test Step $i/$total_steps"
-      run_claude_agent "qa" "Run tests for Step $i of $todo_basename"
+      AW_PIPELINE_STEP="5.$i" run_claude_agent "qa" "Run tests for Step $i of $todo_basename"
       save_state "github-feature" "$id" "5.$i" "qa-done"
     fi
 
     if ! should_skip_step "6.$i"; then
       pstep "6.$i" "Review: Step $i/$total_steps"
-      run_claude_agent "reviewer" "Review Step $i of $todo_basename"
+      AW_PIPELINE_STEP="6.$i" run_claude_agent "reviewer" "Review Step $i of $todo_basename"
       save_state "github-feature" "$id" "6.$i" "review-done"
 
       emit_step_verdict "$id" "$i"
+      # ponytail: run_triage's own internal run_claude_agent calls (fix/
+      # re-review loop, lib/pipeline-core.sh) are left unwired — they still
+      # get AW_SPEC_ID (still in scope from above) but no AW_PIPELINE_STEP,
+      # so their milestones record an empty pipeline_step. Out of B-9 scope
+      # (constraints: touch only lib/pipelines.sh); revisit if fix-loop
+      # milestones need their own step label.
       run_triage "claude" "$id" "$i"
     fi
   done
@@ -576,6 +592,10 @@ pipeline_github_issue() {
 
   write_active_spec "$id"
 
+  # SDK-1 Step B-9 (reviewer-F0): see the identical comment in
+  # pipeline_github_feature above — same wiring, same reason.
+  AW_SPEC_ID="$id"
+
   header "Pipeline: GitHub Issue Investigation & Fix"
   info "Issue: ${BOLD}#${issue_id}${NC}"
   info "Agents: Claude Code | Platform: GitHub"
@@ -648,7 +668,7 @@ ISSUE_EOF
   if ! should_skip_step 2; then
     pstep 2 "Investigation (Troubleshooter)"
     save_state "github-issue" "$id" 2 "running"
-    run_claude_agent "troubleshooter" "Investigate GitHub issue #${issue_id}. Read the issue context at $CONTEXT_DIR/${id}-issue-context.md. Scan the codebase to understand the problem. Check git history for recent changes. Create a diagnosis spec at $CONTEXT_DIR/${id}-bugfix.md with: Problem Statement, Root Cause Analysis, Affected Files, Evidence (from code/git), and a recommended fix approach. Also create $CONTEXT_DIR/${id}-todo.md with atomic fix steps (Step 1 must reproduce the bug as a failing test). $NI_SUFFIX"
+    AW_PIPELINE_STEP="2" run_claude_agent "troubleshooter" "Investigate GitHub issue #${issue_id}. Read the issue context at $CONTEXT_DIR/${id}-issue-context.md. Scan the codebase to understand the problem. Check git history for recent changes. Create a diagnosis spec at $CONTEXT_DIR/${id}-bugfix.md with: Problem Statement, Root Cause Analysis, Affected Files, Evidence (from code/git), and a recommended fix approach. Also create $CONTEXT_DIR/${id}-todo.md with atomic fix steps (Step 1 must reproduce the bug as a failing test). $NI_SUFFIX"
     handle_agent_questions
     save_state "github-issue" "$id" 2 "done"
     wait_for_review "$CONTEXT_DIR/${id}-bugfix.md"
@@ -658,7 +678,7 @@ ISSUE_EOF
   if ! should_skip_step 3; then
     pstep 3 "Architecture & Planning"
     save_state "github-issue" "$id" 3 "running"
-    run_claude_agent "architect" "Review the troubleshooter diagnosis at $CONTEXT_DIR/${id}-bugfix.md and the todo at $CONTEXT_DIR/${id}-todo.md. Refine the plan if needed — ensure each step is atomic, testable, and follows TDD. Update $CONTEXT_DIR/${id}-todo.md with the final plan. Read $CONTEXT_DIR/${id}-issue-context.md for original issue details. $NI_SUFFIX Write files directly. If unclear, document assumptions in the spec."
+    AW_PIPELINE_STEP="3" run_claude_agent "architect" "Review the troubleshooter diagnosis at $CONTEXT_DIR/${id}-bugfix.md and the todo at $CONTEXT_DIR/${id}-todo.md. Refine the plan if needed — ensure each step is atomic, testable, and follows TDD. Update $CONTEXT_DIR/${id}-todo.md with the final plan. Read $CONTEXT_DIR/${id}-issue-context.md for original issue details. $NI_SUFFIX Write files directly. If unclear, document assumptions in the spec."
     handle_agent_questions
     save_state "github-issue" "$id" 3 "done"
     wait_for_review "$CONTEXT_DIR/${id}-todo.md"
@@ -674,19 +694,19 @@ ISSUE_EOF
     if ! should_skip_step "4.$i"; then
       pstep "4.$i" "TDD: Implement Step $i/$total_steps"
       save_state "github-issue" "$id" "4.$i" "running"
-      run_claude_agent "tdd-developer" "Step $i of $todo_file"
+      AW_PIPELINE_STEP="4.$i" run_claude_agent "tdd-developer" "Step $i of $todo_file"
       save_state "github-issue" "$id" "4.$i" "dev-done"
     fi
 
     if ! should_skip_step "5.$i"; then
       pstep "5.$i" "QA: Test Step $i/$total_steps"
-      run_claude_agent "qa" "Run tests for Step $i of ${id}-todo"
+      AW_PIPELINE_STEP="5.$i" run_claude_agent "qa" "Run tests for Step $i of ${id}-todo"
       save_state "github-issue" "$id" "5.$i" "qa-done"
     fi
 
     if ! should_skip_step "6.$i"; then
       pstep "6.$i" "Review: Step $i/$total_steps"
-      run_claude_agent "reviewer" "Review Step $i of ${id}-todo"
+      AW_PIPELINE_STEP="6.$i" run_claude_agent "reviewer" "Review Step $i of ${id}-todo"
       save_state "github-issue" "$id" "6.$i" "review-done"
 
       emit_step_verdict "$id" "$i"
