@@ -209,3 +209,43 @@ run_deleg_render() {
   bash "$RENDERER" --plain < "$FIXTURE" > "$TMP_OUT"
   [ ! -d ".anw" ]
 }
+
+# ---------------------------------------------------------------------------
+# SDK-1 Step B-7 close-out (F1): idle heartbeat.
+#
+# render_active() used to return immediately when ACTIVE_TEXT was empty, so
+# any stretch of the stream with no active `step|run` (e.g. the entire
+# `troubleshooter` pipeline, which emits no sentinels at all, or plain
+# per-agent startup latency) left the TTY screen blank -- no proof the
+# renderer, or the agent, is even alive. B-7 removed the old generic
+# `spinner_start`/`spinner_stop` (AC-7), so nothing else fills that gap.
+#
+# Fix: when no ACTIVE_TEXT is set, render_active() draws an idle heartbeat
+# line instead ("<spinner> ▸ <AW_AGENT> · <AW_TIER> (<elapsed>)"), using a
+# STREAM_START epoch captured once at script start. TTY-only -- --plain /
+# non-TTY stays silent, unaffected (asserted above; the plain path never
+# calls render_active() at all).
+#
+# First exercise of the --force-tty path in this suite (previously
+# untested): --force-tty makes IS_TTY=true without a real terminal, so the
+# TTY FIFO/ticker loop runs under bats. The fixture below feeds NO sentinel
+# lines at all -- input closes only after a short delay -- so ACTIVE_TEXT
+# never becomes non-empty and at least one 0.2s ticker frame fires before
+# EOF. Timing-tolerant: 0.6s gives ~3 ticker frames of margin over the one
+# frame actually needed.
+# ---------------------------------------------------------------------------
+
+@test "render-stream --force-tty: idle heartbeat renders when no sentinel is ever active (screen never blank)" {
+  AW_AGENT=troubleshooter AW_TIER=opus \
+    bash "$RENDERER" --force-tty < <(sleep 0.6) > "$TMP_OUT" 2>&1
+  grep -qF "troubleshooter" "$TMP_OUT"
+  grep -qF "opus" "$TMP_OUT"
+}
+
+@test "render-stream --force-tty: idle heartbeat renders before a delayed first sentinel, then the active line takes over" {
+  bash "$RENDERER" --force-tty \
+    < <(sleep 0.6; printf '@@ANW|step|run|Investigating incident\n'; sleep 0.3) \
+    > "$TMP_OUT" 2>&1
+  grep -qF "▸" "$TMP_OUT"
+  grep -qF "Investigating incident" "$TMP_OUT"
+}
