@@ -8,11 +8,25 @@ INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
   SANDBOX="$(mktemp -d /tmp/aw-confidence-install-XXXXXX)"
+  STUB_BIN="$(mktemp -d /tmp/aw-confidence-install-stub-XXXXXX)"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/copilot"
+  chmod +x "$STUB_BIN/copilot"
+
+  # Hermetic sandbox: every path the installer can write to is pinned inside
+  # $SANDBOX, and a stubbed `copilot` shadows any real one on PATH, so
+  # `install global` can never write to the real ~/.claude or ~/.copilot.
+  # Mirrors tests/sidekick-agent.bats setup().
+  export HOME="$SANDBOX/home"
+  mkdir -p "$HOME"
+  export CLAUDE_HOME="$SANDBOX"
+  export COPILOT_HOME="$SANDBOX/copilot"
+  export PATH="$STUB_BIN:$PATH"
+
   LINKDIR=""
 }
 
 teardown() {
-  rm -rf "$SANDBOX"
+  rm -rf "$SANDBOX" "$STUB_BIN"
   if [ -n "$LINKDIR" ]; then rm -rf "$LINKDIR"; fi
 }
 
