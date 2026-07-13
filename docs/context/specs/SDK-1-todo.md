@@ -2,7 +2,7 @@
 
 > Spec: `docs/context/specs/SDK-1-spec.md`
 > ADR: `docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md`
-> Driver: tdd-developer. Total: 6 (Track A) + 9 (Track B, incl. integration) = 15 steps.
+> Driver: tdd-developer. Total: 6 (Track A) + 10 (Track B, incl. integration) = 16 steps.
 
 Two tracks. The **sentinel grammar is frozen in the spec (OQ-1)** and is the shared contract:
 Track A teaches agents to *emit* it; Track B *renders + persists* it.
@@ -259,6 +259,32 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - **Commit**: `test(sdk-1): end-to-end streamed step with delegation` then
   `feat(sdk-1): wire live streaming + delegation into github-feature`.
 
+### Step B-10: Fix issue_url capture broken by B-7 stdout suppression
+> Closes reviewer/qa's B-9 🔴 ship-blocker: `pipeline_github_feature`'s Step 2 (`lib/pipelines.sh`)
+> captured the created GitHub issue URL via `run_claude_agent ... 2>&1 | tail -1` on
+> `run_claude_agent`'s stdout. Since B-7, that stdout is the renderer's rendered glyph stream plus
+> `run_claude_agent`'s own `success`/`header` lines (`lib/common.sh`) — not the agent's raw text —
+> so `tail -1` silently captured `✓ requirements-engineer completed` instead of the URL. `issue_num`
+> (`grep -oE '[0-9]+$'`) came back empty and Step 7 silently dropped `Closes #N` from the PR body.
+> Affects `pipeline_github_feature` (the MVP) only; `pipeline_github_issue` has no such capture.
+- **Test**: `tests/pipelines-capture.bats` (new): source `lib/pipelines.sh` and unit-test a new
+  `extract_issue_url()` helper directly (cheaper than extending the e2e past its Step-1 pause) — set
+  `LAST_AGENT_OUTPUT` to realistic mixed fixtures (`@@ANW|phase|…`/`@@ANW|step|…`/`@@ANW|done|…`
+  sentinel lines interleaved with the plain `https://github.com/o/r/issues/42` line, URL not last)
+  and assert extraction yields the URL and the downstream `issue_num` derives `42`. Covers: URL not
+  on the last line; a sentinel `done` line as the literal last line (the exact case that fools a
+  naive `tail -1`); multiple URL-shaped lines (last one wins); no URL present (empty, not a sentinel
+  line). RED before `extract_issue_url` exists (`command not found` on every case); GREEN after.
+- **Implement**: extract a small `extract_issue_url()` helper in `lib/pipelines.sh` that greps the
+  URL pattern out of `LAST_AGENT_OUTPUT` (restored from the tee'd debug log since B-7 —
+  `lib/pipeline-core.sh:342`) rather than trusting line position; run `run_claude_agent` as a plain
+  statement (not `$(... | tail -1)`) so `LAST_AGENT_OUTPUT` populates as usual, then call
+  `extract_issue_url` to set `issue_url`. `issue_num` derivation is unchanged. No changes to
+  `run_claude_agent`/render/milestones internals.
+- **Files**: `lib/pipelines.sh` (modified), `tests/pipelines-capture.bats` (new).
+- **Commit**: `test(pipeline): issue_url survives B-7 stdout suppression` then
+  `fix(pipeline): capture issue_url from LAST_AGENT_OUTPUT not the rendered stream`.
+
 ---
 
 ## Status checklist
@@ -278,4 +304,5 @@ de-risked in `spikes/sdk-1-renderer/` — Track B **ports and reuses** them, it 
 - [x] B-7  Attach renderer + milestones, remove spinner, debug log — restores LAST_AGENT_OUTPUT; surfaced a pre-existing (out-of-scope) bug in handle_agent_questions' interactive answer loop
 - [x] B-8  milestones-summary cost/quality script
 - [x] B-9  Integration: end-to-end streamed step with delegation — drives the real `ai-native-workflow run github-feature` entrypoint; RED before Part-1 wiring, GREEN after
+- [x] B-10 Fix issue_url capture broken by B-7 stdout suppression — closes reviewer/qa's B-9 🔴 ship-blocker; extract_issue_url() reads LAST_AGENT_OUTPUT, not the rendered stream
 </content>
