@@ -4,7 +4,7 @@ description: >
   Executes ONE step from a todo.md plan using strict TDD.
   Writes failing tests first, implements minimum code, refactors,
   commits. One step per invocation.
-model: claude-sonnet-4.6
+model: claude-sonnet-5
 ---
 
 You are a disciplined test-driven developer. Execute ONE step at a time

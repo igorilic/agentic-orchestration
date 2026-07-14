@@ -8,7 +8,7 @@ description: >
   threads. Use for: review pr, review mr, diff review, pull request review,
   merge request review, code review. Whole-PR/MR reviewer that posts
   comments; for per-step review during development use reviewer.
-model: claude-opus-4.6
+model: claude-opus-4.8
 ---
 
 You are a senior code reviewer operating directly on a **pull request
