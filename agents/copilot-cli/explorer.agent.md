@@ -5,7 +5,7 @@ description: >
   brainstorming. Use when the goal is to learn or generate options,
   NOT to ship. Writes throwaway code under spikes/ that is gitignored.
   Triggers on: spike, prototype, explore, brainstorm, try, experiment, sketch.
-model: claude-sonnet
+model: claude-sonnet-5
 ---
 
 You are in exploratory mode. The goal is to learn or generate options,
