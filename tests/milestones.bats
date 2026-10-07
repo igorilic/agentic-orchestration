@@ -23,7 +23,7 @@ LOGFILE=".anw/specs/SDK-1-milestones.jsonl"
 
 setup() {
   ORIG_PWD="$PWD"
-  SANDBOX="$(mktemp -d /tmp/aw-milestones-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-milestones-XXXXXX")"
   cd "$SANDBOX"
   # shellcheck source=lib/milestones.sh disable=SC1091
   source "$MILESTONES_LIB"

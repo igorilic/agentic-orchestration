@@ -8,7 +8,7 @@ load 'lib/confidence-helpers'
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-copilot-hooks-install-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-copilot-hooks-install-XXXXXX")"
 }
 
 teardown() {
@@ -227,7 +227,7 @@ _smoke_run_dispatcher() {
   local sandbox="$1"
   local payload="$2"
   local tmpfile
-  tmpfile="$(mktemp /tmp/smoke-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/smoke-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   run bash -c "cat '$tmpfile' | bash '$sandbox/.github/hooks/copilot-cli-dispatcher.sh' 2>/dev/null"
   rm -f "$tmpfile"

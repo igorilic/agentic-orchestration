@@ -5,7 +5,7 @@ load 'lib/confidence-helpers'
 SCRIPTS_DIR="$BATS_TEST_DIRNAME/../scripts"
 
 setup() {
-  TESTDIR="$(mktemp -d)"
+  TESTDIR="$(mktemp -d "$BATS_TMPDIR/tmp.XXXXXX")"
   cd "$TESTDIR"
   git init -q
   mkdir -p .anw/specs .git/aw
@@ -375,7 +375,7 @@ _setup_pipeline_stubs() {
 @test "pipeline wiring: github-feature PR step passes body through build_pr_body — ## Confidence present" {
   local spec_id="PROJ-wiring-pr"
   local captured_body_file
-  captured_body_file="$(mktemp)"
+  captured_body_file="$(mktemp "$BATS_TMPDIR/tmp.XXXXXX")"
 
   mkdir -p .anw/specs
   # No steps todo so the TDD loop is empty; we only want step 7 to run

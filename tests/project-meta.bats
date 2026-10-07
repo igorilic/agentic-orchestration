@@ -6,8 +6,8 @@ INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 REPO_ROOT="$BATS_TEST_DIRNAME/.."
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-meta-XXXXXX)"
-  STUB="$(mktemp -d /tmp/aw-meta-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-meta-XXXXXX")"
+  STUB="$(mktemp -d "$BATS_TMPDIR/aw-meta-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/copilot"; chmod +x "$STUB/copilot"
 }
 

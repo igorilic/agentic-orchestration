@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 setup() {
-  TESTDIR="$(mktemp -d)"
+  TESTDIR="$(mktemp -d "$BATS_TMPDIR/tmp.XXXXXX")"
   cd "$TESTDIR"
   git init -q
   mkdir -p .git/aw

@@ -30,7 +30,7 @@ DELEG_FIXTURE="$BATS_TEST_DIRNAME/fixtures/sdk-1/delegation.sentinels"
 MILESTONES_LOG=".anw/specs/SDK-1-milestones.jsonl"
 
 setup() {
-  TMP_OUT="$(mktemp)"
+  TMP_OUT="$(mktemp "$BATS_TMPDIR/tmp.XXXXXX")"
 }
 
 teardown() {

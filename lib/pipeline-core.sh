@@ -266,7 +266,7 @@ run_copilot_agent() {
   echo ""
 
   local output_file
-  output_file=$(mktemp)
+  output_file=$(mktemp "${TMPDIR:-/tmp}/aw.XXXXXX")
 
   spinner_start "$agent"
 

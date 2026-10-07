@@ -9,8 +9,8 @@
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-uninstall-XXXXXX)"
-  STUB="$(mktemp -d /tmp/aw-uninstall-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-uninstall-XXXXXX")"
+  STUB="$(mktemp -d "$BATS_TMPDIR/aw-uninstall-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/copilot"; chmod +x "$STUB/copilot"
   CL="$SANDBOX/claude"
   CO="$SANDBOX/copilot"

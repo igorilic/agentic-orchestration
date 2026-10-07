@@ -73,7 +73,7 @@ install_global_claude_md() {
   local end='<!-- <<< ai-native-workflow managed block <<< -->'
 
   local managed_temp
-  managed_temp="$(mktemp /tmp/aw-claudemd-XXXXXX.md)"
+  managed_temp="$(mktemp "${TMPDIR:-/tmp}/aw-claudemd-XXXXXX.md")"
   {
     echo "$begin"
     cat << 'MANAGED_EOF'
@@ -132,7 +132,7 @@ PREAMBLE_EOF
     # Markers present: replace ONLY the managed region, preserving everything
     # else (including a user-customised preamble) verbatim.
     local out_temp
-    out_temp="$(mktemp /tmp/aw-claudemd-out-XXXXXX.md)"
+    out_temp="$(mktemp "${TMPDIR:-/tmp}/aw-claudemd-out-XXXXXX.md")"
     awk -v begin="$begin" -v end="$end" -v mf="$managed_temp" '
       $0 == begin { while ((getline line < mf) > 0) print line; close(mf); skip=1; next }
       $0 == end   { skip=0; next }
@@ -219,7 +219,7 @@ HOOKS_JSON_EOF
       # are concat-merged the same way, so a user-customised hook of any type
       # survives re-install instead of being silently replaced (issue #12).
       local new_temp
-      new_temp="$(mktemp /tmp/aw-hooks-new-XXXXXX.json)"
+      new_temp="$(mktemp "${TMPDIR:-/tmp}/aw-hooks-new-XXXXXX.json")"
       echo "$hooks_json" > "$new_temp"
       jq -s '
         . as [$existing, $new] |

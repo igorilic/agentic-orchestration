@@ -11,8 +11,8 @@
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-clobber-XXXXXX)"
-  STUB="$(mktemp -d /tmp/aw-clobber-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-clobber-XXXXXX")"
+  STUB="$(mktemp -d "$BATS_TMPDIR/aw-clobber-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/copilot"; chmod +x "$STUB/copilot"
   CLAUDE_MD="$SANDBOX/claude/CLAUDE.md"
   SETTINGS="$SANDBOX/claude/settings.json"

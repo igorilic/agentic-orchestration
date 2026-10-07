@@ -8,7 +8,7 @@ load 'lib/confidence-helpers'
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-dispatcher-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-dispatcher-XXXXXX")"
   # Initialize git repo so git-based gate logic works
   git -C "$SANDBOX" init -q
   git -C "$SANDBOX" config user.email "test@example.com"
@@ -30,7 +30,7 @@ teardown() {
 run_dispatcher() {
   local payload="$1"
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   run bash -c "cat '$tmpfile' | bash '$DISPATCHER'"
   rm -f "$tmpfile"
@@ -41,7 +41,7 @@ run_dispatcher_env() {
   local payload="$1"
   local env_prefix="$2"
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   run bash -c "$env_prefix cat '$tmpfile' | bash '$DISPATCHER'"
   rm -f "$tmpfile"
@@ -71,7 +71,7 @@ run_dispatcher_env() {
 
 @test "dispatcher: empty stdin (no JSON) -> permissionDecision deny with crashed reason" {
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '' > "$tmpfile"
   run bash -c "cat '$tmpfile' | bash '$DISPATCHER' 2>/dev/null"
   rm -f "$tmpfile"
@@ -97,7 +97,7 @@ run_dispatcher_env() {
   payload="$(mk_payload "bash" "git status" "$SANDBOX/subdir")"
 
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   # env var must be set on the dispatcher process itself, not on cat.
   # Use input redirection to avoid pipe breaking the env assignment.
@@ -114,7 +114,7 @@ run_dispatcher_env() {
   payload='{"toolName":"bash","toolArgs":"{\"command\":\"git status\"}","timestamp":1714694400000}'
 
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   # cd /tmp to be outside any git repo; suppress stderr to keep output as clean JSON
   run bash -c "cd /tmp && cat '$tmpfile' | bash '$DISPATCHER' 2>/dev/null"
@@ -245,7 +245,7 @@ run_dispatcher_env() {
   local payload
   payload="$(mk_payload "bash" "gh pr create" "$SANDBOX")"
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   run bash -c "bash '$DISPATCHER' < '$tmpfile' 2>&1"
   rm -f "$tmpfile"
@@ -389,7 +389,7 @@ run_dispatcher_env() {
   # so that 'command -v jq' returns 1. This avoids PATH surgery while reliably
   # hiding jq from the dispatcher's perspective.
   local TMPDIR2
-  TMPDIR2="$(mktemp -d /tmp/aw-jq-stub-XXXXXX)"
+  TMPDIR2="$(mktemp -d "$BATS_TMPDIR/aw-jq-stub-XXXXXX")"
 
   # Wrapper script: export a command() override before running the dispatcher.
   cat > "$TMPDIR2/run.sh" << 'RUNEOF'
@@ -408,7 +408,7 @@ RUNEOF
   local payload
   payload="$(mk_payload bash "git commit -m foo" "$SANDBOX")"
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
 
   run bash "$TMPDIR2/run.sh" "$DISPATCHER" "$tmpfile"
@@ -430,7 +430,7 @@ RUNEOF
   local payload
   payload='{"toolName":"bash","toolArgs":12345,"cwd":"'"$SANDBOX"'","timestamp":1714694400000}'
   local tmpfile
-  tmpfile="$(mktemp /tmp/dispatcher-payload-XXXXXX.json)"
+  tmpfile="$(mktemp "$BATS_TMPDIR/dispatcher-payload-XXXXXX.json")"
   printf '%s' "$payload" > "$tmpfile"
   run bash -c "cat '$tmpfile' | bash '$DISPATCHER' 2>/dev/null"
   rm -f "$tmpfile"

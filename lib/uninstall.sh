@@ -16,7 +16,7 @@ remove_global_hooks_from_settings() {
   fi
   backup_if_exists "$target"
   local tmp
-  tmp="$(mktemp /tmp/aw-uninstall-settings-XXXXXX.json)"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/aw-uninstall-settings-XXXXXX.json")"
   # For each installer hook type, drop hooks whose command matches one we wrote,
   # then drop now-empty matcher groups and now-empty hook-type arrays.
   jq '

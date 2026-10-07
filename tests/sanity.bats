@@ -3,7 +3,7 @@
 load 'lib/confidence-helpers'
 
 @test "helpers: make_log writes one event per line" {
-  tmp="$(mktemp)"
+  tmp="$(mktemp "$BATS_TMPDIR/tmp.XXXXXX")"
   make_log "$tmp" "$(spec_event '[]')"
   run wc -l < "$tmp"
   [ "$status" -eq 0 ]

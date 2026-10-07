@@ -7,9 +7,9 @@ INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 REPO_ROOT="$BATS_TEST_DIRNAME/.."
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-cop-XXXXXX)"
-  CLAUDE_HOME_DIR="$(mktemp -d /tmp/aw-claude-XXXXXX)"
-  STUB_BIN="$(mktemp -d /tmp/aw-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-cop-XXXXXX")"
+  CLAUDE_HOME_DIR="$(mktemp -d "$BATS_TMPDIR/aw-claude-XXXXXX")"
+  STUB_BIN="$(mktemp -d "$BATS_TMPDIR/aw-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/copilot"
   chmod +x "$STUB_BIN/copilot"
   export PATH="$STUB_BIN:$PATH"
@@ -178,7 +178,7 @@ JSON
 # ---------------------------------------------------------------------------
 
 @test "install global: skips Copilot section when copilot is not on PATH" {
-  EMPTY_BIN="$(mktemp -d /tmp/aw-empty-XXXXXX)"
+  EMPTY_BIN="$(mktemp -d "$BATS_TMPDIR/aw-empty-XXXXXX")"
   PATH="$EMPTY_BIN:/usr/bin:/bin" \
     CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
     "$INSTALLER" install global >/dev/null 2>&1
@@ -194,7 +194,7 @@ JSON
 }
 
 @test "install global: closing banner caveat prints even when copilot is absent" {
-  EMPTY_BIN="$(mktemp -d /tmp/aw-empty-XXXXXX)"
+  EMPTY_BIN="$(mktemp -d "$BATS_TMPDIR/aw-empty-XXXXXX")"
   output="$(PATH="$EMPTY_BIN:/usr/bin:/bin" \
     CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$SANDBOX" \
     "$INSTALLER" install global 2>&1)"
@@ -304,7 +304,7 @@ JSON
 }
 
 @test "integration smoke: COPILOT_HOME=/tmp/cop-test redirects all writes" {
-  ALT="$(mktemp -d /tmp/aw-cop-alt-XXXXXX)"
+  ALT="$(mktemp -d "$BATS_TMPDIR/aw-cop-alt-XXXXXX")"
   PATH="$STUB_BIN:$PATH" CLAUDE_HOME="$CLAUDE_HOME" COPILOT_HOME="$ALT" \
     "$INSTALLER" install global >/dev/null 2>&1
   [ -d "$ALT/skills" ]

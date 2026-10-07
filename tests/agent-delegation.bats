@@ -263,8 +263,8 @@ invert_delegation_mutant() {
   sec="$(section "$src" "$DELEGATION_HEADING")"
   may="$(subsection "$sec" "What you may delegate")"
   never="$(subsection "$sec" "What you never delegate")"
-  may_file="$(mktemp /tmp/aw-agent-delegation-may-XXXXXX)"
-  never_file="$(mktemp /tmp/aw-agent-delegation-never-XXXXXX)"
+  may_file="$(mktemp "$BATS_TMPDIR/aw-agent-delegation-may-XXXXXX")"
+  never_file="$(mktemp "$BATS_TMPDIR/aw-agent-delegation-never-XXXXXX")"
   printf '%s\n' "$may" | tail -n +2 > "$may_file"
   printf '%s\n' "$never" | tail -n +2 > "$never_file"
   # Bodies are injected via getline-from-file (not an awk -v string) because
@@ -394,7 +394,7 @@ assert_review_gate_section() {
 # ---------------------------------------------------------------------------
 
 @test "hardened Task check ignores a decoy Task mention in the BODY (frontmatter-scoped)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/decoy.md"
   cat > "$mutant" <<'EOF'
 ---
@@ -504,7 +504,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "tdd-developer: hardened delegation checks reject a gutted Delegating section (heading kept, content removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/tdd-developer.md"
   gut_section "$TDD_DEVELOPER" "$DELEGATION_HEADING" > "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
@@ -518,7 +518,7 @@ EOF
 }
 
 @test "qa: hardened delegation checks reject a gutted Delegating section (heading kept, content removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/qa.md"
   gut_section "$QA" "$DELEGATION_HEADING" > "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
@@ -532,7 +532,7 @@ EOF
 }
 
 @test "architect: hardened delegation checks reject a gutted Delegating section (heading kept, content removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/architect.md"
   gut_section "$ARCHITECT" "$DELEGATION_HEADING" > "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
@@ -557,7 +557,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "tdd-developer: hardened delegation checks reject a polarity-inverted Delegating section (may/never swapped, gate inverted)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/tdd-developer.md"
   invert_delegation_mutant "$TDD_DEVELOPER" "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
@@ -571,7 +571,7 @@ EOF
 }
 
 @test "qa: hardened delegation checks reject a polarity-inverted Delegating section (may/never swapped, gate inverted)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/qa.md"
   invert_delegation_mutant "$QA" "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
@@ -585,7 +585,7 @@ EOF
 }
 
 @test "architect: hardened delegation checks reject a polarity-inverted Delegating section (may/never swapped, gate inverted)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/architect.md"
   invert_delegation_mutant "$ARCHITECT" "$mutant"
   sec="$(section "$mutant" "$DELEGATION_HEADING")"
@@ -859,7 +859,7 @@ inject_deleg_bullet_mutant() {
 }
 
 @test "reviewer: hardened deleg-bullet check rejects an injected deleg/deleg_reject mutant (old narration check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/reviewer.md"
   inject_deleg_bullet_mutant "$REVIEWER" "$mutant" "$SENTINEL_HEADING"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -873,7 +873,7 @@ inject_deleg_bullet_mutant() {
 }
 
 @test "requirements-engineer: hardened deleg-bullet check rejects an injected deleg/deleg_reject mutant (old narration check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/requirements-engineer.md"
   inject_deleg_bullet_mutant "$REQUIREMENTS_ENGINEER" "$mutant" "$SENTINEL_HEADING"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1045,7 +1045,7 @@ assert_no_verdict() {
 # ---------------------------------------------------------------------------
 
 @test "tdd-developer: hardened sentinel-grammar check rejects a gutted Emitting milestone sentinels section" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/tdd-developer.md"
   gut_section "$TDD_DEVELOPER" "$SENTINEL_HEADING" > "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1055,7 +1055,7 @@ assert_no_verdict() {
 }
 
 @test "qa: hardened sentinel-grammar check rejects a gutted Emitting milestone sentinels section" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/qa.md"
   gut_section "$QA" "$SENTINEL_HEADING" > "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1065,7 +1065,7 @@ assert_no_verdict() {
 }
 
 @test "architect: hardened sentinel-grammar check rejects a gutted Emitting milestone sentinels section" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/architect.md"
   gut_section "$ARCHITECT" "$SENTINEL_HEADING" > "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1078,7 +1078,7 @@ assert_no_verdict() {
 # via assert_narration_section() (their narrower, deleg-free presence check).
 
 @test "reviewer: hardened narration check rejects a gutted Emitting milestone sentinels section" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/reviewer.md"
   gut_section "$REVIEWER" "$SENTINEL_HEADING" > "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1088,7 +1088,7 @@ assert_no_verdict() {
 }
 
 @test "requirements-engineer: hardened narration check rejects a gutted Emitting milestone sentinels section" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/requirements-engineer.md"
   gut_section "$REQUIREMENTS_ENGINEER" "$SENTINEL_HEADING" > "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1106,7 +1106,7 @@ assert_no_verdict() {
 # ---------------------------------------------------------------------------
 
 @test "tdd-developer: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/tdd-developer.md"
   invert_sentinel_mutant "$TDD_DEVELOPER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1120,7 +1120,7 @@ assert_no_verdict() {
 }
 
 @test "qa: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/qa.md"
   invert_sentinel_mutant "$QA" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1134,7 +1134,7 @@ assert_no_verdict() {
 }
 
 @test "architect: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/architect.md"
   invert_sentinel_mutant "$ARCHITECT" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1153,7 +1153,7 @@ assert_no_verdict() {
 # the "grammar keywords still present" control.
 
 @test "reviewer: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/reviewer.md"
   invert_sentinel_mutant "$REVIEWER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1167,7 +1167,7 @@ assert_no_verdict() {
 }
 
 @test "requirements-engineer: hardened redaction-clause check rejects a polarity-inverted governing sentence" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/requirements-engineer.md"
   invert_sentinel_mutant "$REQUIREMENTS_ENGINEER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1189,7 +1189,7 @@ assert_no_verdict() {
 # ---------------------------------------------------------------------------
 
 @test "tdd-developer: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/tdd-developer.md"
   invert_field_order_mutant "$TDD_DEVELOPER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1203,7 +1203,7 @@ assert_no_verdict() {
 }
 
 @test "qa: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/qa.md"
   invert_field_order_mutant "$QA" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1217,7 +1217,7 @@ assert_no_verdict() {
 }
 
 @test "architect: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/architect.md"
   invert_field_order_mutant "$ARCHITECT" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1236,7 +1236,7 @@ assert_no_verdict() {
 # never matches deleg_reject text in these two files).
 
 @test "reviewer: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/reviewer.md"
   invert_field_order_mutant "$REVIEWER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1250,7 +1250,7 @@ assert_no_verdict() {
 }
 
 @test "requirements-engineer: hardened field-order check rejects a field-order-reversed mutant (old presence-only check still passes on it)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/requirements-engineer.md"
   invert_field_order_mutant "$REQUIREMENTS_ENGINEER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1270,7 +1270,7 @@ assert_no_verdict() {
 # ---------------------------------------------------------------------------
 
 @test "qa: hardened verdict clause rejects a field-order-reversed mutant (band/score swapped)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/qa.md"
   invert_field_order_mutant "$QA" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"
@@ -1280,7 +1280,7 @@ assert_no_verdict() {
 }
 
 @test "reviewer: hardened verdict clause rejects a field-order-reversed mutant (band/score swapped)" {
-  mutant_dir="$(mktemp -d /tmp/aw-agent-delegation-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-agent-delegation-mutant-XXXXXX")"
   mutant="$mutant_dir/reviewer.md"
   invert_field_order_mutant "$REVIEWER" "$mutant"
   sec="$(section "$mutant" "$SENTINEL_HEADING")"

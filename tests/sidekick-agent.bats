@@ -78,8 +78,8 @@ INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 SIDEKICK_SRC="$BATS_TEST_DIRNAME/../agents/claude-code/sidekick.md"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-sidekick-install-XXXXXX)"
-  STUB_BIN="$(mktemp -d /tmp/aw-sidekick-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-install-XXXXXX")"
+  STUB_BIN="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/copilot"
   chmod +x "$STUB_BIN/copilot"
 
@@ -310,7 +310,7 @@ assert_tools_whitelist() {
 # ---------------------------------------------------------------------------
 
 @test "sidekick source: hardened tools check rejects Bypass A (frontmatter superset + decoy body line)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   cat > "$mutant" <<'EOF'
 ---
@@ -331,7 +331,7 @@ EOF
 }
 
 @test "sidekick source: hardened model check rejects Bypass B (frontmatter sonnet + decoy body line)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   cat > "$mutant" <<'EOF'
 ---
@@ -361,7 +361,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "sidekick body: hardened forbidden-actions check rejects a gutted Forbidden section (heading kept, bullets removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   gut_section "$SIDEKICK_SRC" "Forbidden actions" > "$mutant"
   sec="$(section "$mutant" "Forbidden actions")"
@@ -371,7 +371,7 @@ EOF
 }
 
 @test "sidekick body: hardened refuse-if-judgment check rejects an emptied Refuse section (heading kept, prose removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   gut_section "$SIDEKICK_SRC" "Refuse if judgment is required" > "$mutant"
   sec="$(section "$mutant" "Refuse if judgment is required")"
@@ -381,7 +381,7 @@ EOF
 }
 
 @test "sidekick body: hardened allowlist check rejects an emptied Allowlist section (heading kept, bullets removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   gut_section "$SIDEKICK_SRC" "Mechanical-only allowlist" > "$mutant"
   sec="$(section "$mutant" "Mechanical-only allowlist")"
@@ -391,7 +391,7 @@ EOF
 }
 
 @test "sidekick body: hardened write-path-scope check rejects a gutted Write-path scope section (heading kept, prose removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   gut_section "$SIDEKICK_SRC" "Write-path scope" > "$mutant"
   sec="$(section "$mutant" "Write-path scope")"
@@ -401,7 +401,7 @@ EOF
 }
 
 @test "sidekick body: hardened no-destructive-overwrite check rejects a gutted No destructive overwrites section (heading kept, prose removed)" {
-  mutant_dir="$(mktemp -d /tmp/aw-sidekick-mutant-XXXXXX)"
+  mutant_dir="$(mktemp -d "$BATS_TMPDIR/aw-sidekick-mutant-XXXXXX")"
   mutant="$mutant_dir/sidekick.md"
   gut_section "$SIDEKICK_SRC" "No destructive overwrites" > "$mutant"
   sec="$(section "$mutant" "No destructive overwrites")"

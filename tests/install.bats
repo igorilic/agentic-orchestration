@@ -7,8 +7,8 @@
 INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-confidence-install-XXXXXX)"
-  STUB_BIN="$(mktemp -d /tmp/aw-confidence-install-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-confidence-install-XXXXXX")"
+  STUB_BIN="$(mktemp -d "$BATS_TMPDIR/aw-confidence-install-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/copilot"
   chmod +x "$STUB_BIN/copilot"
 
@@ -165,7 +165,7 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "install: install global succeeds when invoked via a symlink (brew layout)" {
-  LINKDIR="$(mktemp -d /tmp/aw-brew-link-XXXXXX)"
+  LINKDIR="$(mktemp -d "$BATS_TMPDIR/aw-brew-link-XXXXXX")"
   ln -s "$INSTALLER" "$LINKDIR/ai-native-workflow"
 
   run env CLAUDE_HOME="$SANDBOX" "$LINKDIR/ai-native-workflow" install global
@@ -183,28 +183,28 @@ EOF
 # ---------------------------------------------------------------------------
 
 @test "install project: creates docs/context/CURRENT_SPRINT.md" {
-  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
   [ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]
   rm -rf "$SANDBOX_PROJECT"
 }
 
 @test "install project: creates docs/context/specs/templates/feature-spec.md" {
-  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
   [ -f "$SANDBOX_PROJECT/docs/context/specs/templates/feature-spec.md" ]
   rm -rf "$SANDBOX_PROJECT"
 }
 
 @test "install project: project .gitignore ignores the .anw/ runtime dir" {
-  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
   grep -qF '.anw/' "$SANDBOX_PROJECT/.gitignore"
   rm -rf "$SANDBOX_PROJECT"
 }
 
 @test "install project: project .gitignore no longer references the renamed .context/ dir" {
-  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
   ! grep -q '\.context' "$SANDBOX_PROJECT/.gitignore"
   rm -rf "$SANDBOX_PROJECT"
@@ -214,7 +214,7 @@ EOF
 # detect_stacks expanded an empty array under `set -u` (bash 3.2), aborting
 # the whole install before any file was written. (issue #7)
 @test "install project: stackless repo installs cleanly (exit 0 + dispatcher written)" {
-  SANDBOX_PROJECT="$(mktemp -d /tmp/aw-project-XXXXXX)"
+  SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   # No go.mod/package.json/etc. — detect_stacks returns empty.
   run "$INSTALLER" install project "$SANDBOX_PROJECT"
   [ "$status" -eq 0 ]
@@ -228,7 +228,7 @@ EOF
 # heredocs — this test ensures the old heredoc-drift class can never return.
 # (issue #8; pipeline-* skills are intentionally Claude-stubbed, so excluded.)
 @test "install global: installed agents + skills byte-match source (no drift)" {
-  STUB="$(mktemp -d /tmp/aw-stub-XXXXXX)"
+  STUB="$(mktemp -d "$BATS_TMPDIR/aw-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB/copilot"; chmod +x "$STUB/copilot"
   PATH="$STUB:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
     "$INSTALLER" install global >/dev/null 2>&1
@@ -321,7 +321,7 @@ EOF
 
 @test "hooks: session-start reads sprint from docs/context/CURRENT_SPRINT.md" {
   local proj
-  proj="$(mktemp -d /tmp/aw-session-start-XXXXXX)"
+  proj="$(mktemp -d "$BATS_TMPDIR/aw-session-start-XXXXXX")"
   mkdir -p "$proj/docs/context"
   echo "SPRINT_MARKER_XYZ" > "$proj/docs/context/CURRENT_SPRINT.md"
   output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
@@ -331,7 +331,7 @@ EOF
 
 @test "hooks: session-start does NOT read sprint from old .context/CURRENT_SPRINT.md (hard-cut)" {
   local proj
-  proj="$(mktemp -d /tmp/aw-session-start-XXXXXX)"
+  proj="$(mktemp -d "$BATS_TMPDIR/aw-session-start-XXXXXX")"
   mkdir -p "$proj/.context"
   echo "OLD_SPRINT_MARKER_XYZ" > "$proj/.context/CURRENT_SPRINT.md"
   output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
@@ -398,8 +398,8 @@ EOF
 
 @test "integration smoke: install global then install project produces new docs/context/ layout" {
   local sandbox_claude sandbox_project
-  sandbox_claude="$(mktemp -d /tmp/aw-smoke-claude-XXXXXX)"
-  sandbox_project="$(mktemp -d /tmp/aw-smoke-project-XXXXXX)"
+  sandbox_claude="$(mktemp -d "$BATS_TMPDIR/aw-smoke-claude-XXXXXX")"
+  sandbox_project="$(mktemp -d "$BATS_TMPDIR/aw-smoke-project-XXXXXX")"
 
   # Run global install into sandbox (installs agents, hooks, skills)
   CLAUDE_HOME="$sandbox_claude" "$INSTALLER" install global >/dev/null 2>&1

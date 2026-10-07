@@ -16,8 +16,8 @@ GH_SKILL="$REPO_ROOT/skills/gh-cli/SKILL.md"
 GLAB_SKILL="$REPO_ROOT/skills/glab-cli/SKILL.md"
 
 setup() {
-  SANDBOX="$(mktemp -d /tmp/aw-dr-XXXXXX)"
-  STUB_BIN="$(mktemp -d /tmp/aw-dr-stub-XXXXXX)"
+  SANDBOX="$(mktemp -d "$BATS_TMPDIR/aw-dr-XXXXXX")"
+  STUB_BIN="$(mktemp -d "$BATS_TMPDIR/aw-dr-stub-XXXXXX")"
   printf '#!/usr/bin/env bash\nexit 0\n' > "$STUB_BIN/copilot"
   chmod +x "$STUB_BIN/copilot"
 }

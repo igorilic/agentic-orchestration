@@ -8,8 +8,8 @@ INSTALLER="$BATS_TEST_DIRNAME/../ai-native-workflow"
 REAL_SCRIPT_DIR="$(cd "$BATS_TEST_DIRNAME/.." && pwd -P)"
 
 setup() {
-  TMPDIR1="$(mktemp -d)"
-  TMPDIR2="$(mktemp -d)"
+  TMPDIR1="$(mktemp -d "$BATS_TMPDIR/tmp.XXXXXX")"
+  TMPDIR2="$(mktemp -d "$BATS_TMPDIR/tmp.XXXXXX")"
 }
 
 teardown() {
@@ -92,7 +92,7 @@ teardown() {
   chmod +x "$TMPDIR2/stubs/realpath" "$TMPDIR2/stubs/greadlink"
 
   # Place a copy of the script under a logical /tmp path
-  LOGICAL_DIR="$(mktemp -d /tmp/anw-pwdp-XXXXXX)"
+  LOGICAL_DIR="$(mktemp -d "$BATS_TMPDIR/anw-pwdp-XXXXXX")"
   PHYSICAL_DIR="$(cd "$LOGICAL_DIR" && pwd -P)"
 
   # Sanity: paths must differ; if they don't, skip

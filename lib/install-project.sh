@@ -583,7 +583,7 @@ install_project_copilot_hooks() {
   # output script — they must be runtime variables, not install-time expansions.
   local dispatcher="$hooks_dir/copilot-cli-dispatcher.sh"
   local dispatcher_tmp
-  dispatcher_tmp="$(mktemp /tmp/copilot-dispatcher-XXXXXX.sh)"
+  dispatcher_tmp="$(mktemp "${TMPDIR:-/tmp}/copilot-dispatcher-XXXXXX.sh")"
   cat > "$dispatcher_tmp" <<'DISPATCHER_EOF'
 #!/usr/bin/env bash
 # copilot-cli-dispatcher.sh — ai-native-workflow Copilot CLI pre-tool hook
@@ -882,7 +882,7 @@ README_EOF
   # Write / merge copilot-cli-policy.json (Steps 6 + 7).
   local policy="$hooks_dir/copilot-cli-policy.json"
   local tmp_policy
-  tmp_policy="$(mktemp /tmp/copilot-policy-XXXXXX.json)"
+  tmp_policy="$(mktemp "${TMPDIR:-/tmp}/copilot-policy-XXXXXX.json")"
 
   if ! command -v jq &> /dev/null; then
     # jq not available — write a static minimal policy without merging.

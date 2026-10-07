@@ -3,7 +3,7 @@
 load 'lib/confidence-helpers'
 
 setup() {
-  TMPLOG="$(mktemp)"
+  TMPLOG="$(mktemp "$BATS_TMPDIR/tmp.XXXXXX")"
 }
 
 teardown() {

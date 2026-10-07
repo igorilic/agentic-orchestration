@@ -59,7 +59,7 @@ FIXTURE="$BATS_TEST_DIRNAME/fixtures/sdk-1/summary.jsonl"
 
 @test "milestones-summary: empty file reports zeros, exits 0" {
   local empty
-  empty="$(mktemp /tmp/aw-summary-empty-XXXXXX)"
+  empty="$(mktemp "$BATS_TMPDIR/aw-summary-empty-XXXXXX")"
   run "$SCRIPT" "$empty"
   rm -f "$empty"
   [ "$status" -eq 0 ]

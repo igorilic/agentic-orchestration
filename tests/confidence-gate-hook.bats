@@ -3,7 +3,7 @@
 load 'lib/confidence-helpers'
 
 setup() {
-  TESTDIR="$(mktemp -d)"
+  TESTDIR="$(mktemp -d "$BATS_TMPDIR/tmp.XXXXXX")"
   cd "$TESTDIR"
   git init -q
   mkdir -p .git/aw .anw/specs
@@ -98,7 +98,7 @@ run_hook() {
 }
 
 @test "scorer returns unexpected band: fail closed (exit 2)" {
-  STUB_DIR="$(mktemp -d)"
+  STUB_DIR="$(mktemp -d "$BATS_TMPDIR/tmp.XXXXXX")"
   cat > "$STUB_DIR/confidence.sh" <<'STUB'
 #!/usr/bin/env bash
 echo '{"band":"WAT","score":0,"gates":[]}'
