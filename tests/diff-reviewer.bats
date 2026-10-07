@@ -26,14 +26,6 @@ teardown() {
   rm -rf "$SANDBOX" "$STUB_BIN"
 }
 
-# Run a Claude-only global install into the sandbox. COPILOT_HOME is pointed
-# at a sandbox subdir so a copilot binary on the real PATH can never pollute
-# the user's ~/.copilot during tests.
-claude_install() {
-  CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
-    "$INSTALLER" install global "$@"
-}
-
 # ---------------------------------------------------------------------------
 # Source artifacts exist
 # ---------------------------------------------------------------------------
@@ -137,54 +129,4 @@ claude_install() {
   # the added/deleted/context line rule must be spelled out
   grep -qi 'new_line' "$GLAB_SKILL"
   grep -qi 'old_line' "$GLAB_SKILL"
-}
-
-# ---------------------------------------------------------------------------
-# Claude Code install
-# ---------------------------------------------------------------------------
-
-@test "install global (claude): ships diff-reviewer agent + gh-cli/glab-cli skills" {
-  claude_install >/dev/null 2>&1
-  [ -f "$SANDBOX/claude/agents/diff-reviewer.md" ]
-  [ -f "$SANDBOX/claude/skills/gh-cli/SKILL.md" ]
-  [ -f "$SANDBOX/claude/skills/glab-cli/SKILL.md" ]
-}
-
-@test "install global (claude): installed agent matches the source (no drift)" {
-  claude_install >/dev/null 2>&1
-  diff -q "$CLAUDE_AGENT" "$SANDBOX/claude/agents/diff-reviewer.md"
-  diff -q "$GH_SKILL"   "$SANDBOX/claude/skills/gh-cli/SKILL.md"
-  diff -q "$GLAB_SKILL" "$SANDBOX/claude/skills/glab-cli/SKILL.md"
-}
-
-@test "status (claude): surfaces diff-reviewer agent and review skills" {
-  claude_install >/dev/null 2>&1
-  # `run` tolerates status's exit code (a pre-existing set -u edge in
-  # detect_stacks can make `status` exit non-zero on bash 3.2); we only
-  # assert the new artifacts are listed.
-  run env CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" "$INSTALLER" status
-  [[ "$output" == *"diff-reviewer"* ]]
-  [[ "$output" == *"gh-cli"* ]]
-  [[ "$output" == *"glab-cli"* ]]
-}
-
-# ---------------------------------------------------------------------------
-# Copilot CLI install (copilot stubbed onto PATH)
-# ---------------------------------------------------------------------------
-
-@test "install global (copilot): ships diff-reviewer agent + review skills" {
-  PATH="$STUB_BIN:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
-    "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/copilot/agents/diff-reviewer.agent.md" ]
-  [ -f "$SANDBOX/copilot/skills/gh-cli/SKILL.md" ]
-  [ -f "$SANDBOX/copilot/skills/glab-cli/SKILL.md" ]
-}
-
-@test "install global: the diff-reviewer's ticket dependency ships on both tracks" {
-  # The agent declares skills: [gh-cli, glab-cli, ticket]; gh-cli/glab-cli are
-  # covered above — assert the ticket (Jira AC) skill installs too.
-  PATH="$STUB_BIN:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
-    "$INSTALLER" install global >/dev/null 2>&1
-  [ -f "$SANDBOX/claude/skills/ticket/SKILL.md" ]
-  [ -f "$SANDBOX/copilot/skills/ticket/SKILL.md" ]
 }

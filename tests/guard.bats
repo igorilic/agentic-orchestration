@@ -162,22 +162,22 @@ reason()       { jq -r '.hookSpecificOutput.permissionDecisionReason // .permiss
 @test "ask: commit deletes a test file" {
   git rm -q tests/test_app.py
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -m "chore: cleanup"')"
-  [ "$(decision)" = ask ]; [[ "$(reason)" == *"deletes test files"* ]]
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"deletes test files"* ]] || false
 }
 @test "ask: --amend cannot launder a test deletion" {
   git rm -q tests/test_app.py
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit --amend --no-edit')"
-  [ "$(decision)" = ask ]; [[ "$(reason)" == *"deletes test files"* ]]
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"deletes test files"* ]] || false
 }
 @test "no false positive: src/latest_prices.py is not a test file" {
   printf 'x = 1\n' > src/latest_prices.py; git add -A
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -m "feat: prices"')"
-  [[ "$(reason)" == *"without touching any test"* ]]
+  [[ "$(reason)" == *"without touching any test"* ]] || false
 }
 @test "ask: commit adds a skip marker (pytest)" {
   printf '\nimport pytest\n@pytest.mark.skip\ndef test_more():\n    assert add(1, 1) == 2\n' >> tests/test_app.py; git add -A
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -m "test: more"')"
-  [ "$(decision)" = ask ]; [[ "$(reason)" == *"skip/focus"* ]]
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"skip/focus"* ]] || false
 }
 @test "ask: commit adds it.skip (jest) — copilot payload" {
   mkdir -p web && printf "it.skip('works', () => { expect(1).toBe(1) })\n" > web/a.test.ts; git add -A
@@ -187,12 +187,12 @@ reason()       { jq -r '.hookSpecificOutput.permissionDecisionReason // .permiss
 @test "ask: commit rewrites an existing assertion (weakened expected value)" {
   perl -pi -e 's/== 4/== 5/' tests/test_app.py; printf 'def add(a, b):\n    return 5\n' > src/app.py; git add -A
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -m "fix: add"')"
-  [ "$(decision)" = ask ]; [[ "$(reason)" == *"assertion"* ]]
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"assertion"* ]] || false
 }
 @test "ask: source change with no test change" {
   printf 'def add(a, b):\n    return a + b + 0\n' > src/app.py; git add -A
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -m "feat: x"')"
-  [ "$(decision)" = ask ]; [[ "$(reason)" == *"without touching any test"* ]]
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"without touching any test"* ]] || false
 }
 @test "ask: nested commit via bash -c is still inspected" {
   printf 'def add(a, b):\n    return b + a\n' > src/app.py; git add -A
@@ -213,7 +213,7 @@ reason()       { jq -r '.hookSpecificOutput.permissionDecisionReason // .permiss
 @test "no misclassification: latest.md / inspector.py are not tests; model.fit( is not a skip" {
   printf 'x = model.fit(data)\n' > src/inspector.py; echo x > docs/latest.md; git add -A
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -m "feat: inspector"')"
-  [ "$(decision)" = ask ]; [[ "$(reason)" == *"without touching any test"* ]]; [[ "$(reason)" != *"skip"* ]]
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"without touching any test"* ]] || false; [[ "$(reason)" != *"skip"* ]] || false
 }
 
 # --- fail closed ------------------------------------------------------------------
@@ -250,7 +250,7 @@ claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}
 @test "verify: editing session stopping on red is blocked with the failure tail" {
   mk_verify 'echo "FAILED tests/test_app.py::test_add"; exit 1'; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
-  [ "$(jq -r .decision <<<"$output")" = block ]; [[ "$(jq -r .reason <<<"$output")" == *"FAILED tests/test_app.py"* ]]
+  [ "$(jq -r .decision <<<"$output")" = block ]; [[ "$(jq -r .reason <<<"$output")" == *"FAILED tests/test_app.py"* ]] || false
   [ -f "$TMPDIR/anw-edited-s" ]   # still owed a green check
 }
 @test "verify: green check lets it stop and clears the marker" {
@@ -261,13 +261,13 @@ claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}
 @test "verify: an explicit BLOCKED: escalation is an honest stop (not pushed back)" {
   mk_verify 'exit 1'; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop false $'Step 2 cannot pass as written.\nBLOCKED: AC-3 expects add(2,2)==5, contradicting AC-1.')"
-  [ "$(jq -r .decision <<<"$output")" != block ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"BLOCKED"* ]]
+  [ "$(jq -r .decision <<<"$output")" != block ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"BLOCKED"* ]] || false
   [ ! -e "$TMPDIR/anw-edited-s" ]
 }
 @test "verify: second red stop in a row is allowed but flagged to the human" {
   mk_verify 'exit 1'; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop true)"
-  [ "$(jq -r .decision <<<"$output")" != block ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"still failing"* ]]
+  [ "$(jq -r .decision <<<"$output")" != block ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"still failing"* ]] || false
 }
 @test "verify: copilot agentStop payload (sessionId, workingDirectory) is handled" {
   mk_verify 'exit 1'; edited
@@ -277,12 +277,12 @@ claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}
 @test "verify: an untrusted .anw/verify (cloned or modified repo) is never executed" {
   mkdir -p .anw && printf '#!/bin/sh\ntouch PWNED; exit 1\n' > .anw/verify && chmod +x .anw/verify; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
-  [ ! -e PWNED ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"new or changed"* ]]
+  [ ! -e PWNED ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"new or changed"* ]] || false
 }
 @test "verify: editing a trusted .anw/verify invalidates the trust" {
   mk_verify 'exit 0'; echo '# tampered' >> .anw/verify; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
-  [[ "$(jq -r .systemMessage <<<"$output")" == *"new or changed"* ]]
+  [[ "$(jq -r .systemMessage <<<"$output")" == *"new or changed"* ]] || false
 }
 @test "verify: repos without .anw/verify are untouched (opt-in)" {
   edited

@@ -8,61 +8,10 @@ show_status() {
   header "AI-Native Workflow v${VERSION} — Installation Status"
   echo ""
 
-  header "Global (~/.claude/)"
-  check_file "$CLAUDE_DIR/CLAUDE.md" "CLAUDE.md"
-  check_file "$CLAUDE_DIR/settings.json" "settings.json (hooks)"
-  check_file "$CLAUDE_DIR/hooks/session-start.sh" "hooks/session-start.sh"
-  check_file "$CLAUDE_DIR/hooks/tdd-gate.sh" "hooks/tdd-gate.sh"
-  check_file "$CLAUDE_DIR/hooks/confidence-gate.sh" "hooks/confidence-gate.sh"
-  check_file "$CLAUDE_DIR/scripts/confidence.sh" "scripts/confidence.sh"
-  check_file "$CLAUDE_DIR/scripts/confidence-cli.sh" "scripts/confidence-cli.sh"
-  check_file "$CLAUDE_DIR/skills/tdd/SKILL.md" "skills/tdd"
-  check_file "$CLAUDE_DIR/skills/ticket/SKILL.md" "skills/ticket"
-  check_file "$CLAUDE_DIR/skills/skip-tdd/SKILL.md" "skills/skip-tdd"
-  check_file "$CLAUDE_DIR/skills/override-confidence/SKILL.md" "skills/override-confidence"
-  check_file "$CLAUDE_DIR/skills/session-report/SKILL.md" "skills/session-report"
-  check_file "$CLAUDE_DIR/skills/adr/SKILL.md" "skills/adr"
-  check_file "$CLAUDE_DIR/skills/pr/SKILL.md" "skills/pr"
-  check_file "$CLAUDE_DIR/skills/explore/SKILL.md" "skills/explore"
-  check_file "$CLAUDE_DIR/skills/brainstorm/SKILL.md" "skills/brainstorm"
-  check_file "$CLAUDE_DIR/skills/plan/SKILL.md" "skills/plan (orchestration)"
-  check_file "$CLAUDE_DIR/skills/clusters/SKILL.md" "skills/clusters (multi-region)"
-  check_file "$CLAUDE_DIR/skills/pipeline-gitlab-feature/SKILL.md" "skills/pipeline-gitlab-feature"
-  check_file "$CLAUDE_DIR/skills/pipeline-gitlab-incident/SKILL.md" "skills/pipeline-gitlab-incident"
-  check_file "$CLAUDE_DIR/skills/pipeline-github-feature/SKILL.md" "skills/pipeline-github-feature"
-  check_file "$CLAUDE_DIR/skills/gh-cli/SKILL.md" "skills/gh-cli (PR review)"
-  check_file "$CLAUDE_DIR/skills/glab-cli/SKILL.md" "skills/glab-cli (MR review)"
-  check_file "$CLAUDE_DIR/skills/caveman/SKILL.md" "skills/caveman (terse mode)"
-  check_file "$CLAUDE_DIR/agents/requirements-engineer.md" "agents/requirements-engineer (Opus)"
-  check_file "$CLAUDE_DIR/agents/architect.md" "agents/architect (Opus)"
-  check_file "$CLAUDE_DIR/agents/tdd-developer.md" "agents/tdd-developer (Sonnet)"
-  check_file "$CLAUDE_DIR/agents/qa.md" "agents/qa (Opus)"
-  check_file "$CLAUDE_DIR/agents/reviewer.md" "agents/reviewer (Sonnet)"
-  check_file "$CLAUDE_DIR/agents/diff-reviewer.md" "agents/diff-reviewer (Opus)"
-  check_file "$CLAUDE_DIR/agents/troubleshooter.md" "agents/troubleshooter (Opus)"
-  check_file "$CLAUDE_DIR/agents/explorer.md" "agents/explorer (Sonnet)"
-
-  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR/agents" ] || [ -d "$COPILOT_SKILLS_DIR" ]; then
+  status_home "Claude Code" "$CLAUDE_DIR" CLAUDE.md
+  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR" ]; then
     echo ""
-    header "Copilot CLI ($COPILOT_DIR/)"
-    check_file "$COPILOT_INSTRUCTIONS_FILE" "copilot-instructions.md"
-    check_file "$COPILOT_SETTINGS_FILE" "settings.json"
-    check_file "$COPILOT_DIR/agents/requirements-engineer.agent.md" "agents/requirements-engineer"
-    check_file "$COPILOT_DIR/agents/architect.agent.md" "agents/architect"
-    check_file "$COPILOT_DIR/agents/tdd-developer.agent.md" "agents/tdd-developer"
-    check_file "$COPILOT_DIR/agents/qa.agent.md" "agents/qa"
-    check_file "$COPILOT_DIR/agents/reviewer.agent.md" "agents/reviewer"
-    check_file "$COPILOT_DIR/agents/diff-reviewer.agent.md" "agents/diff-reviewer"
-    check_file "$COPILOT_DIR/agents/troubleshooter.agent.md" "agents/troubleshooter"
-    check_file "$COPILOT_DIR/agents/explorer.agent.md" "agents/explorer"
-    if [ -d "$COPILOT_SKILLS_DIR" ]; then
-      for d in "$COPILOT_SKILLS_DIR"/*/; do
-        [ -d "$d" ] || continue
-        local skill_name
-        skill_name="$(basename "$d")"
-        check_file "$d/SKILL.md" "skills/$skill_name"
-      done
-    fi
+    status_home "Copilot CLI" "$COPILOT_DIR" copilot-instructions.md
   fi
 
   echo ""
@@ -78,17 +27,11 @@ show_status() {
     dim "$(cat .tdd-skip)"
   fi
 
-  # Check for active pipeline
+  # Shown, never sourced: the file lives in the (possibly untrusted) repo.
   if [ -f "$STATE_FILE" ]; then
     echo ""
     header "Active Pipeline"
-    # shellcheck source=/dev/null
-    source "$STATE_FILE"
-    echo -e "  Pipeline:     ${BOLD}${PIPELINE}${NC}"
-    echo -e "  ID:           ${BOLD}${ID}${NC}"
-    echo -e "  Current Step: ${BOLD}${CURRENT_STEP}${NC}"
-    echo -e "  Status:       ${BOLD}${STATUS}${NC}"
-    echo -e "  Last Updated: ${DIM}${TIMESTAMP}${NC}"
+    grep -E '^(PIPELINE|ID|CURRENT_STEP|STATUS|TIMESTAMP)=' "$STATE_FILE" | sed 's/^/  /' || true
   fi
 
   echo ""
@@ -100,13 +43,35 @@ show_status() {
   info "Platform: $(detect_platform ".")"
 }
 
-check_file() {
-  local path="$1" label="$2"
-  if [ -f "$path" ]; then
-    success "$label"
+status_home() {
+  local label="$1" home="$2" instr="$3" f src name
+  header "$label (${home/#$HOME/~}/)"
+  for f in guard.sh verify.sh; do
+    if cmp -s "$_ANW_SCRIPT_DIR/hooks/$f" "$home/hooks/$f"; then success "hooks/$f"
+    elif [ -f "$home/hooks/$f" ]; then warn "hooks/$f differs from this version — run install global"
+    else missing "hooks/$f"; fi
+  done
+  if [ "$instr" = CLAUDE.md ]; then
+    if jq -e '[.hooks[]?[]?.hooks[]?.command // ""] | any(test("hooks/guard\\.sh")) and any(test("hooks/verify\\.sh"))' \
+        "$home/settings.json" >/dev/null 2>&1; then success "settings.json runs guard.sh + verify.sh"
+    else missing "settings.json hook wiring"; fi
   else
-    echo -e "  ${DIM}○${NC} ${DIM}$label (missing)${NC}"
+    check_file "$home/hooks/anw.json" "hooks/anw.json (preToolUse → guard.sh, agentStop → verify.sh)"
   fi
+  if grep -qF "$MANAGED_BEGIN" "$home/$instr" 2>/dev/null; then success "$instr (managed block)"; else missing "$instr managed block"; fi
+  for src in "$_ANW_SCRIPT_DIR"/skills/*/; do
+    src="${src%/}"; name="$(basename "$src")"
+    is_retired_skill "$name" && continue
+    if is_installed_copy "$src" "$home/skills/$name"; then success "skills/$name"
+    elif [ -e "$home/skills/$name" ]; then warn "skills/$name differs from this version — run install global"
+    else missing "skills/$name"; fi
+  done
+}
+
+missing() { echo -e "  ${DIM}○ $1 (missing)${NC}"; }
+
+check_file() {
+  if [ -f "$1" ]; then success "$2"; else missing "$2"; fi
 }
 
 check_dir() {

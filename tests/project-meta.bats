@@ -61,15 +61,14 @@ teardown() {
 
 # --- dedup guard (issue #15) ---
 
-# The "## Agent Pipeline" + "## Stack Detection" markdown is generated from one
-# source (render_pipeline_and_stacks_md) and emitted into BOTH the global
-# CLAUDE.md managed block and the Copilot instructions. Guard that the two
-# installed copies never drift apart again.
-@test "dedup: Agent Pipeline + Stack Detection block is byte-identical across CLAUDE.md and copilot-instructions.md" {
+# Both tools get the same working agreements (incl. the anti-reward-hacking
+# rules); only the Workflow section is tool-specific. Guard the installed
+# copies against drift.
+@test "dedup: Working agreements are byte-identical across CLAUDE.md and copilot-instructions.md" {
   PATH="$STUB:$PATH" CLAUDE_HOME="$SANDBOX/claude" COPILOT_HOME="$SANDBOX/copilot" \
     "$INSTALLER" install global >/dev/null 2>&1
-  sed -n '/^## Agent Pipeline/,/XCTest/p' "$SANDBOX/claude/CLAUDE.md" > "$SANDBOX/blk-claude"
-  sed -n '/^## Agent Pipeline/,/XCTest/p' "$SANDBOX/copilot/copilot-instructions.md" > "$SANDBOX/blk-copilot"
-  [ -s "$SANDBOX/blk-claude" ]            # non-empty (block actually present)
+  sed -n '/^## Working agreements/,/^## Workflow/p' "$SANDBOX/claude/CLAUDE.md" > "$SANDBOX/blk-claude"
+  sed -n '/^## Working agreements/,/^## Workflow/p' "$SANDBOX/copilot/copilot-instructions.md" > "$SANDBOX/blk-copilot"
+  grep -q 'BLOCKED:' "$SANDBOX/blk-claude"   # block actually present
   diff "$SANDBOX/blk-claude" "$SANDBOX/blk-copilot"
 }

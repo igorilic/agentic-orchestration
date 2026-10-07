@@ -123,22 +123,30 @@
 - **Commit**: `feat(hooks): stop-time verification, trust-gated, with BLOCKED escalation`.
 - **Proof**: 52/52.
 
-### Step P1-4: `install global` — native layout
-- **Test**: `tests/install.bats` (rewritten). After `CLAUDE_HOME=$tmp COPILOT_HOME=$tmp2 ai-native-workflow install global` over a fixture of today's layout:
-  - **Hooks:** `guard.sh` and `verify.sh` are **regular files**, byte-identical to `hooks/`.
+### Step P1-4: `install global` — native layout ✅
+- **Test**: `tests/install-native.bats`, 24 tests over sandboxed `CLAUDE_HOME` / `COPILOT_HOME`. It replaces the global-install tests in `install`, `install-copilot`, `uninstall`, `config-clobber`, `sidekick-agent` and `diff-reviewer`.
+  - **Hooks:** `guard.sh` and `verify.sh` are regular files, byte-identical to `hooks/`, in both homes.
   - **Claude settings:**
-    - the result equals the fixture merged with `config/claude-settings.json`;
-    - `additionalDirectories`, `statusLine` and `model` are preserved;
-    - `SessionStart` is empty, and no `tdd-gate` or `confidence-gate` entries remain.
-  - **Copilot:** `$tmp2/hooks/anw.json` parses.
-  - **Skills:** in both homes they are symlinks into `skills/` for `plan`, `check`, `verify`, `incident`, `pr` and the knowledge skills.
-  - **Retired:** `agents/` is empty in both homes; `commands/*` and the legacy skills have moved into a timestamped backup.
-  - **Instructions:** the managed block is replaced by `instructions/*.md`.
-- **Implement**:
-  - In `lib/install-global.sh`: delete the heredoc copies of the hooks; move `spikes/harness-2/{config,instructions}` to `config/` and `instructions/`; copy the hooks, merge with `jq`, symlink the skills.
-  - In `lib/uninstall.sh`: restore from the backup.
-- **Commit**: `feat(install)!: native-first global install — no agents, two hooks, five skills`.
-- **Proof**: run `make install` for real, then repeat the P0-3 and P0-4 proofs.
+    - a union with `config/claude-settings.json`: your keys, rules and hooks survive, and the old gate entries go;
+    - `PreToolUse` runs the guard fail-closed and `Stop` runs verify;
+    - a re-install is byte-identical.
+  - **Copilot:** `hooks/anw.json` wires `preToolUse` (15 s) and `agentStop` (600 s) with absolute paths. Copilot's own `settings.json`, `config.json` and `mcp-config.json` are never touched.
+  - **Skills:** real copies identical to `skills/`, in both homes. They are not symlinks, so an agent editing this repo can't change its own live `/verify` or `/check`. Outdated copies, links and `*.bak.*` duplicates are retired.
+  - **Retired:** the old agents, skills, hooks and confidence scripts move to `<home>/anw-backup/<stamp>/`; yours stay. A fresh install backs nothing up, and a re-install with no changes writes nothing.
+  - **Instructions:**
+    - your preamble plus a managed block;
+    - an unmarked copy of the shipped file is converted in place;
+    - any other unmarked file is backed up and appended to.
+  - **Uninstall:** unwires `settings.json` before deleting the hooks, because a dangling entry would block every tool call. It removes unmodified skill copies and keeps the ones you edited.
+  - **Status:** reports hooks or skills that drifted from the repo. It displays `.anw/.pipeline-state` instead of sourcing it.
+- **Proof**:
+  - the suite passes 447/0 inside the sandbox;
+  - all 10 installer mutants are killed, and none of them can write through into the repo;
+  - a read-only preview against your live config:
+    - the settings merge only drops the empty `SessionStart` and reorders the hook keys;
+    - the hooks are byte-identical;
+    - the 13 skill copies are identical except `adr`, whose stale `.context/` path the repo version replaces.
+- **Your step**: run `make install` yourself, because agents can't write to `~/.claude` or `~/.copilot`. Then run `ai-native-workflow status` and the P0-3/P0-4 canaries.
 
 ### Step P1-5: `install project`, `trust`, `doctor`
 - **Test**:
@@ -151,7 +159,7 @@
   - **`ai-native-workflow trust [path]`** prints the script, asks y/N, and appends the hash.
   - **`doctor`:**
     - exits 0 on a clean install;
-    - exits 1 and names the path when the installed hooks differ from the repo, a skill symlink is broken, a user agent exists, or the Claude `PreToolUse`/`Stop` entries are missing;
+    - exits 1 and names the path when an installed hook or skill differs from the repo, a user agent exists, or the Claude `PreToolUse`/`Stop` entries are missing;
     - `doctor --smoke` runs P1-8.
 - **Implement**: `lib/install-project.sh` (reusing `lib/detect.sh`), plus `trust` and `doctor` in `ai-native-workflow`.
 - **Remove**: the per-project Copilot dispatcher and the vendored scorer. `uninstall project` deletes old copies.
@@ -238,5 +246,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [ ] P1-4 [ ] P1-5 [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
+- [x] P1-4 [ ] P1-5 [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
 - [ ] P2-* (optional)

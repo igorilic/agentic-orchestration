@@ -25,14 +25,6 @@ pstep()   { echo -e "\n${BOLD}${MAGENTA}▸ Step $1:${NC} $2"; }
 dim()     { echo -e "${DIM}  $*${NC}"; }
 ask()     { echo -en "${YELLOW}?${NC} $* "; }
 
-backup_if_exists() {
-  local file="$1"
-  if [ -f "$file" ]; then
-    cp "$file" "${file}${BACKUP_SUFFIX}"
-    dim "Backed up existing $(basename "$file")"
-  fi
-}
-
 write_file() {
   local path="$1"
   local content="$2"

@@ -1,0 +1,197 @@
+{
+  "permissions": {
+    "defaultMode": "auto",
+    "disableBypassPermissionsMode": "disable",
+    "allow": [
+      "Bash(kubectl get:*)",
+      "Bash(kubectl describe:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl top:*)",
+      "Bash(kubectl events:*)",
+      "Bash(kubectl config get-contexts:*)",
+      "Bash(kubectl config current-context)",
+      "Bash(az monitor log-analytics query:*)",
+      "Bash(az monitor log-analytics workspace show:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker compose ps:*)",
+      "Bash(gh auth status:*)",
+      "Bash(gh repo view:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run list:*)",
+      "Bash(glab auth status:*)",
+      "Bash(glab mr view:*)",
+      "Bash(glab mr diff:*)",
+      "Bash(glab mr list:*)",
+      "Bash(glab issue view:*)",
+      "Bash(glab issue list:*)",
+      "Bash(glab ci status:*)",
+      "Bash(glab ci view:*)",
+      "Bash(git fetch:*)"
+    ],
+    "ask": [
+      "Bash(git push:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr comment:*)",
+      "Bash(gh pr review:*)",
+      "Bash(gh issue create:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(gh api:*)",
+      "Bash(gh gist:*)",
+      "Bash(gh repo create:*)",
+      "Bash(gh repo delete:*)",
+      "Bash(gh repo edit:*)",
+      "Bash(gh repo rename:*)",
+      "Bash(gh repo archive:*)",
+      "Bash(gh repo fork:*)",
+      "Bash(gh repo sync:*)",
+      "Bash(glab mr create:*)",
+      "Bash(glab mr merge:*)",
+      "Bash(glab mr note:*)",
+      "Bash(glab issue note:*)",
+      "Bash(glab api:*)",
+      "mcp__confluence__create_page",
+      "mcp__confluence__update_page"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.azure/**)",
+      "Edit(~/.claude/settings.json)",
+      "Edit(~/.claude/settings.local.json)",
+      "Edit(~/.claude/CLAUDE.md)",
+      "Edit(~/.claude/hooks/**)",
+      "Edit(~/.claude/skills/**)",
+      "Edit(~/.claude/agents/**)",
+      "Edit(~/.claude/commands/**)",
+      "Edit(~/.claude/anw/**)",
+      "Edit(~/.claude/plugins/**)",
+      "Edit(~/.copilot/settings.json)",
+      "Edit(~/.copilot/config.json)",
+      "Edit(~/.copilot/copilot-instructions.md)",
+      "Edit(~/.copilot/mcp-config.json)",
+      "Edit(~/.copilot/permissions-config.json)",
+      "Edit(~/.copilot/hooks/**)",
+      "Edit(~/.copilot/skills/**)",
+      "Edit(~/.copilot/agents/**)",
+      "Edit(./.claude/settings.json)",
+      "Edit(./.claude/settings.local.json)",
+      "Bash(sudo:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(kubectl delete:*)",
+      "Bash(kubectl apply:*)",
+      "Bash(kubectl patch:*)",
+      "Bash(kubectl scale:*)",
+      "Bash(kubectl edit:*)",
+      "Bash(kubectl exec:*)",
+      "Bash(kubectl rollout:*)",
+      "Bash(kubectl drain:*)",
+      "Bash(kubectl replace:*)",
+      "Bash(kubectl create:*)",
+      "Bash(kubectl set:*)",
+      "Bash(helm install:*)",
+      "Bash(helm upgrade:*)",
+      "Bash(helm uninstall:*)",
+      "Bash(helm rollback:*)",
+      "Bash(docker system prune:*)",
+      "Bash(docker volume rm:*)",
+      "mcp__claude_ai_Gmail__*",
+      "mcp__claude_ai_Google_Drive__*",
+      "mcp__claude_ai_Google_Calendar__*"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [
+      "docker *",
+      "kubectl *",
+      "az *",
+      "helm *",
+      "gh *",
+      "glab *",
+      "git push *",
+      "git fetch *",
+      "git pull *"
+    ],
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "*.githubusercontent.com",
+        "registry.npmjs.org",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "proxy.golang.org",
+        "sum.golang.org",
+        "crates.io",
+        "static.crates.io",
+        "index.crates.io",
+        "*.nuget.org",
+        "registry.yarnpkg.com"
+      ]
+    },
+    "filesystem": {
+      "allowWrite": [
+        "~/.npm",
+        "~/.cache",
+        "~/Library/Caches",
+        "~/.nuget",
+        "~/.dotnet",
+        "~/go",
+        "~/.cargo",
+        "~/Library/Developer/Xcode/DerivedData"
+      ]
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/guard.sh || exit 2",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/verify.sh",
+            "timeout": 600
+          }
+        ]
+      }
+    ]
+  },
+  "syncClaudeAiPlugins": false,
+  "syncClaudeAiSkills": false,
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": false,
+    "vercel-plugin@vercel": false,
+    "vercel@claude-plugins-official": false,
+    "latex-agentic@latex-agentic": false,
+    "figma@claude-plugins-official": false,
+    "frontend-design@claude-plugins-official": false
+  }
+}

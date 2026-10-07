@@ -15,7 +15,7 @@ show_help() {
     ai-native-workflow <command> [options]
 
   INSTALL COMMANDS
-    install global              Install hooks, skills, agents to ~/.claude/
+    install global              Install hooks, policy, instructions, skills (~/.claude, ~/.copilot)
     install project [path]      Install AGENTS.md, Copilot config, docs/context/
                                 (auto-detects stack from project files)
     install all [path]          Install both global + project
@@ -51,7 +51,7 @@ show_help() {
   OTHER COMMANDS
     detect [path]               Show detected stacks without installing
     status                      Show installation status + pipeline state
-    uninstall global            Remove global hooks and skills
+    uninstall global            Remove our hooks, hook wiring and skill links
     uninstall project [path]    Remove project Copilot instructions
     help                        Show this message
     version                     Show version
@@ -78,30 +78,16 @@ show_help() {
 
   WHAT GETS INSTALLED
 
-    Global (~/.claude/):
-      CLAUDE.md                 Personal defaults + pipeline reference
-      settings.json             SessionStart + TDD gate + confidence gate hooks
-      hooks/session-start.sh    Auto-loads context + detects stack
-      hooks/tdd-gate.sh         Blocks commits without tests
-      hooks/confidence-gate.sh  Blocks PR/MR on RED confidence verdict
-      scripts/confidence.sh     Confidence scorer (deterministic)
-      scripts/confidence-cli.sh Confidence CLI helpers for pipeline
-      skills/tdd/               /tdd — RED → GREEN → REFACTOR
-      skills/ticket/            /ticket — Jira issue → spec + tests
-      skills/skip-tdd/          /skip-tdd — Bypass TDD with reason
-      skills/override-confidence/ /override-confidence — Bypass confidence gate
-      skills/session-report/    /session-report — Obsidian notes
-      skills/adr/               /adr — Architecture Decision Records
-      skills/pr/                /pr — Create PR/MR (gh/glab)
-      skills/plan/              /plan — Pipeline orchestration entry point
-      skills/clusters/          /clusters — Multi-region reference
-      skills/pipeline-*/        Pipeline reference skills
-      agents/requirements-engineer.md  Opus-tier — elicit requirements
-      agents/architect.md       Opus-tier — design, spec, todo plan
-      agents/tdd-developer.md   Sonnet-tier — strict TDD implementation
-      agents/qa.md              Opus-tier — adversarial test + gap hunt
-      agents/reviewer.md        Sonnet-tier — code review + triage
-      agents/troubleshooter.md  Opus-tier — incident diagnosis + fix plan
+    Global (~/.claude/ and ~/.copilot/; replaced files go to anw-backup/):
+      hooks/guard.sh            Pre-tool gate: denies hook bypass and harness edits,
+                                asks on test-weakening commits, new deps, CI edits
+      hooks/verify.sh           Stop gate: runs the repo's trusted .anw/verify
+      settings.json             Claude: permissions, sandbox, hook wiring (merged)
+      hooks/anw.json            Copilot: preToolUse + agentStop wiring
+      CLAUDE.md                 Claude: your preamble + managed working agreements
+      copilot-instructions.md   Copilot: your preamble + managed working agreements
+      skills/*                  Copies: plan, check, verify, incident, pr, explore,
+                                ticket, adr, gh-cli, glab-cli, ...
 
     Per-Project:
       AGENTS.md                 Cross-tool rules (Claude + Copilot)

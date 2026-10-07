@@ -1,14 +1,11 @@
 #!/usr/bin/env bats
 
-# SDK-1 Step A-1: sidekick agent contract + install wiring (GATE).
+# SDK-1 Step A-1: sidekick agent contract (GATE).
 #
 # Verifies:
 #   - the source agents/claude-code/sidekick.md frontmatter is exactly the
 #     OQ-6 decision: model: haiku, tools: Read, Write, Edit, Glob, Grep
-#     (no Bash, no Task);
-#   - `install global` into a sandbox CLAUDE_HOME picks up sidekick.md via
-#     the existing agents/claude-code/*.md glob with ZERO installer changes
-#     (lib/install-global.sh:593-607, install_global_agents()).
+#     (no Bash, no Task).
 #
 # Note: CLAUDE_HOME is the target .claude directory itself (not its parent),
 # same convention as tests/install.bats.
@@ -408,29 +405,4 @@ EOF
   run assert_no_overwrite_section "$sec"
   rm -rf "$mutant_dir"
   [ "$status" -ne 0 ]
-}
-
-# ---------------------------------------------------------------------------
-# Install wiring: zero installer changes, picked up by the existing glob
-# ---------------------------------------------------------------------------
-
-@test "install global: sidekick.md lands in the installed agents dir" {
-  run "$INSTALLER" install global
-  [ "$status" -eq 0 ]
-  [ -f "$CLAUDE_HOME/agents/sidekick.md" ]
-}
-
-@test "install global: installed sidekick.md byte-matches source (no drift)" {
-  run "$INSTALLER" install global
-  [ "$status" -eq 0 ]
-  cmp -s "$SIDEKICK_SRC" "$CLAUDE_HOME/agents/sidekick.md"
-}
-
-@test "install global: installed sidekick.md frontmatter preserves model: haiku and exact tools" {
-  run "$INSTALLER" install global
-  [ "$status" -eq 0 ]
-  fm="$(frontmatter "$CLAUDE_HOME/agents/sidekick.md")"
-  [ "$(grep -cE '^model: haiku$' <<<"$fm" || true)" -eq 1 ]
-  tools_line="$(grep -E '^tools:' <<<"$fm")"
-  assert_tools_whitelist "$tools_line"
 }
