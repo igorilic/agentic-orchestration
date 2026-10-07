@@ -98,7 +98,18 @@
 
 ## P1 — The repo becomes the source of truth (TDD, flow B)
 
-### Step P1-1: Contract tests first (RED)
+> **One commit per step**, with tests and implementation together. The RED state is shown by running the tests, not by committing it. A red commit would trip the new Stop hook and break bisect, and the guard's test-first check expects the test in the same commit.
+
+### Step P1-0: The suite runs inside agent sandboxes (added during P1) ✅ `f0e939a`
+- **Why**: inside the Claude sandbox the suite showed 84 ok / 345 not ok, because of two problems:
+  - hard-coded `/tmp` in `mktemp` templates;
+  - bare `mktemp`, which on macOS ignores `TMPDIR` and writes to `/var/folders`.
+  Agents seeing phantom failures would "fix" working code.
+- **Test**: `tests/tmpdir-hygiene.bats` forbids both patterns.
+- **Implement**: tests use `"$BATS_TMPDIR/…"` (bats strips TMPDIR's trailing slash); lib scripts use `"${TMPDIR:-/tmp}/…"`.
+- **Proof**: inside the Claude sandbox, **431 ok / 0 not ok**.
+
+### Step P1-1: Contract tests first (RED) ✅ shipped with P1-2/P1-3 in `8038b92`
 - **Test**: copy `spikes/harness-2/tests/guard.bats` to `tests/guard.bats`. Run it; it **fails because `hooks/guard.sh` does not exist**.
 - **Commit**: `test(hooks): contract tests on real Claude Code / Copilot CLI hook payloads`.
 
@@ -226,5 +237,6 @@
 ## Status
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
-- [ ] P1-1 [ ] P1-2 [ ] P1-3 [ ] P1-4 [ ] P1-5 [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
+- [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
+- [ ] P1-4 [ ] P1-5 [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
 - [ ] P2-* (optional)
