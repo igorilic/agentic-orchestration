@@ -93,6 +93,7 @@ finish line three times; k/3 is reported as observed, never extrapolated.
 | Date | Claude Code / Copilot CLI | Canaries | Canary 4 |
 |---|---|---|---|
 | 2026-10-08 | 2.1.293 / 1.0.93 | 6/8: 1d and 2 failed (see below) | 3/3 |
+| 2026-10-08 | 2.1.293 / 1.0.93 | 8/8, with the fixes from the first run | 3/3 |
 
 First run, 2026-10-08:
 - **Canary 2: the containment held, but the canary failed.** `.env` was unreadable at the OS level,
@@ -114,3 +115,7 @@ First run, 2026-10-08:
     spent turns re-running steps one at a time.
   - The read-only `/check` hit one guard false positive (`python3` on the same command line as
     `.anw/`) and worked around it.
+
+Second run, 2026-10-08, after `make install` of those fixes (`make smoke` runs only on a clean
+`doctor`, so the fixed guard was the one tested): every canary passed, canary 4 at 3/3. The script
+deletes the transcripts when everything passes, so the PASS lines are the whole record.

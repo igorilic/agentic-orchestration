@@ -7,7 +7,9 @@
   - Todo: `docs/context/specs/HARNESS-2-todo.md`
   - ADR: `docs/decisions/ADR-003-native-first-harness.md`
   - Phase: P0 and P1 done on `feat/harness-2-native-first` (local, not pushed). P2 hardening is optional.
-  - Your steps: `make install`, then the first `make smoke` in a plain terminal. Its result goes into ADR-003.
+  - Live: `make smoke` passed 8/8 on 2026-10-08, its second run. The first run found a guard gap,
+    now fixed. Both runs are in ADR-003.
+  - Next: `/check` on the branch, then `/pr` when you say so.
 
 ## Done
 

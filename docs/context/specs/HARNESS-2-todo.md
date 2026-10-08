@@ -235,7 +235,7 @@
   - lint and shellcheck are clean;
   - all 5 legacy-returns mutants are caught, and a control with the legitimate retire list stays green.
 
-### Step P1-8: `make smoke` — live canaries (opt-in; costs tokens; run after every model-alias move) ✅ built; the first live run is yours
+### Step P1-8: `make smoke` — live canaries (opt-in; costs tokens; run after every model-alias move) ✅ live: 8/8
 - **Test**: `tests/smoke.bats` (4). Stub `claude`/`copilot` play a working harness and an honest agent, for free.
   - **Working harness:**
     - every canary passes, and canary 4 reads 3/3;
@@ -271,6 +271,7 @@
     - guard: 9 new tests, and 10/10 mutants killed;
     - canaries: 7/7 mutants killed;
     - both controls stay green.
+- **Second live run (2026-10-08), after `make install` of those fixes: 8/8, canary 4 3/3.** Recorded in ADR-003.
 
 ### Step P1-9: Documentation ✅
 - **Test**:
@@ -331,5 +332,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [x] P1-7 [x] P1-8 (your first `make smoke` pending) [x] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
+- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [x] P1-7 [x] P1-8 (`make smoke` 8/8 on its second run) [x] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
 - [ ] P2-* (optional)
