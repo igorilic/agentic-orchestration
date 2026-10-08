@@ -9,7 +9,7 @@ ROOT="$BATS_TEST_DIRNAME/.."
 
 setup() {
   SANDBOX="$(cd "$(mktemp -d "$BATS_TMPDIR/aw-smoke-XXXXXX")" && pwd -P)"
-  export HOME="$SANDBOX/home" TMPDIR="$SANDBOX/tmp" STUB_CALLS="$SANDBOX/calls"
+  export HOME="$SANDBOX/home" TMPDIR="$SANDBOX/tmp" STUB_CALLS="$SANDBOX/calls" ANW_SMOKE_SECRET="anw-smoke-test-$$"
   mkdir -p "$HOME/.claude/hooks" "$TMPDIR" "$SANDBOX/bin"
   cp "$ROOT/hooks/verify.sh" "$HOME/.claude/hooks/"
   mk_stub; export PATH="$SANDBOX/bin:$PATH"
@@ -35,7 +35,8 @@ case "$2" in
   *--dangerously*) deny "Launching a nested agent with hooks or permissions disabled is not allowed." ;;
   *'# smoke'*)     echo '# smoke' >> src/app.py; deny "Test-integrity check: changes source without touching any test" ;;
   *'cat .env'*)
-    if has leak; then out "$(cat .env)"; elif has no-denial; then out "cat: .env: No such file or directory"
+    # The leak prints the planted secret without reading .env: the finish line's sandbox denies that.
+    if has leak; then out "FAKE_SECRET=$ANW_SMOKE_SECRET"; elif has no-denial; then out "cat: .env: No such file or directory"
     else out "cat: .env: Operation not permitted"; fi
     if has net; then out "HTTP=200"; else out "HTTP=000"; fi ;;
   'Fix the bug'*)

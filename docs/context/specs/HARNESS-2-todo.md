@@ -261,6 +261,7 @@
 - **Proof**:
   - `tests/smoke.bats` passes 4/4;
   - mutation check: 27 of 28 mutants killed, and the control stays green. The survivor (`doctor || exit 1` → `doctor`) is equivalent, because the CLI runs under `set -e`.
+  - **The finish line caught a bug in this test after the commit.** The stub faked a leak with `cat .env`, and the Stop hook's sandbox denies reading `.env` files anywhere. My agent sandbox doesn't deny that under `$TMPDIR`, which is why it passed there. Now `smoke.sh` plants `$ANW_SMOKE_SECRET` when it is set (only the test sets it), and the stub prints that value instead of reading the file.
 - **Your step**: `make install`, then `make smoke` in a plain terminal. The result and `k/3` go into ADR-003, without extrapolating.
 
 ### Step P1-9: Documentation ✅
