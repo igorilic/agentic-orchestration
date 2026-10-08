@@ -264,6 +264,11 @@ claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}
   [ "$(jq -r .decision <<<"$output")" != block ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"BLOCKED"* ]] || false
   [ ! -e "$TMPDIR/anw-edited-s" ]
 }
+@test "verify: a markdown-bold **BLOCKED**: line is the same honest stop (seen live in E12)" {
+  mk_verify 'exit 1'; edited
+  run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop false $'The check contradicts the spec.\n**BLOCKED**: AC-1 says the sum, the check expects add(2,2)==5.')"
+  [ "$(jq -r .decision <<<"$output")" != block ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"escalated with BLOCKED"* ]] || false
+}
 @test "verify: second red stop in a row is allowed but flagged to the human" {
   mk_verify 'exit 1'; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop true)"

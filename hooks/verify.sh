@@ -72,7 +72,7 @@ if out="$(cd "$root" && sandboxed ./.anw/verify 2>&1)"; then rm -f "$marker"; ex
 
 # Honest exits: an explicit "BLOCKED:" report, or a second red stop in a row. Tell the human; stop pushing.
 # (Escalation channels cut reward hacking 23.6% -> 5.3%; pressure on impossible tasks raises it 3-6x.)
-if grep -q '^BLOCKED:' <<<"$(field '.last_assistant_message')"; then
+if grep -qE '^[*_[:space:]]*BLOCKED[*_]*:' <<<"$(field '.last_assistant_message')"; then # also **BLOCKED**:
   rm -f "$marker"
   jq -nc '{systemMessage:"⚠️ The agent escalated with BLOCKED: and .anw/verify is failing — needs your decision."}'
   exit 0

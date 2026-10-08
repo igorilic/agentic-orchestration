@@ -14,6 +14,9 @@
 # Stripped from Copilot's shell and MCP environments, and redacted from its output.
 SECRET_ENV_VARS="GH_TOKEN,GITHUB_TOKEN,GITLAB_TOKEN,JIRA_API_TOKEN,ANTHROPIC_API_KEY,OPENAI_API_KEY"
 
+# The honest exit, as hooks/verify.sh reads it: a line starting "BLOCKED:", also markdown-bold.
+BLOCKED_RE='^[*_[:space:]]*BLOCKED[*_]*:'
+
 policy_bash_rules() {
   jq -r '(.permissions.ask + .permissions.deny)[] | select(startswith("Bash("))' "$_ANW_SCRIPT_DIR/config/claude-settings.json"
 }
@@ -48,7 +51,7 @@ run_stage() {
       "${args[@]}" </dev/null 2>&1 | tee "$log" || rc="${PIPESTATUS[0]}"
     result="$(cat "$log")"
   fi
-  if grep -q '^BLOCKED:' <<<"$result"; then warn "$name stopped: $(grep -m1 '^BLOCKED:' <<<"$result")"; return 1; fi
+  if grep -qE "$BLOCKED_RE" <<<"$result"; then warn "$name stopped: $(grep -m1 -E "$BLOCKED_RE" <<<"$result")"; return 1; fi
   [ "$rc" -eq 0 ] || { error "$name failed (exit $rc). Transcript: $log"; return 1; }
 }
 

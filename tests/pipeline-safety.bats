@@ -34,7 +34,7 @@ case "$2" in
   /incident*) f="${2##* }"; mkdir -p "$(dirname "$f")"; printf '# Incident\nRoot cause: a null config.\n' > "$f"; say "Report: $f" ;;
   /plan*) f="${2##* }"; mkdir -p "$(dirname "$f")"; printf '# Toy feature\n### Step 1\n### Step 2\n' > "$f"; say "Plan: $f" ;;
   Implement\ step*) s="$(sed -n 's/^Implement step \([0-9]*\).*/\1/p' <<<"$2")"
-    if [ "${STUB_BLOCK_STEP:-}" = "$s" ]; then say "BLOCKED: step $s contradicts AC-1"; exit 0; fi
+    if [ "${STUB_BLOCK_STEP:-}" = "$s" ]; then say "${STUB_BLOCK_WORD:-BLOCKED:} step $s contradicts AC-1"; exit 0; fi
     echo "step $s" >> impl.txt; git add -A; git commit -qm "feat: step $s"; say "Step $s done" ;;
   /check*) say "No merge-blocking problems." ;;
 esac
@@ -99,6 +99,13 @@ seq_of() { basename "$1" | cut -d. -f1; }                                       
   [[ "$output" == *"BLOCKED: step 1"* ]] || false
   ! call_with claude 'Implement step 2' || false
   ! call_with claude /check || false
+  ! pushed feature/toy || false
+}
+@test "github-feature: a markdown-bold **BLOCKED**: step stops it too" {
+  STUB_BLOCK_STEP=1 STUB_BLOCK_WORD='**BLOCKED**:' run anw run github-feature toy.md <<<$'y\ny'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"**BLOCKED**: step 1"* ]] || false
+  ! call_with claude 'Implement step 2' || false
   ! pushed feature/toy || false
 }
 @test "finish: a red .anw/verify blocks the push unless you say so" {
