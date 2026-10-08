@@ -179,7 +179,7 @@
   - the profile compiles: it reaches `sandbox_apply`, while broken controls fail at compile time with exit 65;
   - the suite passes 414/0 with those 4 skipped inside the agent sandbox;
   - your plain-terminal run (2026-10-08) passed 5/5 with no skips. The "can write" test needs a working profile, and the 3 "cannot" tests need real denials, so this checks both directions;
-  - the optional negative control (a copy without the sandbox should fail 4) hasn't run yet; the first attempt used BSD `sed -i ''`, which GNU sed rejects.
+  - your negative control (the same file, on a copy with the sandbox switched off): the 3 "cannot" tests fail, while the sync and "can write" tests pass, as they should without a sandbox. So the confinement tests catch both a missing sandbox and an over-tight one.
 
 ### Step P1-6: Native pipelines
 - **Test**: `tests/pipeline-safety.bats` (new):
@@ -262,5 +262,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [x] P1-5 [x] P1-5b [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
+- [x] P1-4 [x] P1-5 [x] P1-5b [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
 - [ ] P2-* (optional)
