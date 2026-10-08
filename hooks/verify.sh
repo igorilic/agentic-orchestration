@@ -17,11 +17,11 @@ cd "$(field '.cwd // .workingDirectory')" 2>/dev/null || cd "${CLAUDE_PROJECT_DI
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
 [ -x "$root/.anw/verify" ] || exit 0
 
-# Hooks run OUTSIDE the sandbox, so only run a .anw/verify whose exact content you approved
-# (like `direnv allow`). A cloned or agent-modified script is skipped, never executed.
+# Hooks run OUTSIDE the sandbox, so only run a .anw/verify whose exact content you approved at
+# this exact path (like `direnv allow`). A cloned, copied or agent-modified script is never executed.
 trust="${ANW_TRUST_FILE:-$HOME/.claude/anw/trusted-verify}"
-if ! grep -qx "$(shasum -a 256 "$root/.anw/verify" | cut -d' ' -f1)" "$trust" 2>/dev/null; then
-  jq -nc --arg p "$root/.anw/verify" '{systemMessage:("⚠️ Not run: " + $p + " is new or changed. Review it, then trust it: shasum -a 256 " + $p + " | cut -d\" \" -f1 >> ~/.claude/anw/trusted-verify")}'
+if ! grep -qxF "$(shasum -a 256 "$(cd "$root" && pwd -P)/.anw/verify")" "$trust" 2>/dev/null; then
+  jq -nc --arg p "$root/.anw/verify" --arg r "$root" '{systemMessage:("⚠️ Not run: " + $p + " is new or changed, or trusted only for another repo. Review it, then run: ai-native-workflow trust " + ($r | @sh))}'
   exit 0
 fi
 

@@ -39,19 +39,9 @@ uninstall_project() {
   header "Uninstalling project files from: $project_dir"
   echo ""
 
-  local items=(
-    "$project_dir/.github/instructions"
-    "$project_dir/.github/copilot-instructions.md"
-  )
-
-  for item in "${items[@]}"; do
-    if [ -e "$item" ]; then
-      rm -rf "$item"
-      success "Removed $(basename "$item")"
-    fi
-  done
-
-  warn "AGENTS.md, CLAUDE.md, docs/context/, and .anw/ preserved (contain project data)"
+  remove_legacy_copilot_hooks "$project_dir"
+  # Everything else may carry your edits, so it stays.
+  warn "Kept: AGENTS.md, CLAUDE.md, .github/ instructions, docs/ and .anw/verify. Delete .anw/verify to stop the end-of-session check here."
   echo ""
   success "Project uninstall complete"
 }

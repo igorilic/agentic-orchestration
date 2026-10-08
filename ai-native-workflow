@@ -193,6 +193,12 @@ main() {
     status)
       show_status
       ;;
+    trust)
+      trust_verify "${subcommand:-.}"
+      ;;
+    doctor)
+      doctor
+      ;;
     uninstall)
       case "$subcommand" in
         global)  uninstall_global ;;

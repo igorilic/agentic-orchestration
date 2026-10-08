@@ -16,8 +16,8 @@ show_help() {
 
   INSTALL COMMANDS
     install global              Install hooks, policy, instructions, skills (~/.claude, ~/.copilot)
-    install project [path]      Install AGENTS.md, Copilot config, docs/context/
-                                (auto-detects stack from project files)
+    install project [path]      Write .anw/verify (the finish line, trusted on your y),
+                                AGENTS.md, CLAUDE.md and docs/context/ (stack auto-detected)
     install all [path]          Install both global + project
 
   PIPELINE COMMANDS
@@ -51,8 +51,11 @@ show_help() {
   OTHER COMMANDS
     detect [path]               Show detected stacks without installing
     status                      Show installation status + pipeline state
-    uninstall global            Remove our hooks, hook wiring and skill links
-    uninstall project [path]    Remove project Copilot instructions
+    doctor                      Like status, but exits 1 on drift, a custom agent,
+                                or an untrusted .anw/verify in this repo
+    trust [path]                Review a repo's .anw/verify and approve it for the Stop hook
+    uninstall global            Remove our hooks, hook wiring and unmodified skills
+    uninstall project [path]    Remove the old per-project Copilot hooks
     help                        Show this message
     version                     Show version
 
@@ -90,12 +93,10 @@ show_help() {
                                 ticket, adr, gh-cli, glab-cli, ...
 
     Per-Project:
-      AGENTS.md                 Cross-tool rules (Claude + Copilot)
-      CLAUDE.md                 Project context
+      .anw/verify               Finish line: the full test suite (tracked; rest of .anw/ ignored)
+      AGENTS.md                 Commands, then Always / Ask first / Never (≤ 80 lines)
+      CLAUDE.md                 Imports AGENTS.md
       docs/context/             Architecture, conventions, specs, sprint
-      .anw/                     Runtime pipeline state + confidence logs (gitignored)
-      .github/copilot-instructions.md   Copilot repo-wide rules
-      .github/instructions/*.md          Stack-specific Copilot rules
       docs/decisions/           ADR directory
 
   AGENT ROSTER

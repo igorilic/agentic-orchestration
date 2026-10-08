@@ -19,8 +19,9 @@ show_status() {
   check_file "AGENTS.md" "AGENTS.md"
   check_file "CLAUDE.md" "CLAUDE.md"
   check_file "$SPRINT_FILE" "docs/context/"
-  check_file ".github/copilot-instructions.md" ".github/copilot-instructions.md"
-  check_dir ".github/instructions" ".github/instructions/"
+  if [ ! -e .anw/verify ]; then missing ".anw/verify (finish line)"
+  elif verify_is_trusted .; then success ".anw/verify (trusted)"
+  else warn ".anw/verify is not trusted — review it, then: ai-native-workflow trust"; fi
 
   if [ -f ".tdd-skip" ]; then
     warn "TDD bypass is ACTIVE"
@@ -48,7 +49,7 @@ status_home() {
   header "$label (${home/#$HOME/~}/)"
   for f in guard.sh verify.sh; do
     if cmp -s "$_ANW_SCRIPT_DIR/hooks/$f" "$home/hooks/$f"; then success "hooks/$f"
-    elif [ -f "$home/hooks/$f" ]; then warn "hooks/$f differs from this version — run install global"
+    elif [ -f "$home/hooks/$f" ]; then problem "hooks/$f differs from this version — run install global"
     else missing "hooks/$f"; fi
   done
   if [ "$instr" = CLAUDE.md ]; then
@@ -63,26 +64,44 @@ status_home() {
     src="${src%/}"; name="$(basename "$src")"
     is_retired_skill "$name" && continue
     if is_installed_copy "$src" "$home/skills/$name"; then success "skills/$name"
-    elif [ -e "$home/skills/$name" ]; then warn "skills/$name differs from this version — run install global"
+    elif [ -e "$home/skills/$name" ]; then problem "skills/$name differs from this version — run install global"
     else missing "skills/$name"; fi
   done
 }
 
-missing() { echo -e "  ${DIM}○ $1 (missing)${NC}"; }
+# Exit 1, naming each path, if the install drifted, a custom agent exists, or this
+# repo's finish line isn't trusted. `status` shows the same checks without failing.
+doctor() {
+  local f root
+  ANW_PROBLEMS=0
+  header "AI-Native Workflow v${VERSION} — doctor"
+  status_home "Claude Code" "$CLAUDE_DIR" CLAUDE.md
+  if command -v copilot &> /dev/null || [ -d "$COPILOT_DIR" ]; then
+    echo ""
+    status_home "Copilot CLI" "$COPILOT_DIR" copilot-instructions.md
+  fi
+  for f in "$CLAUDE_DIR"/agents/*.md "$COPILOT_DIR"/agents/*.md; do
+    [ -e "$f" ] || continue
+    problem "custom agent ${f/#$HOME/~} (the harness uses the tools' native agents)"
+  done
+  if root="$(git rev-parse --show-toplevel 2>/dev/null)" && [ -e "$root/.anw/verify" ]; then
+    echo ""
+    header "This repo ($root)"
+    if verify_is_trusted "$root"; then success ".anw/verify trusted"
+    else problem "$root/.anw/verify is not trusted — review it, then: ai-native-workflow trust"; fi
+  fi
+  echo ""
+  if [ "$ANW_PROBLEMS" -eq 0 ]; then success "No problems found"; return 0; fi
+  error "$ANW_PROBLEMS problem(s) found"
+  return 1
+}
+
+ANW_PROBLEMS=0
+problem() { ANW_PROBLEMS=$((ANW_PROBLEMS + 1)); warn "$*"; }
+missing() { ANW_PROBLEMS=$((ANW_PROBLEMS + 1)); echo -e "  ${DIM}○ $1 (missing)${NC}"; }
 
 check_file() {
   if [ -f "$1" ]; then success "$2"; else missing "$2"; fi
-}
-
-check_dir() {
-  local path="$1" label="$2"
-  if [ -d "$path" ] && [ "$(ls -A "$path" 2>/dev/null)" ]; then
-    local count
-    count=$(ls -1 "$path" 2>/dev/null | wc -l | tr -d ' ')
-    success "$label ($count files)"
-  else
-    echo -e "  ${DIM}○${NC} ${DIM}$label (empty/missing)${NC}"
-  fi
 }
 
 show_detect() {

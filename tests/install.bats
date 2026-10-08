@@ -62,27 +62,23 @@ teardown() {
 @test "install project: project .gitignore no longer references the renamed .context/ dir" {
   SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
-  ! grep -q '\.context' "$SANDBOX_PROJECT/.gitignore"
+  ! grep -q '\.context' "$SANDBOX_PROJECT/.gitignore" || false
   rm -rf "$SANDBOX_PROJECT"
 }
 
 # Regression: a stackless project must NOT crash `install project`.
 # detect_stacks expanded an empty array under `set -u` (bash 3.2), aborting
 # the whole install before any file was written. (issue #7)
-@test "install project: stackless repo installs cleanly (exit 0 + dispatcher written)" {
+@test "install project: stackless repo installs cleanly (exit 0, no finish line guessed)" {
   SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
   # No go.mod/package.json/etc. — detect_stacks returns empty.
   run "$INSTALLER" install project "$SANDBOX_PROJECT"
   [ "$status" -eq 0 ]
-  [ -f "$SANDBOX_PROJECT/.github/hooks/copilot-cli-dispatcher.sh" ]
+  [ ! -e "$SANDBOX_PROJECT/.anw/verify" ]
   [ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]
   rm -rf "$SANDBOX_PROJECT"
 }
 
-# Drift guard: every installed agent + non-pipeline skill must be a byte-copy of
-# its source file. Agents/skills are now installed via cp-from-source, not
-# heredocs — this test ensures the old heredoc-drift class can never return.
-# (issue #8; pipeline-* skills are intentionally Claude-stubbed, so excluded.)
 # ---------------------------------------------------------------------------
 # CTX-1 Step 3: repo-level .gitignore shape guard
 # ---------------------------------------------------------------------------
@@ -253,7 +249,7 @@ teardown() {
 
   # AC: .gitignore ignores the runtime .anw/ dir and no longer mentions .context/
   grep -qF '.anw/' "$sandbox_project/.gitignore"
-  ! grep -q '\.context' "$sandbox_project/.gitignore"
+  ! grep -q '\.context' "$sandbox_project/.gitignore" || false
 
   rm -rf "$sandbox_claude" "$sandbox_project"
 }

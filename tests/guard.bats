@@ -238,7 +238,7 @@ reason()       { jq -r '.hookSpecificOutput.permissionDecisionReason // .permiss
 
 # --- verify.sh: an editing session cannot end on red ---------------------------------
 mk_verify() { mkdir -p .anw && printf '#!/bin/sh\n%s\n' "$1" > .anw/verify && chmod +x .anw/verify
-              shasum -a 256 .anw/verify | cut -d' ' -f1 >> "$ANW_TRUST_FILE"; }   # the human approved this content
+              shasum -a 256 "$(pwd -P)/.anw/verify" >> "$ANW_TRUST_FILE"; }   # the human approved this content, here
 edited()    { touch "$TMPDIR/anw-edited-s"; }
 claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}" '{session_id:"s",hook_event_name:"Stop",stop_hook_active:$a,cwd:$d,last_assistant_message:$m}'; }
 
@@ -278,6 +278,18 @@ claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}
   mkdir -p .anw && printf '#!/bin/sh\ntouch PWNED; exit 1\n' > .anw/verify && chmod +x .anw/verify; edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
   [ ! -e PWNED ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"new or changed"* ]] || false
+}
+@test "verify: content trusted for another repo is not run here (trust is bound to the path)" {
+  mkdir -p .anw && printf '#!/bin/sh\ntouch PWNED; exit 1\n' > .anw/verify && chmod +x .anw/verify; edited
+  printf '%s  /elsewhere/.anw/verify\n' "$(shasum -a 256 .anw/verify | cut -d' ' -f1)" >> "$ANW_TRUST_FILE"
+  run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
+  [ ! -e PWNED ]; [[ "$(jq -r .systemMessage <<<"$output")" == *"ai-native-workflow trust"* ]] || false
+}
+@test "verify: a legacy hash-only trust entry no longer counts" {
+  mkdir -p .anw && printf '#!/bin/sh\ntouch PWNED; exit 1\n' > .anw/verify && chmod +x .anw/verify; edited
+  shasum -a 256 .anw/verify | cut -d' ' -f1 >> "$ANW_TRUST_FILE"
+  run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
+  [ ! -e PWNED ]
 }
 @test "verify: editing a trusted .anw/verify invalidates the trust" {
   mk_verify 'exit 0'; echo '# tampered' >> .anw/verify; edited

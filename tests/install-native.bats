@@ -228,3 +228,35 @@ JSON
   [ ! -e "$SANDBOX/PWNED" ]
   [[ "$output" == *"PIPELINE=demo"* ]] || false
 }
+
+# --- doctor -------------------------------------------------------------------------------
+@test "doctor: a clean install passes" {
+  anw install global
+  cd "$SANDBOX"
+  run anw doctor
+  [ "$status" -eq 0 ]
+}
+@test "doctor: fails and names the path for a drifted skill, a custom agent, or missing hook wiring" {
+  anw install global; cd "$SANDBOX"
+  edit_installed "$C/skills/plan/SKILL.md" "# edited"
+  run anw doctor
+  [ "$status" -eq 1 ] && [[ "$output" == *"skills/plan differs"* ]] || false
+  anw install global
+  mkdir -p "$P/agents"; echo x > "$P/agents/helper.agent.md"
+  run anw doctor
+  [ "$status" -eq 1 ] && [[ "$output" == *"agents/helper.agent.md"* ]] || false
+  rm "$P/agents/helper.agent.md"
+  jq 'del(.hooks.Stop)' "$C/settings.json" > "$SANDBOX/s" && mv "$SANDBOX/s" "$C/settings.json" || false
+  run anw doctor
+  [ "$status" -eq 1 ] && [[ "$output" == *"settings.json"* ]] || false
+}
+@test "doctor: flags this repo's .anw/verify until you trust it" {
+  anw install global
+  R="$SANDBOX/repo"; mkdir -p "$R/.anw"; git -C "$R" init -q
+  printf '#!/bin/sh\nexit 0\n' > "$R/.anw/verify"; chmod +x "$R/.anw/verify"; cd "$R"
+  run anw doctor
+  [ "$status" -eq 1 ] && [[ "$output" == *"not trusted"* ]] || false
+  anw trust "$R" <<<"y" >/dev/null
+  run anw doctor
+  [ "$status" -eq 0 ]
+}

@@ -89,9 +89,9 @@
 - **Do**: you do this, not the agent; the guard blocks agent writes to `.anw/`. In the repo:
   ```bash
   mkdir -p .anw && printf '#!/bin/sh\nexec make test\n' > .anw/verify && chmod +x .anw/verify
-  shasum -a 256 .anw/verify | cut -d' ' -f1 >> ~/.claude/anw/trusted-verify
+  ai-native-workflow trust .
   ```
-  Use your real **full, fast** suite instead of `make test` (spec P4). Commit it.
+  Use your real **full, fast** suite instead of `make test` (spec P4). Commit it. (Since P1-5, `install project` writes the script for you, and trust entries are bound to the path, so the hash-only line P0 used no longer counts.)
 - **Proof**: in a throwaway branch, ask Claude to "change one covered line so it is wrong" and end the turn. The Stop hook pushes back with the failing output; reply `BLOCKED: test` and the turn ends with a flag to you. Then `git checkout .`
 
 ---
@@ -148,22 +148,27 @@
     - the 13 skill copies are identical except `adr`, whose stale `.context/` path the repo version replaces.
 - **Your step**: run `make install` yourself, because agents can't write to `~/.claude` or `~/.copilot`. Then run `ai-native-workflow status` and the P0-3/P0-4 canaries.
 
-### Step P1-5: `install project`, `trust`, `doctor`
-- **Test**:
-  - **`install project`**, for each stack fixture (go.mod, package.json, *.csproj, Cargo.toml, pyproject.toml, Package.swift, a Makefile with `test:`):
-    - writes an executable `.anw/verify` running the full test command;
-    - records its hash in the trust file;
-    - **never overwrites** an existing `.anw/verify`;
-    - adds `.anw/*` and `!.anw/verify` to `.gitignore`;
-    - writes an AGENTS.md of at most 80 lines, with commands first and then Always / Ask first / Never.
-  - **`ai-native-workflow trust [path]`** prints the script, asks y/N, and appends the hash.
-  - **`doctor`:**
-    - exits 0 on a clean install;
-    - exits 1 and names the path when an installed hook or skill differs from the repo, a user agent exists, or the Claude `PreToolUse`/`Stop` entries are missing;
-    - `doctor --smoke` runs P1-8.
-- **Implement**: `lib/install-project.sh` (reusing `lib/detect.sh`), plus `trust` and `doctor` in `ai-native-workflow`.
-- **Remove**: the per-project Copilot dispatcher and the vendored scorer. `uninstall project` deletes old copies.
-- **Commit**: `feat(cli): per-repo trusted finish line; trust and doctor commands`.
+### Step P1-5: `install project`, `trust`, `doctor` ✅
+- **Found while building it**: trust entries were bare hashes, so a byte-identical `.anw/verify` in any other repo was trusted too. This repo's script is public, and generated ones like `exec go test ./...` are identical everywhere. **Entries are now `shasum -a 256` lines: hash and path.** The legacy hash-only line no longer counts, so re-run `trust` once per repo.
+- **Test**: `tests/install-project.bats` (15), plus 2 hook tests in `guard.bats` and 3 `doctor` tests in `install-native.bats`.
+  - **`install project`:**
+    - writes an executable `.anw/verify` per stack (Makefile `test:` target, go, cargo, dotnet, uv/poetry/pip pytest, pnpm/yarn/bun/npm, swift), or several lines under `set -e`;
+    - writes no script when nothing runnable is found, and npm's placeholder test doesn't count;
+    - never overwrites an existing script;
+    - shows the script and trusts it only on `y`.
+  - **`.gitignore`:** `.anw/*` + `!.anw/verify`, checked with `git check-ignore`. An old bare `.anw/` is migrated.
+  - **AGENTS.md:** ≤ 80 lines, commands first, then Always / Ask first / Never. CLAUDE.md imports it, and neither is ever overwritten.
+  - **Legacy:** the per-project Copilot dispatcher, scorer and policy entry are removed by `install project` and by `uninstall project`; your own hook entries stay.
+  - **`trust [path]`:** refuses a missing or non-executable script; re-trusting replaces that path's entry and drops legacy lines. End to end through the real `verify.sh`, the trusted repo's script runs and an identical copy elsewhere doesn't.
+  - **`doctor`:** exits 0 on a clean install; exits 1 and names the path for drift, a custom agent, missing hook wiring, or an untrusted `.anw/verify` in this repo. `--smoke` comes with P1-8.
+- **Removed**: the dispatcher's 58 tests (`copilot-cli-dispatcher.bats`, `install-project-copilot-hooks.bats`); `guard.sh` and its 51 contract tests replace them.
+- **Proof**: all 14 mutants are killed; the suite passes 409/0 inside the sandbox; a scratch Go repo gets a 23-line AGENTS.md, and git tracks `.anw/verify` while ignoring the rest of `.anw/`.
+- **Your step**: `make install` (new `verify.sh`), then `./ai-native-workflow trust` in this repo. `doctor` should then exit 0.
+
+### Step P1-5b: Run the Stop-hook verify inside a sandbox (R14) — proposed, needs your call
+- **Why**: Claude Code runs hooks outside its sandbox, so `verify.sh` runs repo code that the agent may have just written with your full permissions. Copilot's hooks are already sandboxed.
+- **Sketch**: on macOS, run `.anw/verify` under `sandbox-exec` with the agent's write allowlist (repo, `$TMPDIR`, the caches in `config/claude-settings.json`) and its read denies (`~/.ssh`, `~/.aws`, `~/.azure`, `.env`, keys).
+- **Your call**: network. Deny it (tests needing a package restore fail), or allow it (exfiltration of readable files stays possible).
 
 ### Step P1-6: Native pipelines
 - **Test**: `tests/pipeline-safety.bats` (new):
@@ -246,5 +251,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [ ] P1-5 [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
+- [x] P1-4 [x] P1-5 [ ] P1-5b [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
 - [ ] P2-* (optional)

@@ -285,9 +285,9 @@ Every Claude call uses `--permission-mode acceptEdits --permission-prompts none`
 **`verify.sh`** runs as Claude `Stop` and Copilot `agentStop`. It acts only when:
 - the session edited files, and
 - `.anw/verify` exists, and
-- the script's hash is in `~/.claude/anw/trusted-verify`.
+- `~/.claude/anw/trusted-verify` has the script's exact `shasum -a 256` line: its hash **and** its path, written by `ai-native-workflow trust`.
 
-The trust check exists because hooks run outside the sandbox. A cloned or modified script is skipped, and you're told (E14).
+The trust check exists because hooks run outside the sandbox. A cloned or modified script is skipped, and you're told (E14). Binding the hash to the path means a byte-identical copy in another repo isn't trusted either; generic scripts such as `exec go test ./...` are the same everywhere. What a trusted script runs is still code from the repo; see R14.
 
 Outcomes:
 - Green: the turn ends normally.
@@ -354,7 +354,7 @@ Copilot doesn't document `context` or `agent` in SKILL.md, so treat `/check` the
 - **`skills/`:** the 5 workflow skills plus the knowledge skills.
 - **Hooks and skills are copies, never symlinks.** An agent working in this repo can't change live enforcement, or its own `/verify` and `/check` instructions. Only `install global` makes a repo change live; `status` flags drift.
 - **`agents/`, `commands/`, `scripts/`:** empty.
-- **`anw/trusted-verify`:** hashes of the `.anw/verify` scripts you have approved.
+- **`anw/trusted-verify`:** one `shasum -a 256` line (hash and path) per `.anw/verify` you approved with `ai-native-workflow trust`.
 
 ### 5.5 `~/.copilot` end state
 - **`copilot-instructions.md`:** `spikes/harness-2/instructions/copilot-instructions.md`. Same agreements; the flow mentions plan mode and `/rubber-duck`.
@@ -383,12 +383,13 @@ Copilot doesn't document `context` or `agent` in SKILL.md, so treat `/check` the
   - writes the instructions;
   - retires the legacy agents, skills, hooks and scripts into `<home>/anw-backup/<stamp>/` (never deletes; your own files stay).
 - **`install project`:**
-  - writes `.anw/verify` for the detected stack and trusts it;
+  - writes `.anw/verify` for the detected stack (a Makefile `test:` target wins), never overwriting one, then shows it and asks you to trust it;
   - adds `.anw/*` plus `!.anw/verify` to `.gitignore`, so the script stays tracked;
-  - writes a slim AGENTS.md: commands first, then Always / Ask first / Never, at most 80 lines.
+  - writes a slim AGENTS.md: commands first, then Always / Ask first / Never, at most 80 lines. CLAUDE.md just imports it, and there are no Copilot-only files, because Copilot reads AGENTS.md;
+  - removes the old per-project Copilot hook layer (dispatcher and vendored scorer), keeping any hook entries you added.
 - **New commands:**
-  - `ai-native-workflow trust` re-approves a changed `.anw/verify`;
-  - `doctor [--smoke]` reports drift and runs the canaries.
+  - `ai-native-workflow trust [path]` shows a repo's `.anw/verify` and, on your `y`, records its hash and path;
+  - `doctor` exits 1 and names the path on drift, a custom agent, or an untrusted `.anw/verify` in the current repo. `--smoke` (the canaries) arrives with P1-8.
 
 ### 5.7 Size: before → after
 
@@ -486,6 +487,7 @@ That is why the flow makes `.anw/verify` the full suite and `/check` a standard 
 - **R11** Native features move (skill `context: fork`, Copilot's rubber-duck). `doctor --smoke` detects breakage, and there are fewer moving parts than with custom agents.
 - **R12** Copilot may ignore `context`/`agent` in SKILL.md. Then `/check` runs inline there, and `/rubber-duck` adds the independence.
 - **R13** Edits made only through Bash don't mark the session. The pre-push verify and CI still run.
+- **R14** **The Claude Stop hook runs repo code outside the sandbox** (found in P1-5). Trust covers the script's text, not what it runs: `make test` executes the Makefile and tests the agent may have edited this session. So a prompt-injected test could write `~/.zshrc` or `~/.claude/settings.json` when the session ends. Copilot's hooks run inside its sandbox, so this is Claude-only. Mitigation: P1-5b runs the script under an OS sandbox mirroring the agent's.
 
 ## 10. Out of scope
 
