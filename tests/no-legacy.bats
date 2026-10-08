@@ -22,3 +22,19 @@ ROOT="$BATS_TEST_DIRNAME/.."
 @test "CI and lint only check files that exist" {
   ! grep -qE 'scripts/\*\.sh|skills/\*/\*\.bash' "$ROOT/Makefile" "$ROOT/.github/workflows/test.yml" || false
 }
+
+# P1-9: the docs match the code. History stays in PAPER's erratum, ADR-003 and the old specs.
+@test "README, ARCHITECTURE and CONTRIBUTING describe no removed component" {
+  run bash -c 'cd "$1" && grep -n -E "skip-tdd|override-confidence|tdd-gate|confidence-gate|confidence\.jsonl|\.tdd-skip|--agent|requirements-engineer|tdd-developer|diff-reviewer|troubleshooter|sidekick|@@ANW|copilot-cli-dispatcher|session-start\.sh" \
+    README.md docs/ARCHITECTURE.md CONTRIBUTING.md' _ "$ROOT"
+  [ -z "$output" ] || { echo "$output"; false; }
+}
+@test "PAPER carries the erratum and drops the claims that were never true" {
+  grep -q '^## Erratum' "$ROOT/PAPER.md" || false
+  ! grep -q 'automatically deleted after the next commit' "$ROOT/PAPER.md" || false
+  ! grep -qi 'does not support user-global hooks' "$ROOT/PAPER.md" "$ROOT/docs/ARCHITECTURE.md" || false
+}
+@test "ADR-003 supersedes ADR-001 and ADR-002" {
+  grep -q '^- \*\*Supersedes\*\*: ADR-001.*ADR-002' "$ROOT/docs/decisions/ADR-003-native-first-harness.md" || false
+  for a in 001 002; do grep -q '^- \*\*Status\*\*: Superseded by ADR-003' "$ROOT"/docs/decisions/ADR-$a-*.md || { echo "ADR-$a"; false; }; done
+}

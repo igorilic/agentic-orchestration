@@ -1,339 +1,110 @@
 # Agentic Orchestration
 
-An AI-native development CLI with multi-agent pipelines for test-driven development using Claude Code and GitHub Copilot CLI.
+A small, verified harness for **Claude Code** and **GitHub Copilot CLI**: two fail-closed hooks,
+five workflow skills, an OS-sandboxed policy and a trusted per-repo finish line. The tools' own
+agents do the work; this repo makes sure the work is checked and contained.
 
-Eight specialized AI agents across two tracks:
-- **Production**: **requirements-engineer** → **architect** → **tdd-developer** → **qa** → **reviewer** (with **troubleshooter** for incidents), plus **diff-reviewer** for whole-PR/MR review.
-- **Exploration**: **explorer** for spikes, prototypes, and API learning under `spikes/` (gitignored, TDD gate skipped).
+## Why
 
-The **diff-reviewer** agent reviews a finished GitHub PR or GitLab MR
-(quality, correctness, logic, conventions, security, landmines, best
-practices), ranks findings by severity, and — after a preview/confirm gate —
-posts severity-ranked **inline comments** on the diff (or **conceptual
-threads** for non-line issues) with a verdict. It drives `gh`/`glab` via the
-`gh-cli`/`glab-cli` skills and reads acceptance criteria from the linked
-GitHub issue or Jira ticket.
+Coding agents with tests in reach will sometimes make the check pass instead of making the code
+right, especially when the task is impossible or the check is weak. Prompts lower that rate but
+don't remove it. So the rules that must hold are enforced outside the agent's reach, and the agent
+gets an honest way out: `BLOCKED: <evidence>`.
 
-## The Problem
+The first version of this project used eight custom agents and a hook-enforced TDD gate. An audit
+found that the Claude-side gates had never fired (see the erratum in [PAPER.md](PAPER.md)). This
+version replaces all of it with the native features of both tools and checks the enforcement
+against their real hook payloads.
 
-AI coding assistants forget your rules mid-session. You tell them "tests first" and 30 minutes later they're writing implementation code. TDD instructions in `CLAUDE.md` are suggestions — the model can deprioritize them.
+## How it works
 
-## The Solution
+| Mechanism | What it does |
+|---|---|
+| `guard.sh` (before every command and edit) | Denies hook bypasses (`--no-verify`, …), nested agents without permissions, and writes to the harness itself. **Asks you** before a commit that deletes or weakens tests or changes code with no test, before a new dependency, and before CI or instruction edits. |
+| `verify.sh` (when an editing turn ends) | Runs the repo's `.anw/verify`, your full fast suite, but only a script you approved by hash and path, and on macOS inside a sandbox. While it's red, the agent keeps working or ends with `BLOCKED:`. |
+| Settings (merged into Claude's `settings.json`) | OS sandbox with an egress allowlist; secrets unreadable; asks before push, PR/MR and comments; denies force-push and mutating cluster commands. In Copilot, turn its sandbox on with `/sandbox`. |
+| Skills | `/plan`, `/check` (fresh context, read-only), `/verify`, `/incident` (read-only), `/pr` |
+| Agents | Native only: the main session, plan mode, built-in subagents. No custom agents. |
 
-Separate concerns by guarantee level:
+Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
+decision: [ADR-003](docs/decisions/ADR-003-native-first-harness.md).
 
-| Layer | Mechanism | Guarantee |
-|-------|-----------|-----------|
-| **Hooks** | Shell scripts at lifecycle points | 100% — blocks actions via exit code 2 |
-| **Skills** | Reusable workflow instructions | Probabilistic — model loads when contextually relevant (not guaranteed) |
-| **Agents** | Specialized AI with scoped tools | Purpose-built — each agent does one thing |
+## Quick start
 
-The TDD gate is a `PreToolUse` hook that **blocks `git commit`** if no test files are staged. It's not a suggestion — it's a shell script that returns exit code 2. The AI cannot override it.
+```bash
+make install                      # = ./ai-native-workflow install global (both tools)
+ai-native-workflow doctor         # exits 1 on drift, a custom agent or an untrusted finish line
+
+cd ~/code/my-project
+ai-native-workflow install project .   # writes .anw/verify, shows it, asks you to trust it
+```
+
+`install global` merges the policy into your settings and keeps your own keys, skills and files.
+Anything an older version installed moves to `<home>/anw-backup/<stamp>/`. To try it in a sandbox
+first, set `CLAUDE_HOME` and `COPILOT_HOME` to empty directories.
+
+## Day to day
+
+- **Small change (1–2 files):** just ask. The agent writes a failing test, then the fix. The hooks
+  gate the commit and the end of the turn. Then `/check`, then `/pr`.
+- **Feature or unclear work:** `/plan PROJ-123` writes `docs/context/specs/PROJ-123.md`, and you
+  approve it. Implement one step per session ("implement step 1 of …"), committing each. Then
+  `/check` and `/pr`.
+- **Incident:** `/incident PROJ-456` investigates read-only and writes a report. You decide what to
+  post. Fix in a fresh session.
+- **Review a PR/MR:** the built-in `/code-review` (Claude) or `/review` (Copilot).
+- **Copilot:** plan in plan mode, and follow `/check` with `/rubber-duck`.
+
+Edited `.anw/verify`? Review it, then `ai-native-workflow trust`. Until then it doesn't run.
 
 ## Pipelines
 
-### Pipeline 1: GitLab Feature (Copilot CLI + Jira)
-```
-ai-native-workflow run gitlab-feature PROJ-123
-  │
-  ├─ requirements-engineer  → structured requirements from Jira
-  ├─ qa                     → test plan
-  ├─ architect              → spec.md + todo.md
-  ├─ tdd-developer          → RED → GREEN → REFACTOR (per step)
-  ├─ qa                     → run affected tests
-  ├─ reviewer               → code review + triage
-  └─ glab mr create         → merge request
-
-  then (manual follow-up, after the MR exists):
-  └─ diff-reviewer          → review MR diff; preview → confirm → post
-                              inline comments + threads + verdict (glab)
-```
-
-### Pipeline 2: GitLab Incident (Copilot CLI + Jira + Troubleshooter)
-```
-ai-native-workflow run gitlab-incident PROJ-456
-  │
-  ├─ troubleshooter         → Jira + ArgoCD + App Insights + kubectl
-  ├─ USER DECIDES           → document findings OR fix the issue
-  ├─ tdd-developer          → reproduce bug + fix via TDD
-  ├─ qa                     → verify fix
-  ├─ reviewer               → review MR
-  └─ glab mr create         → merge request + update Jira
-```
-
-### Pipeline 3: GitHub Feature (Claude Code)
-```
-ai-native-workflow run github-feature specs.md
-  │
-  ├─ requirements-engineer  → structured requirements from specs.md
-  ├─ gh issue create        → GitHub issue (feature request)
-  ├─ architect              → spec.md + todo.md
-  ├─ tdd-developer          → RED → GREEN → REFACTOR (per step)
-  ├─ qa                     → run affected tests
-  ├─ reviewer               → code review + triage
-  └─ gh pr create           → pull request (Closes #issue)
-
-  then (manual follow-up, after the PR exists):
-  └─ diff-reviewer          → review PR diff; preview → confirm → post
-                              inline comments + threads + verdict (gh)
-```
-
-### Exploration Track (both Claude Code and Copilot CLI)
-For spikes, prototypes, and API learning. Throwaway code under `spikes/`,
-gitignored, TDD gate skipped automatically.
-```
-/explore <topic>            (or copilot --agent=explorer)
-  │
-  ├─ explorer               → 2-3 approaches with tradeoffs
-  ├─ spikes/<topic>/        → prototype iteratively (gitignored)
-  └─ FINDINGS.md            → recommendation; re-enter /plan to ship
-```
-Use `/brainstorm` first if the idea is too vague to spike yet.
-
-## Quick Start
+The same flow, headless. Each stage is a fresh `claude -p` or `copilot -p` session with no bypass
+flags. In Claude, planning and `/check` run Opus-tier and each step Sonnet-tier, through floating
+aliases, never pinned versions; Copilot stages use its session default. Only the script pushes,
+opens the PR/MR or posts to Jira, each on your yes (Enter means no).
 
 ```bash
-# Install globally (hooks, skills, agents for Claude Code + Copilot CLI)
-./ai-native-workflow install global
-
-# Install per project (auto-detects your stack)
-cd ~/code/my-project
-ai-native-workflow install project .
-
-# Run a pipeline
-ai-native-workflow run gitlab-feature PROJ-123
-ai-native-workflow run gitlab-incident PROJ-456
-ai-native-workflow run github-feature specs.md
-
-# Check what's installed
-ai-native-workflow status
+ai-native-workflow run github-feature specs.md   # Claude: /plan → approve → steps → /check → verify → PR
+ai-native-workflow run github-issue 42           # planned from issue #42; the PR closes it
+ai-native-workflow run gitlab-feature PROJ-123   # Copilot + Jira ticket → MR
+ai-native-workflow run gitlab-incident PROJ-456  # Copilot: read-only /incident → you decide → fix
+ai-native-workflow run status                    # or: run resume
 ```
 
-### Sandboxed installs
+## What gets installed
 
-`install global` writes to `~/.claude/` and `~/.copilot/` by default, and
-auto-backs up `CLAUDE.md` and `settings.json` as `<file>.bak.<timestamp>`
-before overwriting. To install into a sandbox instead — useful for
-testing changes without touching your real config — set `CLAUDE_HOME`
-and/or `COPILOT_HOME`:
+| Where | What |
+|---|---|
+| `~/.claude/` | `hooks/guard.sh`, `hooks/verify.sh`, the policy merged into `settings.json`, a managed block in `CLAUDE.md`, `skills/` |
+| `~/.copilot/` | `hooks/guard.sh`, `hooks/verify.sh`, `~/.copilot/hooks/anw.json` wiring them, a managed block in `~/.copilot/copilot-instructions.md`, `~/.copilot/skills/` |
+| your project | `.anw/verify` (tracked; `.gitignore` gets `.anw/*` + `!.anw/verify`), a short `AGENTS.md` that `CLAUDE.md` imports, `docs/context/`, `docs/decisions/` |
 
-```bash
-CLAUDE_HOME=/tmp/aw-sandbox \
-COPILOT_HOME=/tmp/aw-sandbox-copilot \
-  ai-native-workflow install global
-```
+`.anw/verify` comes from the detected stack. A Makefile `test:` target wins; otherwise
+`go test ./...`, `cargo test`, `dotnet test`, `uv run pytest` / `poetry run pytest` /
+`python3 -m pytest`, `pnpm test` / `yarn test` / `bun run test` / `npm test`, or `swift test`.
+An existing script is never overwritten.
 
-## What Gets Installed
+## Keeping it honest
 
-### Global (`~/.claude/` + `~/.copilot/`)
-
-#### Claude Code (`~/.claude/`)
-
-| Component | Purpose |
-|-----------|---------|
-| `hooks/session-start.sh` | Auto-loads context + detects stack on session start |
-| `hooks/tdd-gate.sh` | Blocks commits without test files |
-| `skills/plan/` | Pipeline orchestration entry point |
-| `skills/tdd/` | RED → GREEN → REFACTOR workflow |
-| `skills/ticket/` | Jira issue → spec + test stubs |
-| `skills/skip-tdd/` | Bypass TDD with logged reason |
-| `skills/session-report/` | Obsidian session notes |
-| `skills/adr/` | Architecture Decision Records |
-| `skills/pr/` | Create PR/MR (auto-detects gh/glab) |
-| `skills/gh-cli/` | Drive `gh` to review a GitHub PR — inline comments + threads |
-| `skills/glab-cli/` | Drive `glab` to review a GitLab MR — inline discussions + threads |
-| `skills/caveman/` | `/caveman` — ultra-terse response mode (drops filler, keeps substance) |
-| `skills/clusters/` | Multi-cluster reference (EMEA/APAC/NAM) |
-| `skills/pipeline-*/` | Pipeline reference skills |
-| `agents/requirements-engineer.md` | Opus-tier — elicit & formalize requirements |
-| `agents/architect.md` | Opus-tier — design, spec, atomic plans |
-| `agents/tdd-developer.md` | Sonnet-tier — strict TDD implementation |
-| `agents/qa.md` | Opus-tier — adversarial test + spec-gap & security hunt |
-| `agents/reviewer.md` | Sonnet-tier — per-step code review + triage |
-| `agents/diff-reviewer.md` | Opus-tier — whole-PR/MR diff review; posts inline comments + threads |
-| `agents/troubleshooter.md` | Opus-tier — incident diagnosis |
-| `agents/explorer.md` | Sonnet-tier — spikes/prototypes under `spikes/` |
-| `skills/explore/` | Exploratory mode entry point |
-| `skills/brainstorm/` | One-question-at-a-time spec elicitation |
-
-#### Copilot CLI (`~/.copilot/`)
-
-`install global` writes a symmetric harness for GitHub Copilot CLI alongside
-the Claude Code installation. Copilot CLI must be on `PATH` for the Copilot
-artifacts to be created. If `copilot` is not on PATH, the installer prints a
-brief notice and skips Copilot-side artifacts. The Claude side installs
-normally.
-
-| Component | Purpose |
-|-----------|---------|
-| `~/.copilot/skills/` | All skills from `skills/`, with `claude --agent=` rewritten to `copilot --agent=` in pipeline skills |
-| `~/.copilot/copilot-instructions.md` | Global AI instructions (equivalent of `CLAUDE.md`) |
-| `~/.copilot/settings.json` | Copilot CLI settings (merged additively on re-install to preserve user keys) |
-| `~/.copilot/agents/` | Agent definition files (`.agent.md`) mirroring `~/.claude/agents/` |
-
-> **Hooks asymmetry**: Claude Code hooks (`tdd-gate.sh`, `confidence-gate.sh`,
-> `session-start.sh`) are installed globally and fire on every Claude Code
-> session. GitHub Copilot CLI scopes hooks per-repository. Run
-> `ai-native-workflow install project` in each trusted repository to enable
-> Copilot repo-level hooks (the per-project `copilot-cli-dispatcher.sh`).
-
-### Per-Project (generated based on detected stack)
-
-| Component | Purpose |
-|-----------|---------|
-| `AGENTS.md` | Cross-tool agent rules (Claude + Copilot) |
-| `CLAUDE.md` | Project context |
-| `docs/context/` | Sprint board, tracked specs/todos/requirements, plus installer-seeded architecture/conventions/glossary (git-tracked; reviewable in PRs) |
-| `.anw/` | Runtime pipeline state, audit log, and confidence logs (gitignored) |
-| `.github/copilot-instructions.md` | Copilot repo-wide rules |
-| `.github/instructions/*.instructions.md` | Stack-specific Copilot rules |
-| `.github/hooks/copilot-cli-dispatcher.sh` | **Copilot CLI per-project hook** — enforces TDD + confidence gates (mirrors Claude's global hooks; per-project because Copilot CLI has no user-global hook support) |
-| `.github/hooks/scripts/confidence.sh` | Vendored confidence scorer (self-contained copy; no dependency on `~/.claude/`) |
-| `.github/hooks/copilot-cli-policy.json` | Registers the dispatcher as a `preToolUse` hook; merged idempotently on re-install |
-| `.github/hooks/README.md` | Explains bypass paths (`/skip-tdd`, `/override-confidence`) and audit trail to contributors |
-| `docs/decisions/` | ADR directory |
-
-## Stack Detection
-
-The installer auto-detects your stack and generates tailored configuration:
-
-| Files Found | Stack | Test Runner | Copilot Instructions |
-|-------------|-------|-------------|---------------------|
-| `*.csproj` / `*.sln` | .NET | xUnit + FluentAssertions | `dotnet.instructions.md` |
-| `go.mod` | Go | testing + testify | `go.instructions.md` |
-| `Cargo.toml` | Rust | built-in + tokio-test | `rust.instructions.md` |
-| `pyproject.toml` | Python | pytest | `python.instructions.md` |
-| `package.json` + react | React/TS | Vitest + Testing Library | `typescript.instructions.md` |
-| `package.json` + react-native | React Native | Jest + RNTL | `typescript.instructions.md` |
-| `Package.swift` | Swift | XCTest | `swift.instructions.md` |
-
-Scans 3 levels deep for monorepo support.
-
-## Usage
-
-### CLI Pipelines
-```bash
-# Full automated pipelines
-ai-native-workflow run gitlab-feature PROJ-123
-ai-native-workflow run gitlab-incident PROJ-456
-ai-native-workflow run github-feature specs.md
-ai-native-workflow run github-feature            # interactive input
-
-# Pipeline management
-ai-native-workflow run status                    # check progress
-ai-native-workflow run resume                    # resume from checkpoint
-```
-
-### Claude Code (Interactive)
-```bash
-# Start the pipeline
-/plan Add JWT authentication
-
-# Or invoke agents directly
-Use the requirements-engineer to analyze the specs
-Use the architect agent to plan the auth feature
-Use tdd-developer to work on Step 1 of auth-todo.md
-Use qa to verify the changes
-Use reviewer to review the changes
-
-# Review a finished PR/MR (posts inline comments after you confirm)
-Use diff-reviewer to review PR #42
-
-# Incident response
-Use the troubleshooter to investigate PROJ-456
-```
-
-### Copilot CLI
-```bash
-# Interactive
-copilot
-> /agent    # pick from list
-
-# Direct
-copilot --agent=requirements-engineer --prompt "Analyze PROJ-123"
-copilot --agent=architect --prompt "Plan JWT auth"
-copilot --agent=tdd-developer --prompt "Step 1 of auth-todo.md"
-copilot --agent=diff-reviewer --prompt "Review MR !42 for PROJ-123"
-copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
-```
-
-### TDD Bypass
-```bash
-# In Claude Code
-/skip-tdd "docs-only change"
-
-# The gate allows the next commit, then re-enables
-```
-
-## Confidence Gate
-
-After every pipeline run, a deterministic confidence verdict is computed
-from the events that `architect`, `qa`, and `reviewer` write to
-`.anw/specs/<id>-confidence.jsonl`. The verdict surfaces both as a
-0–100 score and as a band (GREEN / YELLOW / RED).
-
-**The hook (`hooks/confidence-gate.sh`) blocks `gh pr create` /
-`glab mr create` on RED.** It also surfaces YELLOW as a non-blocking
-warning, and writes a `## Confidence` section into the PR/MR body.
-
-### Hard gates (any one → RED)
-- `NO_AC` — no acceptance criteria in spec
-- `TEST_FAILED` — any test failed
-- `BUILD_BROKEN` — build/typecheck broken
-- `MUST_FIX` — reviewer flagged an unresolved must-fix item
-- `AC_NOT_TESTED` — an AC item has no corresponding test
-- `TDD_BYPASSED_NO_REASON` — TDD gate bypassed without `/skip-tdd`
-
-### Scored penalties
-Score starts at 100; subtractions: −5 per should-fix, −1 per suggestion,
-−5 per step that needed a 2nd review loop, −10 more for a 3rd, −3 per
-tech-debt deferral, −2 per missing AC (cap −20), −5 if diff > 400 lines
-(−15 if > 1000).
-
-### Bands
-- `GREEN` ≥ 80 — proceed
-- `YELLOW` 60–79 — pause and prompt during pipeline; informational at PR
-- `RED` < 60 or any hard gate — block PR
-
-### Bypass
-- `/override-confidence "<reason>"` — explicit one-shot bypass; reason
-  must be ≥12 chars and not boilerplate.
-- `/skip-tdd "<reason>"` — auto-bypasses **structural** gates only
-  (`NO_AC`, `AC_NOT_TESTED`). Behavioral gates (test/build/must-fix)
-  still block.
-
-### Audit trail
-The full event history per spec lives in
-`.anw/specs/<id>-confidence.jsonl` — a local append-only log. Every
-verdict, every override, every gate fire is recorded there. Note this file
-is **gitignored** (`.anw/specs/*.jsonl`) to keep runtime state out of
-version control, so the trail is local to the working copy, not committed.
-
-## Multi-Cluster Troubleshooting
-
-The troubleshooter agent works across 3 regional Kubernetes clusters (EMEA, APAC, NAM):
-
-- **ArgoCD**: Single MCP instance manages all clusters
-- **kubectl**: `--context=aks-<region>-prod` per command
-- **App Insights**: Region-specific `--app` and `--resource-group`
-
-Edit `~/.claude/skills/clusters/SKILL.md` with your cluster details after install.
-
-## Documentation
-
-- [PAPER.md](PAPER.md) — Scientific paper describing the architecture
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — Architecture v3.0 with all pipelines
+- `make test` runs the bats suite. The hooks are driven with each tool's real payloads.
+- `make smoke` (`ai-native-workflow doctor --smoke`) runs live canaries against the installed
+  harness: bypasses, containment, an honest fix, an impossible finish line ×3, and `/check` on a
+  gamed change. It spends model calls, so run it in a plain terminal after every model or tool update.
+- Add a rule only after you have seen the same failure twice.
 
 ## Requirements
 
-- [Claude Code](https://code.claude.com) (for Claude Code agents/hooks/skills)
-- [GitHub Copilot CLI](https://github.com/features/copilot/cli) (optional, for Copilot agents)
-- `gh` CLI (for GitHub pipelines and `/pr` skill)
-- `glab` CLI (for GitLab pipelines and `/pr` skill)
-- `kubectl` (for troubleshooter)
-- `az` CLI (for Azure Application Insights queries)
-- `jq` (required for tests; also used to merge existing settings.json)
-- `bats-core` (development only — `brew install bats-core` on macOS, `npm i -g bats` elsewhere)
+- [Claude Code](https://code.claude.com) and/or [GitHub Copilot CLI](https://github.com/features/copilot/cli)
+- `jq`, `git`, and `make`. The verify sandbox needs macOS `sandbox-exec`; elsewhere the check runs unsandboxed, and `trust` says so.
+- Pipelines: `gh` or `glab`; optional `jira` CLI. Incidents: `kubectl`, `az` (read-only)
+- Development: `bats-core` (`brew install bats-core`)
+
+## Documentation
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, flows, hooks, pipelines
+- [PAPER.md](PAPER.md): design rationale (a whitepaper, not an empirical study), with the erratum
+- [docs/decisions/](docs/decisions/): ADRs · [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License
 

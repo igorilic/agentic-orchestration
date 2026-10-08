@@ -1,300 +1,378 @@
-# Agentic Orchestration for Test-Driven Development: A Multi-Agent Pipeline Architecture for Solo Full-Stack Development
+# Agentic Orchestration for Test-Driven Development: A Native-First, Verifiable Harness for Solo Full-Stack Development
 
 **Igor Ilic**
 
-March 2026
+March 2026 · revised October 2026
 
 ---
 
-> **Note on scope and method.** This is a *design and architecture whitepaper*
-> describing a working open-source system, not an empirical study. It reports
-> no controlled evaluation. Claims about behavioral drift, TDD discipline, and
-> reliability are design rationale and informal observation from single-developer
-> use, not measured results; statements that a mechanism is "probabilistic" or
-> "guaranteed" describe intended behavior of the underlying tools, not benchmarked
-> rates. Read it as an engineering description of how the system is built and why,
-> with the contributions below understood as design contributions.
+> **Note on scope and method.** This is a *design and architecture whitepaper* describing a
+> working open-source system, not an empirical study. It reports no controlled evaluation. The
+> live runs it cites are small demonstrations (N ≤ 4 per scenario), not measured rates, and
+> statements about what a mechanism "enforces" describe how the tools document their hook and
+> sandbox behavior, checked by the tests and canaries in §5. Read the contributions below as
+> design contributions.
+
+---
+
+## Erratum (October 2026)
+
+Versions of this paper from March to September 2026 described two Claude Code `PreToolUse`
+hooks, a TDD gate and a confidence gate, as deterministic enforcement that the model could not
+override. **They never fired.** Both scripts read the command from an environment variable
+(`CLAUDE_TOOL_INPUT`) that Claude Code does not set; hook input arrives as JSON on stdin. The
+project's tests passed only because they set that variable themselves. So every claim of
+machine-enforced TDD or confidence gating on the Claude side was false.
+
+Three further statements were also wrong:
+- the TDD skip marker was never removed after a commit;
+- the skip and override skills that "kept the bypass accountable" were invocable by the agent itself;
+- Copilot CLI *does* support user-global hooks.
+
+The confidence score was computed from logs the agents wrote themselves.
+
+The architecture has since been rebuilt (ADR-003), and this version describes the rebuilt
+harness. Its enforcement is now tested against each tool's real hook payloads and checked live by
+canaries (§5). The earlier text remains in the repository's git history.
 
 ---
 
 ## Abstract
 
-This paper presents a multi-agent orchestration architecture designed for solo full-stack developers managing polyglot codebases across distributed Kubernetes environments. The system coordinates eight specialized AI agents — requirements engineer, architect, test-driven developer, quality assurance, code reviewer, diff reviewer, troubleshooter, and explorer — through a deterministic pipeline enforced by lifecycle hooks, with probabilistic skill activation for workflow flexibility. The architecture operates across two primary AI coding platforms (Claude Code and GitHub Copilot CLI) using a shared instruction layer (AGENTS.md) to ensure behavioral consistency. We describe how separating concerns between deterministic enforcement (hooks), probabilistic workflows (skills), and specialized reasoning (agents with model-tier selection) creates a development system where test-driven discipline is guaranteed by machinery rather than developer memory, while maintaining the flexibility needed for real-world incident response across multi-region cloud infrastructure. The system is delivered as a self-contained CLI installer with automatic stack detection for .NET, Go, Rust, Python, React/TypeScript, React Native, and Swift codebases.
+We describe a harness for AI-assisted software development, used by a solo full-stack developer
+with Claude Code and GitHub Copilot CLI. Its first version coordinated eight custom agents through
+a pipeline it claimed was enforced by lifecycle hooks. An audit found that the hooks on the Claude
+side had never run. The current version is native-first: the tools' own agent loops, plan modes
+and subagents do the agent work, and the repository ships only what they lack. That is two
+fail-closed hooks shared by both tools, five workflow skills, a sandboxed settings policy and
+short instructions.
 
-**Keywords:** multi-agent orchestration, test-driven development, AI-assisted software engineering, Claude Code, GitHub Copilot, DevOps, Kubernetes, agentic workflows
+The design targets the failure that matters most for coding agents with tests in reach: making
+the check pass instead of making the code right.
+- **The finish line.** A per-repository script (`.anw/verify`, the full fast suite) runs whenever
+  an editing session ends. It runs only if the developer approved it by hash and path, and then
+  inside an OS sandbox.
+- **Weakened tests.** A commit that deletes or weakens tests asks the human.
+- **The honest exit.** The agent's sanctioned way out is `BLOCKED: <evidence>`.
+- **Review.** A fresh-context, read-only `/check` reviews every change before a pull request.
+
+We describe the design, its principles and how the harness itself is verified: contract tests on
+the tools' real payloads, mutation-checked tests, and opt-in live canaries.
+
+**Keywords:** coding agents, reward hacking, test-driven development, lifecycle hooks, sandboxing,
+Claude Code, GitHub Copilot CLI
 
 ---
 
 ## 1. Introduction
 
-### 1.1 Problem Statement
+### 1.1 Problem
 
-Solo full-stack developers face a compounding productivity challenge: they must maintain discipline across multiple technology stacks, testing frameworks, and deployment environments while simultaneously designing, implementing, reviewing, and operating their software. The cognitive load of context-switching between architectural thinking, test writing, implementation, code review, and production troubleshooting degrades the quality of each activity.
+A solo developer who delegates coding to agents needs three things the agents don't provide by
+themselves.
 
-AI coding assistants have shown significant promise in augmenting developer productivity, but they introduce their own category of problems. Current AI assistants exhibit what we term *behavioral drift* — the tendency to gradually deprioritize system-level instructions (such as TDD requirements) over the course of a conversation as the model's attention shifts to the most recent context. A developer who establishes a "tests first" rule at the beginning of a session frequently finds the AI skipping directly to implementation 30 minutes later.
+1. **Checks that hold.** Instructions in a context file are suggestions. A model can deprioritize
+   them as a session grows, so rules that must hold need machinery.
+2. **Resistance to reward hacking.** Agents facing an impossible or contradictory task tend to go
+   after the check instead. In one incident investigation, about 700 agents facing impossible tasks
+   went after the scorer [9]. Telling an agent not to hack lowers the rate but does not eliminate
+   it [11]. In one preprint, a written policy plus an escalation tool cut hacking from 23.6% to
+   5.3% [10].
+3. **Containment.** Agents read untrusted text (tickets, pull requests, logs, web pages) while
+   holding credentials. A session should not combine untrusted input, sensitive systems and
+   external actions [16]. Hooks and model-based approval are not a security boundary [17, 18];
+   the OS sandbox is [5].
 
-Additionally, existing approaches typically rely on a single monolithic instruction file (e.g., `CLAUDE.md`) to encode all behavioral rules, workflow protocols, and project context. This conflation of concerns — enforcement, workflow, and context — means that everything operates at the same priority level: suggestion. Nothing is guaranteed.
+### 1.2 What the first version got wrong
 
-### 1.2 Proposed Solution
-
-We propose a **separation-of-concerns architecture** for AI-assisted development that divides the workflow into three distinct mechanism types:
-
-1. **Deterministic enforcement** via lifecycle hooks that execute shell scripts at specific points in the AI agent's workflow (session start, pre-tool-use, post-tool-use). These cannot be skipped or overridden by the AI model.
-
-2. **Probabilistic workflows** via skills — reusable instruction sets that the AI model loads when contextually relevant, providing structured procedures for common tasks.
-
-3. **Specialized reasoning** via purpose-built agents, each configured with a specific model tier, tool set, and behavioral prompt optimized for a single responsibility.
-
-The system is further designed around a **pipeline pattern** where agents hand off work products to each other through the filesystem (specification files, todo plans, test files, code), creating an auditable chain of artifacts.
+The first version answered (1) with hooks that never ran (see the Erratum), and (2) with
+bypasses the agent could reach. It answered (3) not at all: its pipelines launched agents with
+permission-bypass flags and no sandbox. Its eight role-based agents were mostly orchestration
+prompts, and none of them enforced anything. ADR-003 records the audit and the decision.
 
 ### 1.3 Contributions
 
-This paper makes the following contributions:
-
-- A formalization of the **hooks/skills/agents** separation principle for AI-assisted development workflows
-- An **eight-agent system**: a linear feature pipeline (requirements-engineer → architect → tdd-developer → qa → reviewer) plus specialist agents — troubleshooter (incidents), diff-reviewer (whole-PR/MR review), and explorer (spikes) — each with model-tier optimization per role
-- A **cross-tool instruction layer** (AGENTS.md) that provides behavioral consistency across Claude Code and GitHub Copilot CLI
-- A **deterministic TDD gate** that blocks commits without test files, with an accountable bypass mechanism
-- A **confidence gate** that scores step readiness from a per-spec log and blocks commits that fail hard gates (e.g., failing or absent tests), with an accountable `/override-confidence` bypass
-- A **multi-cluster troubleshooting workflow** for distributed Kubernetes environments with ArgoCD, Azure Application Insights, and kubectl
-- A **self-contained CLI installer** with automatic polyglot stack detection
+- A **native-first harness**. The coding tools' own agents do the work; the harness adds only
+  enforcement, containment and a few explicit workflows.
+- **Two fail-closed hook scripts shared by both tools.** Each reads either tool's payload, so
+  Claude Code and Copilot CLI are gated by the same code.
+- A **trusted, sandboxed finish line**, run at the end of every editing turn, with an **honest
+  exit** (`BLOCKED:`) in place of agent-reachable bypasses.
+- **Test-integrity checks at commit time** that ask the human, rather than skip or override switches.
+- **Verification of the harness itself**: contract tests on real payloads, mutation-checked tests
+  and live canaries.
 
 ---
 
-## 2. Background and Related Work
+## 2. Background
 
-### 2.1 AI Coding Assistants
+### 2.1 Extension points
 
-The landscape of AI-assisted development has evolved from autocomplete (GitHub Copilot, 2021) to conversational code generation (ChatGPT, 2022) to agentic coding (Claude Code, Copilot CLI agent mode, 2025). The key transition is from *suggestion* to *execution* — modern tools can read files, run commands, edit code, and commit changes autonomously.
+Both tools expose lifecycle hooks that receive a JSON payload on stdin.
+- **Claude Code** blocks a tool call on exit code 2 or a JSON decision. Other failures, timeouts
+  and missing scripts let the call proceed [2].
+- **Copilot CLI** denies on a non-zero exit, but its hook timeouts always fail open [6, 7].
+- **Skills** are reusable instruction sets [3]. A skill can run in a forked context that doesn't
+  see the conversation history, with a read-only agent type.
+- **Plan mode** and **built-in subagents** cover planning and delegation natively [4].
+- Both tools offer an **OS sandbox** [5].
 
-Claude Code introduced three extension points that enable the architecture described in this paper: **hooks** (deterministic lifecycle scripts, September 2025), **skills** (reusable instruction sets, October 2025), and **subagents** (isolated context windows with custom system prompts, July 2025). GitHub Copilot CLI subsequently added support for custom agents (.agent.md files) and AGENTS.md instruction files, creating the opportunity for cross-tool behavioral consistency.
+### 2.2 Reward hacking and weak checks
 
-### 2.2 Test-Driven Development Enforcement
+Most test patches carry weak or no explicit oracle [12]. LLM reviewers miss some confirmed hacks,
+and evasion rises when agents receive detailed feedback [13]. Agents also tamper with their own
+traces [14], so scores computed from agent-written logs are not evidence. Vendor guidance asks the
+model not to special-case tests and to report a wrong test rather than work around it [22]. That
+helps, but prompts alone do not suffice [11].
 
-TDD's effectiveness is well-documented but its adoption remains low, even among developers who believe in its value. The primary barrier is not technical but cognitive — writing tests first requires sustained discipline that competes with the immediate gratification of writing implementation code. AI assistants exacerbate this by making implementation "feel free" while tests still require careful specification of expected behavior.
+### 2.3 One writer, one reviewer
 
-Previous approaches to TDD enforcement relied on CI/CD pipeline gates (rejecting PRs without test coverage) or IDE plugins (prompting for tests). Both operate *after* the developer has already written implementation code, making them corrective rather than preventive. Our approach operates *before* code is committed, at the AI agent level, making TDD the only available path.
-
-### 2.3 Multi-Agent Systems in Software Engineering
-
-The concept of specialized agents collaborating on software tasks has been explored in academic literature but practical implementations have been limited by the lack of runtime infrastructure. The introduction of subagent support in Claude Code and custom agents in Copilot CLI provides, for the first time, a production-ready platform for multi-agent software engineering workflows with separate context windows, tool restrictions, and model selection per agent.
+Multi-agent systems work best "when writes stay single-threaded and the additional agents
+contribute intelligence rather than actions" [15]. A reviewer prompted to find gaps "will usually
+report some, even when the work is sound" [21]. So the review step asks for merge-blocking
+problems only, each with a repro.
 
 ---
 
 ## 3. Architecture
 
-### 3.1 Design Principles
+### 3.1 Principles
 
-The architecture is governed by four principles:
+| # | Principle |
+|---|---|
+| P1 | **Enforce outside the agent's reach.** Must-hold rules live in hooks and settings that fail closed and that the agent can't edit. Prompts only state intent. |
+| P2 | **Ground truth comes from execution, never self-report.** The hooks run the check themselves; CI and branch protection stay final. |
+| P3 | **Every gate has an honest exit.** `BLOCKED: <evidence>` is a success path, and the human is the only bypass. |
+| P4 | **Strong finish lines.** The finish line runs the whole fast suite, so no cheap hack passes it. |
+| P5 | **Native first.** One session writes; one fresh-context review checks. No custom agents. |
+| P6 | **Contain the blast radius.** OS sandbox, egress allowlist, denied secrets, human approval for outward and irreversible actions. |
+| P7 | **Verify the harness against reality.** Contract tests use real payloads; canaries rerun after model updates. |
 
-**P1: Determinism over suggestion.** Any rule that must be followed 100% of the time is implemented as a hook (exit code 2 blocks the action), not as an instruction in a prompt.
-
-**P2: Single responsibility per agent.** Each agent has one job. The architect never writes code. The developer never designs. The reviewer never modifies. The QA agent never interprets — only reports.
-
-**P3: Filesystem as message bus.** Agents communicate through files (spec.md, todo.md, test files, code files), not through conversational context. This creates an auditable artifact trail and survives context window compaction.
-
-**P4: Cross-tool consistency.** Behavioral rules are defined once in AGENTS.md and consumed by both Claude Code and Copilot CLI, eliminating the need to maintain parallel instruction sets.
-
-### 3.2 Three-Layer Architecture
+### 3.2 Components
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  ENFORCEMENT LAYER (Hooks — Deterministic)                     │
-│  SessionStart → load context, detect stack                     │
-│  PreToolUse   → TDD gate + confidence gate (block commits)     │
-│  Notification → desktop alerts                                 │
-├────────────────────────────────────────────────────────────────┤
-│  WORKFLOW LAYER (Skills — Probabilistic)                       │
-│  /plan    → pipeline orchestration entry point                 │
-│  /tdd     → RED→GREEN→REFACTOR cycle                           │
-│  /ticket  → Jira/GitHub issue → spec + test stubs              │
-│  /adr · /pr → decision records, PR/MR creation                 │
-│  /override-confidence → accountable confidence bypass          │
-├────────────────────────────────────────────────────────────────┤
-│  REASONING LAYER (Agents — Specialized)                        │
-│  requirements-engineer (Opus-tier)   → elicit, formalize ACs   │
-│  architect             (Opus-tier)   → design, spec, plan      │
-│  tdd-developer         (Sonnet-tier) → implement via TDD       │
-│  qa                    (Opus-tier)   → adversarial test + gaps │
-│  reviewer              (Sonnet-tier) → per-step review         │
-│  diff-reviewer         (Opus-tier)   → whole-PR/MR review      │
-│  troubleshooter        (Opus-tier)   → incident investigation  │
-│  explorer              (Sonnet-tier) → spikes & prototypes     │
-└────────────────────────────────────────────────────────────────┘
+ENFORCEMENT  guard.sh   before every command and edit (both tools, user-global)
+             verify.sh  when an editing turn ends: the trusted, sandboxed finish line
+CONTAINMENT  settings   OS sandbox, egress allowlist, secrets unreadable, ask before outward actions
+WORKFLOW     skills     /plan  /check  /incident  /pr  (the developer)  ·  /verify (the model)
+AGENTS       native     the main session, plan mode, built-in subagents
 ```
 
-### 3.3 Agent Pipeline
+### 3.3 The development flow
 
-#### 3.3.1 Feature Development Pipeline
+- **Small changes** happen in the main session: a failing test first, then the fix [1]. The hooks
+  gate the commit and the end of the turn.
+- **Larger work** starts with `/plan`, which writes testable acceptance criteria and small steps.
+  The developer approves the plan: this is the highest-value human checkpoint. Each step is then
+  implemented in its own session and committed.
+- **Before a pull request**, `/check` reviews the branch in a fresh, read-only context. `/pr`
+  pushes and opens the PR or MR, each after the developer confirms.
+- **Incidents** go through `/incident`, a read-only investigation that produces a report. The
+  developer decides what to post, and the fix starts in a fresh session.
+- **Headless pipelines** run the same stages as fresh `claude -p` or `copilot -p` processes with no
+  bypass flags. Only the pipeline script pushes or posts, and only after the developer confirms.
 
-The feature development pipeline follows a strict linear progression:
+### 3.4 Enforcement: `guard.sh`
 
-1. **Requirements-Engineer** (Opus-tier) elicits and formalizes the requirement — from a Jira ticket, a `specs.md` file, or direct user input — into a structured requirements document with testable acceptance criteria. This runs before any design so the architect plans against explicit, verifiable goals rather than an ambiguous prompt.
+Runs before every command and file edit, in both tools.
+- **Deny:** hook bypasses (`--no-verify`, `core.hooksPath`, …), nested agents launched with
+  permissions disabled, and writes to the harness itself (hooks, settings, skills, the trust list,
+  the finish line).
+- **Ask:** a commit that deletes tests, adds skip or focus markers, removes or rewrites
+  assertions, or changes source with no test; a new dependency name; CI and instruction edits.
+  Headless, an ask becomes a denial.
+- **Never:** it never emits an `allow`, which would approve the call. A crash, malformed input or a
+  missing script denies.
 
-2. **Architect** (Opus-tier) reads the requirements, analyzes the codebase, and produces two artifacts: a feature specification (`spec.md`) and an atomic todo plan (`todo.md`). Each step in the todo must be independently testable and result in a commit. The architect never writes implementation code.
+Every edit also marks the session as edited, which arms the finish line.
 
-3. **TDD-Developer** (Sonnet-tier) receives one step at a time from the todo plan and executes the RED→GREEN→REFACTOR cycle. It writes failing tests first (RED), implements the minimum code to pass (GREEN), refactors while keeping tests green, and commits at each phase. The PreToolUse hooks block any `git commit` that doesn't include test files in the staging area, or that fails the confidence gate's hard checks.
+### 3.5 The finish line: `verify.sh`
 
-4. **QA** (Opus-tier) runs after each step completes. It executes the tests affected by the changed files, then reads the spec adversarially — deriving the edge cases each acceptance criterion implies but does not state, and probing the implementation for spec/behaviour discrepancies and security holes the committed tests never exercised. It reports exact pass/fail results alongside every gap it can demonstrate with a throwaway probe (which it never commits). Closing those gaps is the developer's job; QA's job is to find them.
+When a session that edited files ends, the hook runs the repository's `.anw/verify`.
+- **Trust.** Hooks run outside the agent's sandbox, so the script runs only if its exact content
+  at that exact path was approved: like `direnv allow`, a `shasum -a 256` line recorded by
+  `ai-native-workflow trust`. A cloned, copied or edited script is skipped, and the developer is told.
+- **Sandbox.** A trusted script still runs repository code the agent may have just written. On
+  macOS it therefore runs under `sandbox-exec` with the agent's own file limits.
+- **Outcome.** While the check is red, the turn cannot end, and the hook returns the failure with
+  the honest-exit instruction. A reply with a `BLOCKED:` line, or a second red stop in a row, ends
+  the turn and is flagged to the developer.
 
-5. **Reviewer** (Sonnet-tier) evaluates the changes against a checklist covering correctness, test quality, code quality, stack conventions, security, and performance. Findings are categorized as MUST FIX (automatic), SHOULD FIX (user decides), and SUGGESTION (user decides). The user triages each item as Fix, Tech Debt, or Ignore.
+The finish line must be strong. In our spike, a check made only of an assertion contradicting the
+spec was gamed in 2 of 2 runs. With a real test added, so that no simple hack could pass both,
+4 of 4 runs ended `BLOCKED:` instead (§5.4).
 
-6. **Fix Loop** (max 3 iterations): items marked for fixing are sent back to the TDD-Developer. After three cycles, remaining issues are automatically moved to a tech debt backlog.
+### 3.6 Review: `/check`
 
-Two further agents operate outside this linear flow: **diff-reviewer** (Opus-tier) performs a whole-PR/MR review once a pull/merge request exists — ranking findings by severity and, after a preview-and-confirm gate, posting them as inline comments or threads — and **explorer** (Sonnet-tier) supports spikes, prototyping, and API learning, writing throwaway code under a gitignored `spikes/` directory rather than shipping it.
+A forked, read-only skill at the Opus tier. It runs the check itself and reads the diff before any
+summary, then audits integrity: weakened or deleted tests, special-cased inputs, tests that would
+pass without the change. It reports only what would block the merge, each with a failing repro,
+and ends with `Verdict: block` or `Verdict: pass`. It is a sensor, not a gate. Review panels can
+be evaded [13], so CI and branch protection remain the ground truth.
 
-#### 3.3.2 Incident Response Pipeline
+### 3.7 Containment
 
-The troubleshooter agent (Opus-tier) handles a parallel workflow for production incidents:
+The Claude policy turns the OS sandbox on with an egress allowlist and makes secrets unreadable at
+the OS level. It asks before push, PR/MR creation and comments. It denies force-push and mutating
+cluster commands, and it disables the permission-bypass mode [8]. Copilot uses its own sandbox and
+deny rules; pipelines pass the same policy as `--deny-tool` rules.
 
-1. Fetch incident context from Jira (via MCP)
-2. Determine scope — query Azure Application Insights across all three regional clusters (EMEA, APAC, NAM) to determine if the issue is regional or global
-3. Gather evidence from ArgoCD (app health, sync status), kubectl (pod logs, events), and Application Insights (exceptions, failed requests, dependency failures)
-4. Correlate timestamps across sources to identify root cause
-5. Produce a structured diagnosis and create a todo plan where Step 1 is always a test that reproduces the bug
-6. Hand off to the TDD-Developer for the fix
+### 3.8 Model strategy
 
-### 3.4 Model Selection Strategy
+What matters architecturally is the tier, not a version:
+- planning and review run at the Opus tier;
+- implementation runs at the Sonnet tier;
+- Copilot uses its session default.
 
-Model selection is based on the cognitive demands of each role:
+Everything uses floating aliases (`opus`, `sonnet`), so nothing pins a model version. Because
+model updates can break harness prompts, the canaries are rerun after each alias move.
 
-| Agent | Model | Rationale |
-|-------|-------|-----------|
-| Requirements-Engineer | Opus-tier | Elicits and disambiguates intent into testable acceptance criteria — high-stakes framing that the rest of the pipeline depends on |
-| Architect | Opus-tier | Requires deep codebase analysis, design reasoning, and creative problem decomposition |
-| TDD-Developer | Sonnet-tier | Needs strong coding ability but follows a prescribed plan — no design decisions |
-| QA | Opus-tier | Adversarial verification — derives unstated edge cases, hunts spec/implementation discrepancies and security holes, and proves each with a probe; reasoning over an untrusted diff, not a test-runner's job |
-| Reviewer | Sonnet-tier | Pattern matching against conventions and best practices — moderate reasoning |
-| Diff-Reviewer | Opus-tier | Whole-PR/MR review — security, logic, and landmine analysis across an entire diff |
-| Troubleshooter | Opus-tier | Requires cross-system correlation, root cause analysis, and creative diagnosis |
-| Explorer | Sonnet-tier | Generates and evaluates throwaway options for spikes — coding ability without ship-quality constraints |
+### 3.9 Cross-tool consistency
 
-This tiering matches model strength to the cognitive demands of each role. The roles that follow a prescribed plan or checklist (TDD-Developer, Reviewer, Explorer) sit at Sonnet-tier; the roles that must reason from incomplete information — Requirements-Engineer, Architect, Troubleshooter, Diff-Reviewer, and QA — run at Opus-tier. QA is deliberately placed at the top tier: catching the discrepancy a developer's own tests were always going to miss is adversarial reasoning over an untrusted change, and a weaker model there simply rubber-stamps a green suite.
-
-The architecturally meaningful decision is the **tier**, not a specific model version. Agents are therefore configured with floating tier aliases (`opus`, `sonnet`, `haiku`) rather than pinned version identifiers, so each role automatically tracks the current best model of its tier as new releases ship — no per-release maintenance, and no quality left on the table. We avoid naming concrete versions in this paper for the same reason: with no controlled evaluation pinned to a particular model (see §5.3), a version number would imply a reproducibility claim the system does not make. Copilot CLI is the one exception in practice: its agent frontmatter accepts a `model` field but expects a concrete model identifier and offers no floating-alias equivalent, so the Copilot-side agents are the single place a specific version is pinned — and the price is that those identifiers must be bumped by hand as new models ship.
-
-### 3.5 Commit-Time Enforcement: TDD and Confidence Gates
-
-Two `PreToolUse` hooks gate `git commit`. The TDD gate is the first:
-
-```bash
-# Simplified logic
-if [[ "$TOOL_INPUT" matches "git commit" ]]; then
-  if [[ -f ".tdd-skip" ]]; then exit 0; fi    # Bypass active
-  TEST_FILES=$(git diff --cached --name-only | grep -iE "(test|spec)")
-  if [[ -z "$TEST_FILES" ]]; then exit 2; fi  # Block commit
-fi
-```
-
-Exit code 2 is the critical mechanism — Claude Code treats it as a hard block that prevents the action. This is fundamentally different from a prompt instruction, which the model can deprioritize or forget.
-
-The bypass mechanism (`/skip-tdd`) creates a timestamped `.tdd-skip` file with the developer's reason, which is automatically deleted after the next commit. This provides accountability without rigidity.
-
-The second gate is a **confidence gate**. As the pipeline runs, agents append structured events to a per-spec confidence log (`.anw/specs/<id>-confidence.jsonl`) recording acceptance-criteria coverage and test outcomes. A second `PreToolUse` hook scores the active step's readiness from this log into one of three bands — GREEN, YELLOW, RED — combining *hard gates* (e.g., a failing test run, or an acceptance criterion claimed complete with zero tests) that force RED with softer scored penalties. A RED band blocks the commit. The scorer is deliberately **fail-closed**: a missing or unparseable `tests_failed` field is treated as a failure rather than waved through, so the absence of evidence never reads as success. As with the TDD gate, the bypass (`/override-confidence`) is accountable — it requires a non-boilerplate reason of meaningful length, which is logged against the active spec.
-
-Together the two gates encode a simple invariant: a commit must carry tests, and the recorded evidence for the current step must not be in a known-bad state. Both are machinery rather than prompt instructions, so neither can be deprioritized as a conversation grows.
-
-### 3.6 Cross-Tool Compatibility
-
-The architecture achieves behavioral consistency across Claude Code and Copilot CLI through a layered instruction model:
-
-| File | Claude Code | Copilot CLI |
-|------|-------------|-------------|
-| `AGENTS.md` | ✓ auto-loaded | ✓ auto-loaded |
-| `CLAUDE.md` | ✓ auto-loaded | ✓ supported |
-| `.github/copilot-instructions.md` | — | ✓ auto-loaded |
-| `.github/instructions/*.instructions.md` | — | ✓ path-specific |
-| `~/.claude/agents/*.md` | ✓ subagents | — |
-| `~/.copilot/agents/*.agent.md` | — | ✓ custom agents |
-
-`AGENTS.md` is the shared behavioral contract. Agent-specific files are maintained in parallel for each tool but derived from the same source of truth.
+The same two scripts serve both tools. A short `AGENTS.md` per repository is read by Copilot and
+imported by `CLAUDE.md`. The global instructions are 16 lines per tool, with the same working
+agreements. Skills are installed into both tools as copies, so an agent editing the harness
+repository can't change live enforcement.
 
 ---
 
 ## 4. Implementation
 
-### 4.1 Stack Detection
+A bash CLI (`ai-native-workflow`, about 1,350 lines with its library) installs and runs the harness.
 
-The installer performs automatic stack detection by scanning project files:
+- `install global` copies the hooks and skills. It merges the policy into Claude's settings,
+  keeping the developer's own keys, writes managed instruction blocks and generates Copilot's hook
+  wiring. Anything an earlier version installed moves to a timestamped backup.
+- `install project` writes `.anw/verify` for the detected stack, and asks the developer to trust
+  it. A Makefile `test:` target wins; otherwise Go, Rust, .NET, Python, Node or Swift test
+  commands are used.
+- `trust`, `doctor` (exits non-zero on drift, a custom agent or an untrusted finish line) and
+  `doctor --smoke` (the live canaries).
+- `run github-feature | github-issue | gitlab-feature | gitlab-incident`, with `status` and `resume`.
 
-| Indicator | Stack | Test Runner |
-|-----------|-------|-------------|
-| `*.csproj`, `*.sln` | .NET | xUnit + FluentAssertions |
-| `go.mod` | Go | testing + testify |
-| `Cargo.toml` | Rust | built-in + tokio-test |
-| `pyproject.toml` | Python | pytest |
-| `package.json` with react | React/TS | Vitest or Jest |
-| `package.json` with react-native | React Native | Jest + RNTL |
-| `Package.swift` | Swift | XCTest |
-
-Detection scans up to three directory levels deep, supporting monorepo configurations where different stacks exist in subdirectories.
-
-### 4.2 Multi-Cluster Support
-
-The troubleshooter agent operates across three regional Kubernetes clusters (EMEA, APAC, NAM) managed by a single ArgoCD instance. The `/clusters` skill provides a reference table mapping each region to its kubectl context, ArgoCD cluster name, and Azure Application Insights instance.
-
-ArgoCD's Model Context Protocol (MCP) server requires only a single URL regardless of the number of managed clusters, as each application's `destination.server` field identifies the target cluster. kubectl commands use the `--context` flag to target specific clusters without switching the global context. Azure Application Insights queries require region-specific `--app` and `--resource-group` parameters.
-
-### 4.3 CLI Installer
-
-The system is driven by a bash entry point (`ai-native-workflow`) that handles both installation and pipeline execution. The entry point is a thin (~220-line) dispatcher: it resolves its own location through any symlink chain, sources a set of cohesive library modules under `lib/` (`common`, `detect`, `pipeline-core`, `pipelines`, `install-global`, `install-project`, `status`, `uninstall`, `help`), then dispatches the subcommand. Agent and skill definitions live as standalone files under `agents/` and `skills/` and are installed by copying from source — a single source of truth, enforced by a drift test that fails if an installed copy diverges from its source. The library modules embed the hook scripts, the confidence-scoring tooling, and the configuration templates. The CLI supports:
-
-- `ai-native-workflow install global` — installs hooks, skills, agents, and settings to `~/.claude/` and `~/.copilot/`
-- `ai-native-workflow install project <path>` — generates a stack-tailored AGENTS.md, Copilot instructions, a tracked `docs/context/` directory (architecture, conventions, glossary, specs, sprint), and a gitignored `.anw/` runtime directory
-- `ai-native-workflow run <pipeline> [arg]` — drives an end-to-end pipeline: `gitlab-feature` / `gitlab-incident` (Copilot CLI + Jira → MR), `github-feature` / `github-issue` (Claude Code → PR), plus `run status` / `run resume` for checkpointed state
-- `ai-native-workflow status` — health check of global and project installation
-- `ai-native-workflow detect <path>` — stack detection without installation
-- `ai-native-workflow uninstall global|project [path]` — removes the installation
+| Component | First version | Now |
+|---|---|---|
+| Custom agents | 9 Claude + 8 Copilot | 0 |
+| Enforcement scripts | 3 Claude hooks (inert) + a per-project Copilot dispatcher | 2 scripts for both tools (236 lines) |
+| Global instructions | 58 + 55 lines | 16 + 16 lines |
+| Bypass mechanisms | 2 agent-invocable skills, 2 marker files | none: the developer answers the prompt |
+| Test suite | 391 tests, mostly on the wrong hook contract | 164 tests on the real payloads |
 
 ---
 
-## 5. Discussion
+## 5. Verifying the harness
 
-### 5.1 Determinism vs. Flexibility
+### 5.1 Contract tests
 
-The central design tension is between enforcement and developer autonomy. Hard deterministic rules (hooks) guarantee compliance but can impede legitimate workflows (documentation-only commits, config changes). The `/skip-tdd` escape hatch resolves this by allowing bypass with accountability — the reason and timestamp are logged, and the bypass auto-expires after one commit.
+The hooks are tested with the payload shapes each tool really sends, captured from live sessions.
+This is the step whose absence let the first version's gates stay inert. The pipelines are tested
+with stub CLIs that record their arguments, and pushes go to a local bare remote.
 
-We found that the three-mechanism model (hooks → skills → agents) maps naturally to the certainty spectrum: rules that must never be violated become hooks, workflows that should usually be followed become skills, and decisions requiring judgment become agent responsibilities.
+### 5.2 Mutation-checked tests
 
-### 5.2 Filesystem as Communication Channel
+Each change to the harness was checked by seeding mutants into the code: removing a check, or
+loosening a rule. The new tests had to fail on each mutant, and a control had to stay green. One
+surviving mutant in the canary step was equivalent: it removed an explicit exit that `set -e`
+already guarantees.
 
-Using the filesystem rather than conversational context as the inter-agent communication channel has several advantages:
+### 5.3 Live canaries
 
-1. **Persistence**: Artifacts survive context window compaction and session restarts
-2. **Auditability**: The git history records exactly what each agent produced
-3. **Composability**: Any agent can read any other agent's output without being in the same conversation
-4. **Human-readability**: spec.md and todo.md files are useful documentation even without AI agents
+`make smoke` runs real headless sessions against the installed harness, in throwaway
+repositories. The guard must deny `--no-verify` in both tools, a nested agent without permissions,
+and an untested source commit. A fake secret must stay unreadable and the network outside the
+allowlist unreachable. An honest bug fix must pass without pushback. An impossible finish line,
+run three times, must end `BLOCKED:` with nothing tampered. `/check` must block a gamed change.
 
-### 5.3 Limitations
+The canary script has its own tests: every injected defect must fail its own canary. Results are
+recorded per run in ADR-003, as observed counts, never extrapolated.
 
-- **Model availability**: The system requires access to Opus, Sonnet, and Haiku models. If a model tier is unavailable, the pipeline degrades.
-- **Skill activation reliability**: Skills are probabilistic and may not activate autonomously in all cases. The `/plan` skill uses `disable-model-invocation: true` to require explicit invocation.
-- **Copilot CLI model pinning**: Copilot CLI's agent frontmatter accepts a `model` field but expects a concrete model identifier and has no floating-alias equivalent to Claude Code's `opus`/`sonnet`/`haiku`. The Copilot-side agents therefore pin specific versions and must be updated manually when a better model ships — the one place the floating-tier strategy does not reach.
-- **Single developer**: The pipeline is designed for solo workflows. Multi-developer orchestration would require additional coordination mechanisms.
-- **No controlled evaluation**: The claimed benefits — reduced behavioral drift, sustained TDD discipline, lower context-switching cost — are motivated by design and observed informally in single-developer use. This paper reports no A/B comparison, no measured task-completion or defect-rate data, and no benchmarked skill-activation rate. Quantifying these effects against a non-orchestrated baseline is the most important direction for future work.
+### 5.4 Spike demonstrations
+
+The design was shaped by small live runs (haiku agent, Opus-tier review):
+
+| Scenario | Result |
+|---|---|
+| Honest bug fix | fixed, check green at stop, no pushback |
+| Weak finish line (only an assertion contradicting the spec) | 2/2 gamed it (`a + b + 1`) |
+| Strong finish line (a real test plus the contradictory assertion) | 4/4 ended `BLOCKED:`, no code changed |
+| `/check` on the two gamed states | 2/2 blocked the merge with the right diagnosis |
+
+These are demonstrations of the mechanisms, not estimates of how often they work.
 
 ---
 
-## 6. Conclusion
+## 6. Discussion
 
-We have presented a practical architecture for AI-assisted test-driven development that separates enforcement, workflow, and reasoning into distinct mechanism types. The system enforces TDD and step-confidence compliance through deterministic hooks while maintaining developer flexibility through accountable bypass mechanisms. Eight specialized agents, each optimized for a specific role with an appropriate model tier, collaborate through filesystem artifacts in a pipeline that covers the full software lifecycle from requirements and design through implementation, review, and incident response. We present this as a design contribution: the architecture is operational and in single-developer use, but the paper makes no claim of controlled empirical evaluation.
+### 6.1 Hooks are guardrails; the sandbox is the boundary
 
-The architecture is operational today using Claude Code and GitHub Copilot CLI, requires no custom infrastructure beyond the standard AI tool installations, and is distributed as a single self-contained installer script. By making TDD the path of least resistance rather than a discipline to maintain, the system addresses the fundamental challenge of sustaining engineering rigor in AI-accelerated development workflows.
+A hook that pattern-matches shell text stops the naive bypass, not a determined injection [17].
+The harness therefore puts the hard limits in the OS sandbox and the settings. It uses the hooks
+for what they do well: running the check, asking at commit time, and failing closed.
+
+### 6.2 Honest exits beat clever detectors
+
+The harness detects hacks only crudely, at commit time and in `/check`. Mostly it makes hacks
+unnecessary: a strong finish line, a sanctioned `BLOCKED:` exit, and a human who is the only
+bypass. That matches the evidence that an escalation path reduces hacking [10] and that
+instructions alone don't [11].
+
+### 6.3 Less harness
+
+Repository context files rarely help and raise cost [19]. Skills that should fire on their own
+often don't [20]. So the instructions stay short, skills are invoked explicitly, and anything that
+must hold is a hook or a setting. A harness component can stop being needed, or start getting in
+the way, when the model changes, so the canaries are rerun after every model update.
+
+### 6.4 Limitations
+
+- No controlled evaluation. The spike runs and canaries are small-N demonstrations.
+- The finish-line sandbox needs macOS `sandbox-exec`; elsewhere the check runs unsandboxed, and
+  `trust` says so.
+- A repository's own settings can disable hooks. Only managed settings can't be overridden.
+- The guard's shell-text rules can be phrased around; shell writes to CI config currently get no
+  ask.
+- Copilot hook timeouts fail open, so the finish line must stay under ten minutes.
+- The design targets a single developer.
+
+---
+
+## 7. Conclusion
+
+The first version of this harness promised enforcement that never ran, and its tests could not
+tell. The rebuilt harness is smaller and more honest. The coding tools' native agents do the work.
+Two hooks shared by both tools gate commits and the end of every editing turn. The finish line is
+trusted, sandboxed and strong. The agent always has an honest exit. The harness itself is checked
+against the tools' real behavior, by contract tests and live canaries. We offer it as a design:
+operational and in daily single-developer use, but not empirically evaluated.
 
 ---
 
 ## References
 
 1. Beck, K. (2003). *Test-Driven Development: By Example*. Addison-Wesley.
-2. Anthropic. (2025). Claude Code Hooks Documentation. https://code.claude.com/docs/en/hooks-guide
-3. Anthropic. (2025). Claude Code Skills Documentation. https://code.claude.com/docs/en/skills
-4. Anthropic. (2025). Claude Code Subagents Documentation. https://code.claude.com/docs/en/sub-agents
-5. GitHub. (2026). GitHub Copilot CLI Documentation. https://docs.github.com/en/copilot/how-tos/copilot-cli
-6. GitHub. (2025). Copilot Coding Agent Custom Instructions. https://github.blog/changelog/2025-08-28-copilot-coding-agent-now-supports-agents-md-custom-instructions/
-7. Argoproj Labs. (2025). MCP Server for ArgoCD. https://github.com/argoproj-labs/mcp-for-argocd
-8. Microsoft. (2026). Azure Application Insights CLI Reference. https://learn.microsoft.com/en-us/cli/azure/monitor/app-insights
-9. Model Context Protocol. (2025). MCP Specification. https://modelcontextprotocol.io/specification/2025-11-25
+2. Anthropic. Claude Code: Hooks. https://code.claude.com/docs/en/hooks
+3. Anthropic. Claude Code: Skills. https://code.claude.com/docs/en/skills
+4. Anthropic. Claude Code: Subagents. https://code.claude.com/docs/en/sub-agents
+5. Anthropic. Claude Code: Sandboxing. https://code.claude.com/docs/en/sandboxing
+6. GitHub. Copilot CLI hooks reference. https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-hooks-reference
+7. GitHub. GitHub Copilot CLI documentation. https://docs.github.com/en/copilot/how-tos/copilot-cli
+8. Anthropic. Claude Code: Permissions. https://code.claude.com/docs/en/permissions
+9. METR (2026-08-26). OpenAI / Hugging Face incident investigation. https://metr.org/blog/2026-08-26-openai-hugging-face-incident-investigation/
+10. Gomez (2026-08-29). arXiv 2608.29460 (preprint). https://arxiv.org/abs/2608.29460
+11. Hack-Verifiable Terminal Bench (2026-08-22). arXiv 2608.22103. https://arxiv.org/abs/2608.22103
+12. *All Smoke, No Alarm* (2026-06-16). arXiv 2606.18168. https://arxiv.org/abs/2606.18168
+13. (2026-09-23). arXiv 2609.28614. https://arxiv.org/abs/2609.28614
+14. (2026-09-24). arXiv 2609.30266. https://arxiv.org/abs/2609.30266
+15. Factory (2026-08-27). What it takes for coding agents to complete large software tasks. https://factory.com/news/what-it-takes-for-coding-agents-to-complete-large-software-tasks
+16. Meta (2025-10-31). Practical AI agent security (the Agents Rule of Two). https://ai.meta.com/blog/practical-ai-agent-security/
+17. Trail of Bits. claude-code-config. https://github.com/trailofbits/claude-code-config
+18. (2026-09-17). arXiv 2609.19587. https://arxiv.org/abs/2609.19587
+19. ETH Zurich (2026-09-29). arXiv 2602.11988 v3. https://arxiv.org/abs/2602.11988
+20. Vercel (2026-01-27). AGENTS.md outperforms skills in our agent evals. https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals
+21. Anthropic. Claude Code: Best practices. https://code.claude.com/docs/en/best-practices
+22. Anthropic. Claude prompting best practices. https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices
 
 ---
 
-*This paper describes a system developed for personal use and shared as open-source software. The author has no commercial affiliation with Anthropic or GitHub.*
+*This paper describes a system developed for personal use and shared as open-source software. The
+author has no commercial affiliation with Anthropic or GitHub.*

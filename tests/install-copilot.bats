@@ -1,21 +1,18 @@
 #!/usr/bin/env bats
 
-# COP-1 docs checks. The Copilot install itself is tested in
-# tests/install-native.bats; HARNESS-2 P1-9 rewrites these with the docs.
+# The docs name what `install global` really puts in ~/.copilot (tested in
+# tests/install-native.bats), and that both tools' hooks are user-global.
 
-@test "docs: README mentions ~/.copilot/skills/" {
-  rg -q '~/\.copilot/skills/' "$BATS_TEST_DIRNAME/../README.md"
+ROOT="$BATS_TEST_DIRNAME/.."
+
+@test "docs: README lists what install global puts in ~/.copilot" {
+  for p in '~/.copilot/hooks/anw.json' '~/.copilot/skills/' '~/.copilot/copilot-instructions.md'; do
+    grep -qF "$p" "$ROOT/README.md" || { echo "README.md does not mention $p"; false; }
+  done
 }
 
-@test "docs: README mentions ~/.copilot/copilot-instructions.md" {
-  rg -q '~/\.copilot/copilot-instructions\.md' "$BATS_TEST_DIRNAME/../README.md"
-}
-
-@test "docs: README mentions ~/.copilot/settings.json" {
-  rg -q '~/\.copilot/settings\.json' "$BATS_TEST_DIRNAME/../README.md"
-}
-
-@test "docs: ARCHITECTURE notes hooks asymmetry (Claude global, Copilot repo-scope)" {
-  rg -qi 'copilot.*(repo|repository)[- ]scope|repo[- ]scope.*copilot' \
-    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+@test "docs: ARCHITECTURE says the hooks are user-global in both tools" {
+  grep -qi 'user-global' "$ROOT/docs/ARCHITECTURE.md" || false
+  grep -qF '~/.copilot/hooks/anw.json' "$ROOT/docs/ARCHITECTURE.md" || false
+  ! grep -qiE 'repo[- ]scope' "$ROOT/docs/ARCHITECTURE.md" || false
 }

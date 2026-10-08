@@ -1,6 +1,7 @@
 # ADR-002 — Sentinel-stream live rendering + real sidekick delegation
 
-- **Status**: Proposed
+- **Status**: Superseded by ADR-003 (2026-10-08). The custom agents, the sidekick and the
+  sentinel protocol are gone; the pipeline renders Claude's own `stream-json` events.
 - **Date**: 2026-07-01
 - **Related**: `docs/context/specs/SDK-1-spec.md`, `docs/context/specs/SDK-1-brainstorm.md`,
   `spikes/sdk-1-renderer/FINDINGS.md`

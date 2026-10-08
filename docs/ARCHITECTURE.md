@@ -1,271 +1,148 @@
-# Workflow Architecture v3.0
+# Architecture v4: native-first
 
-For the full technical specification, see [PAPER.md](../PAPER.md).
+The tools' own agent loops do the agent work. This repo ships only what they lack: two
+fail-closed hooks, five workflow skills, a sandboxed settings policy, short instructions, and a
+CLI that installs them and runs headless pipelines.
 
-## Three-Layer Architecture
-
-```
-┌────────────────────────────────────────────────────────────┐
-│  ENFORCEMENT LAYER (Hooks — Deterministic)                 │
-│  SessionStart → load context, detect stack                 │
-│  PreToolUse   → TDD gate (blocks commits without tests)   │
-│  PreToolUse   → Confidence gate (blocks PR/MR on RED)     │
-│  Notification → macOS native alerts                        │
-├────────────────────────────────────────────────────────────┤
-│  WORKFLOW LAYER (Skills — Probabilistic)                   │
-│  /plan                    → generic pipeline orchestration │
-│  /pipeline-gitlab-feature → GitLab + Copilot + Jira       │
-│  /pipeline-gitlab-incident→ GitLab + Troubleshooter + Jira│
-│  /pipeline-github-feature → GitHub + Claude LLMs          │
-│  /tdd     → RED→GREEN→REFACTOR cycle                      │
-│  /ticket  → Jira/GitHub issue → spec + test stubs          │
-│  /adr     → Architecture Decision Record                   │
-│  /pr      → Pull request creation (gh/glab)                │
-│  /clusters → Multi-region reference data                   │
-├────────────────────────────────────────────────────────────┤
-│  REASONING LAYER (Agents — Specialized)                    │
-│  requirements-engineer (Opus-tier) → elicit, formalize reqs │
-│  architect             (Opus-tier) → design, spec, plan     │
-│  tdd-developer         (Sonnet-tier) → implement via TDD   │
-│  qa                    (Opus-tier) → adversarial test + gaps│
-│  reviewer              (Sonnet-tier) → code review + triage │
-│  diff-reviewer         (Opus-tier) → PR/MR review + comment │
-│  troubleshooter        (Opus-tier) → incident investigation │
-└────────────────────────────────────────────────────────────┘
-```
-
-## Pipelines
-
-### Pipeline 1: GitLab Feature Development (Copilot CLI + Jira)
+- Why: [PAPER.md](../PAPER.md) · Decision: [ADR-003](decisions/ADR-003-native-first-harness.md) ·
+  Spec: [HARNESS-2](context/specs/HARNESS-2-spec.md)
 
 ```
-Jira Ticket
-  │
-  ├─ 1. requirements-engineer (Opus-tier)
-  │     Fetch Jira ticket → structured requirements
-  │     → docs/context/specs/<id>-requirements.md
-  │
-  ├─ 2. qa (Opus-tier) — test planning
-  │     Requirements → testing plan with scenarios
-  │
-  ├─ 3. architect (Opus-tier)
-  │     Requirements + test plan → spec.md + todo.md
-  │     → User approves plan
-  │     → emits spec event to <id>-confidence.jsonl
-  │
-  ├─ 4. tdd-developer (Sonnet-tier) — per step
-  │     RED → GREEN → REFACTOR → commit
-  │
-  ├─ 5. qa (Opus-tier) — test execution
-  │     Run affected tests → pass/fail
-  │     → emits qa event
-  │
-  ├─ 6. reviewer (Sonnet-tier) — MR review
-  │     Review → triage → max 3 fix loops
-  │     → emits review event
-  │     → confidence per-step verdict (pauses on YELLOW/RED)
-  │
-  ├─ 7. confidence (aggregate verdict — hook enforces RED at MR step)
-  │
-  ├─ 8. glab mr create → merge request (body includes ## Confidence section)
-  │
-  └─ 9. diff-reviewer (Opus-tier) — whole-MR diff review (optional)
-        Review diff + Jira AC → rank by severity → preview + confirm
-        → post inline comments + threads + verdict via glab
+┌───────────────────────────────────────────────────────────────────────────┐
+│  ENFORCEMENT  hooks, user-global in both tools, fail closed               │
+│    guard.sh   before every command and edit: deny bypasses and harness    │
+│               writes; ask about weakened tests, new deps, CI edits        │
+│    verify.sh  when an editing turn ends: run the trusted .anw/verify      │
+│               (sandboxed); red → keep working or end with BLOCKED:        │
+├───────────────────────────────────────────────────────────────────────────┤
+│  CONTAINMENT  settings: OS sandbox, egress allowlist, secrets unreadable, │
+│               ask before push/PR/comments, deny force-push and prod edits │
+├───────────────────────────────────────────────────────────────────────────┤
+│  WORKFLOW     skills: /plan /check /incident /pr (you), /verify (model)   │
+├───────────────────────────────────────────────────────────────────────────┤
+│  AGENTS       native: the main session, plan mode, built-in subagents     │
+│               (no custom agents)                                          │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Platform**: GitLab + Copilot CLI + Jira
-**Agents**: All run via `copilot --agent=<name>`
+## The development flow
 
-### Pipeline 2: GitLab Incident Response (Copilot CLI + Jira + Troubleshooter)
+| Work | Flow |
+|---|---|
+| Small change (1–2 files) | Ask in the main session. A failing test first, then the fix. The hooks gate the commit and the end of the turn. `/check`, then `/pr`. |
+| Feature or unclear work | `/plan <ticket>` writes `docs/context/specs/<id>.md`; **you approve**. Implement one step per session, committing each. `/check`, then `/pr`. |
+| Incident | `/incident <ticket>` investigates read-only and writes a report. You decide what to post; the fix starts in a fresh session. |
+| PR/MR review | The built-in `/code-review` (Claude) or `/review` (Copilot). |
 
-```
-Jira Incident Ticket
-  │
-  ├─ 1. troubleshooter (Opus-tier)
-  │     Jira → ArgoCD → App Insights → kubectl
-  │     → Key findings + next action
-  │
-  ├─ 2. USER DECISION POINT
-  │     ├─ A: Document only → add findings to Jira → END
-  │     └─ B: Fix the issue → continue
-  │
-  ├─ 3. tdd-developer (Sonnet-tier)
-  │     Step 1: reproduce bug as failing test
-  │     Step 2+: implement fix
-  │
-  ├─ 4. qa (Opus-tier) → verify fix
-  │     → emits qa event
-  │
-  ├─ 5. reviewer (Sonnet-tier) → review MR
-  │     → emits review event
-  │     → confidence per-step verdict (pauses on YELLOW/RED)
-  │
-  ├─ 6. confidence (aggregate verdict — hook enforces RED at MR step)
-  │
-  └─ 7. glab mr create + update Jira (body includes ## Confidence section)
-```
+In Copilot, plan in plan mode (`/model plan` picks the planner) and follow `/check` with
+`/rubber-duck`.
 
-**Platform**: GitLab + Copilot CLI + Jira + Azure
-**Key feature**: User decides whether to fix or just document findings
+## Enforcement: the two hooks
 
-### Pipeline 3: GitHub Feature Development (Claude LLMs)
+Both scripts read either tool's stdin JSON, and both are installed **user-global**: in Claude Code
+through `~/.claude/settings.json`, and in Copilot CLI through `~/.copilot/hooks/anw.json`.
 
-```
-specs.md / User Input
-  │
-  ├─ 1. requirements-engineer (Opus-tier)
-  │     Specs or input → structured requirements
-  │     → docs/context/specs/<id>-requirements.md
-  │
-  ├─ 2. gh issue create
-  │     Requirements → GitHub issue (feature request)
-  │
-  ├─ 3. architect (Opus-tier)
-  │     Requirements → spec.md + todo.md
-  │     → User approves plan
-  │     → emits spec event to <id>-confidence.jsonl
-  │
-  ├─ 4. tdd-developer (Sonnet-tier) — per step
-  │     RED → GREEN → REFACTOR → commit
-  │
-  ├─ 5. qa (Opus-tier) → run affected tests
-  │     → emits qa event
-  │
-  ├─ 6. reviewer (Sonnet-tier) — PR review
-  │     Review → triage → max 3 fix loops
-  │     → emits review event
-  │     → confidence per-step verdict (pauses on YELLOW/RED)
-  │
-  ├─ 7. confidence (aggregate verdict — hook enforces RED at PR step)
-  │
-  ├─ 8. gh pr create → pull request (Closes #issue; body includes ## Confidence section)
-  │
-  └─ 9. diff-reviewer (Opus-tier) — whole-PR diff review (optional)
-        Review diff + issue AC → rank by severity → preview + confirm
-        → post inline comments + threads + verdict via gh
-```
+**`guard.sh`** (Claude `PreToolUse` as `guard.sh || exit 2`; Copilot `preToolUse`):
 
-**Platform**: GitHub + Claude Code
-**Agents**: All run as Claude Code subagents
+| Rule | Decision |
+|---|---|
+| `--no-verify`, `commit -n`, `core.hooksPath`, `HUSKY=0`, `SKIP=` | deny |
+| A nested `claude`/`copilot` with permissions or hooks disabled | deny |
+| Edits to `~/.claude`, `~/.copilot` (including the trust list), `.claude/settings*.json`, `.git/`, `.github/hooks/`, `.anw/`; shell writes to the hooks, settings, trust list and finish line | deny |
+| A commit that deletes tests, adds skip/focus markers, removes or rewrites assertions, or changes source with no test | ask |
+| A new dependency name; edits to CI config, instruction files or `.claude/` | ask |
+| Any edit | marks the session as edited, which arms `verify.sh` |
 
-## Generic Pipeline (Legacy)
+It never emits `allow`. A crash, malformed input or a missing script denies. Headless, an ask
+becomes a denial.
 
-```
-/plan "add user authentication"
-  │
-  ├─ 1. architect (Opus-tier)
-  │     Reads codebase → creates spec.md + todo.md
-  │     Each step: what to test, what to implement, which files
-  │     → User approves the plan
-  │     → emits spec event to <id>-confidence.jsonl
-  │
-  ├─ 2. tdd-developer (Sonnet-tier) — per step
-  │     RED: writes failing tests → commits
-  │     GREEN: minimum code → commits
-  │     REFACTOR: improve → commits
-  │
-  ├─ 3. qa (Opus-tier)
-  │     Runs only affected unit + integration tests
-  │     Reports pass/fail with exact errors
-  │     → emits qa event
-  │
-  ├─ 4. reviewer (Sonnet-tier)
-  │     Reviews against checklist
-  │     🔴 MUST FIX / 🟡 SHOULD FIX / 🟢 SUGGESTION
-  │     → User triages: [F]ix / [T]ech debt / [I]gnore
-  │     → emits review event
-  │     → confidence per-step verdict (pauses on YELLOW/RED)
-  │
-  └─ 5. Fix loop (max 3) → then next step
-```
+**`verify.sh`** (Claude `Stop`; Copilot `agentStop`; `--run` for scripts) acts only when the session
+edited files and the repo has an executable `.anw/verify` that you trusted:
 
-## Agent Roster
+- **Trust.** `ai-native-workflow trust` shows you the script and, on your `y`, records its
+  `shasum -a 256` line (hash and physical path) in `~/.claude/anw/trusted-verify`. A cloned,
+  copied or edited script is never run. Agents can't write the trust list.
+- **Sandbox.** Hooks run outside the agent's sandbox, and the trusted script runs repo code the
+  agent may have just written. So on macOS it runs under `sandbox-exec` with the agent's file
+  limits: writes only to the repo, temp and caches; never to git hooks, agent config or the
+  finish line; no reading keys. The network stays open.
+- **Outcome.** Green ends the turn. Red blocks it with the failure output and the honest-exit
+  instruction. A reply with a `BLOCKED:` line (bold allowed), or a second red stop in a row, ends
+  the turn and is flagged to you.
 
-| Agent | Model | Role | Writes Code? |
-|-------|-------|------|-------------|
-| requirements-engineer | Opus-tier | Elicit & formalize requirements | No |
-| architect | Opus-tier | Design solutions, create plans | No |
-| tdd-developer | Sonnet-tier | Implement via strict TDD | Yes |
-| qa | Opus-tier | Run tests, hunt spec/impl gaps & security holes | No |
-| reviewer | Sonnet-tier | Per-step code review, quality gate | No |
-| diff-reviewer | Opus-tier | Whole-PR/MR diff review; posts inline comments + threads | No (posts review comments) |
-| troubleshooter | Opus-tier | Incident investigation, diagnosis | No |
+## Skills
 
-## Path Conventions
+| Skill | Invoked by | What it does |
+|---|---|---|
+| `plan` | you | ticket → testable ACs and small test-first steps, then stops for your approval |
+| `check` | you | fresh context, read-only, Opus tier: runs the check, reads the diff, audits integrity, reports merge blockers with repros, ends with `Verdict: block` or `Verdict: pass` |
+| `verify` | the model (Claude runs it before each commit) | runs `.anw/verify` and quotes the real result |
+| `incident` | you | read-only investigation → diagnosis and fix plan; never posts |
+| `pr` | you | verify, then push and open the PR/MR (each asks you) |
 
-The project uses a deliberate split between tracked spec artifacts and runtime state:
+Knowledge skills (`clusters`, `gh-cli`, `glab-cli`, `ticket`, `adr`, `explore`, …) are optional.
+Hooks and skills are installed as **copies**, never symlinks, so an agent editing this repo can't
+change live enforcement; `doctor` reports drift.
 
-| Path | Tracked in git? | Contents |
-|------|----------------|----------|
-| `docs/context/` | Yes | Sprint board (`CURRENT_SPRINT.md`), specs, todos, requirements, test plans, plus installer-seeded `ARCHITECTURE.md` / `CONVENTIONS.md` / `GLOSSARY.md` (tracked in consumer projects, not generated in this repo) |
-| `.anw/specs/*.jsonl` | No (gitignored) | Confidence event logs (runtime state) |
-| `.anw/.pipeline-state` | No (gitignored) | Pipeline run state |
-| `.anw/.pipeline-audit.log` | No (gitignored) | Audit trail |
+## Pipelines (`ai-native-workflow run …`)
 
-The `docs/context/` path is version-controlled so spec reviews happen in pull requests. The `.context/` runtime artifacts are gitignored to prevent churn from pipeline state files.
+Each stage is a fresh headless session with stdin closed, running a skill:
 
-## Symmetric Harness (COP-1)
+| Stage | Claude (`github-feature`, `github-issue`) | Copilot (`gitlab-feature`, `gitlab-incident`) |
+|---|---|---|
+| plan | `/plan` on opus, then you approve | `/plan`, then you approve |
+| each step | "implement step N" on sonnet | the same, MCP servers disabled |
+| check | `/check` on opus, edit tools disallowed | `/check` with `--deny-tool=write` |
 
-`install global` writes a symmetric set of artifacts for both Claude Code
-(`~/.claude/`) and GitHub Copilot CLI (`~/.copilot/`). Skills, agents, and
-global instructions are identical in purpose across both tools; pipeline skills
-have `claude --agent=` invocations rewritten to `copilot --agent=` in the
-Copilot copy. There is one intentional asymmetry: Claude Code hooks are
-installed globally and fire on every session, while Copilot CLI scopes hooks
-per-repository — Copilot repo-scope hooks are installed by `install project`
-and ship via COP-2 (see Hook Surfaces below).
+- Claude runs with `--permission-mode acceptEdits --permission-prompts none`. Copilot runs with
+  `--allow-all-tools --no-ask-user`.
+- Neither gets a bypass flag. The policy's ask and deny rules (push, PR/MR, Jira writes, `gh`/`glab`
+  `api`, mutating kubectl) are passed as disallowed tools.
+- A `BLOCKED:` stage stops the pipeline.
+- The script runs the trusted `.anw/verify` (`verify.sh --run`, same sandbox). Then, each on your
+  yes (Enter means no), it pushes, opens the PR/MR and posts to Jira.
+- State lives in `.anw/.pipeline-state`, parsed and never sourced. `run resume` continues from the
+  last finished stage.
 
-## Hook Surfaces
+## What gets installed
 
-The system enforces quality gates through two distinct hook surfaces:
+| Where | What |
+|---|---|
+| `~/.claude/` | `hooks/guard.sh`, `hooks/verify.sh`; the policy merged into `settings.json` (your keys kept); a managed block in `CLAUDE.md`; `skills/` |
+| `~/.copilot/` | the same two hooks plus `hooks/anw.json`; a managed block in `copilot-instructions.md`; `skills/` |
+| a project (`install project`) | `.anw/verify` for the detected stack (never overwritten; trusted on your `y`); a short `AGENTS.md` that `CLAUDE.md` imports; `.gitignore` rules `.anw/*` + `!.anw/verify`; `docs/context/`, `docs/decisions/` |
 
-### Claude Code global hooks (`~/.claude/hooks/`)
+Older installs are cleaned up: retired agents, skills and hooks move to `<home>/anw-backup/<stamp>/`.
 
-| Hook | Trigger | Gate |
-|------|---------|------|
-| `session-start.sh` | Session open | Load context, detect stack |
-| `tdd-gate.sh` | `PreToolUse` | Blocks `git commit` without staged test files |
-| `confidence-gate.sh` | `PreToolUse` | Blocks `gh pr create` / `glab mr create` on RED confidence |
+## Path conventions
 
-These are **user-global** — installed once and apply to all projects opened with Claude Code.
+| Path | Tracked | Contents |
+|---|---|---|
+| `docs/context/` | yes | sprint board, specs and plans, reviewed in PRs |
+| `.anw/verify` | yes | the finish line |
+| `.anw/*` (everything else) | no | pipeline state and stage transcripts |
+| `~/.claude/anw/trusted-verify` | — | the trust list; agents can't write it |
 
-### Copilot CLI per-project hooks (`.github/hooks/`)
+## Verifying the harness
 
-| File | Purpose |
-|------|---------|
-| `copilot-cli-dispatcher.sh` | Single `preToolUse` entry point; enforces both TDD + confidence gates |
-| `scripts/confidence.sh` | Vendored scorer copy (self-contained; no dependency on `~/.claude/`) |
-| `copilot-cli-policy.json` | Registers the dispatcher; merged idempotently on `install project` |
-| `README.md` | Explains the hooks, bypass paths, and audit trail to contributors |
+- `make test` runs the bats suite. The hooks are driven with each tool's real payload shapes, and
+  the pipelines with stub CLIs and a local bare remote.
+- `make smoke` (`ai-native-workflow doctor --smoke`) runs live canaries against the installed
+  harness. It covers bypasses, containment, an honest fix, an impossible finish line ×3 and `/check`
+  on a gamed change. It spends model calls, so run it after every model or tool update.
 
-These are **per-project** because Copilot CLI does not support user-global hooks — only
-repository-scoped ones registered in `copilot-cli-policy.json`.
+## Key design decisions
 
-**Asymmetry summary**:
-
-| Dimension | Claude Code | Copilot CLI |
-|-----------|-------------|-------------|
-| Scope | Global (`~/.claude/hooks/`) | Per-project (`.github/hooks/`) |
-| TDD gate | `tdd-gate.sh` | `copilot-cli-dispatcher.sh` (combined) |
-| Confidence gate | `confidence-gate.sh` | `copilot-cli-dispatcher.sh` (combined) |
-| Scorer path | `~/.claude/scripts/confidence.sh` | `.github/hooks/scripts/confidence.sh` (vendored) |
-| Hook registration | `~/.claude/settings.json` | `.github/hooks/copilot-cli-policy.json` |
-
-## Key Design Decisions
-
-- **Hooks for enforcement**: TDD gate is a shell script (exit code 2 = block), not a prompt instruction
-- **Filesystem as message bus**: Agents communicate through spec.md/todo.md files, not conversation
-- **One step at a time**: tdd-developer executes exactly one step per invocation
-- **User in the loop**: Reviewer presents findings, user triages — no automatic overrides
-- **Model tiering**: Opus for design/diagnosis, Sonnet for implementation/review, Haiku for test execution
-- **Pipeline per platform**: GitLab uses Copilot CLI agents, GitHub uses Claude Code subagents
-- **Requirements first**: requirements-engineer runs before architect to ensure clear, testable inputs
-- **Decision points**: Incident pipeline lets user choose between documenting findings or implementing a fix
-- **Symmetric harness**: Skills/agents/instructions are symmetric across Claude Code and Copilot CLI; hooks are Claude-global, Copilot repo-scope (per-project via `install project`)
-- **Copilot hooks are per-project**: Copilot CLI lacks user-global hook support; the dispatcher is vendored into each repo so enforcement is self-contained and portable
+- **Enforce outside the agent's reach.** Must-hold rules live in hooks and settings that fail
+  closed and that the agent can't edit. Prompts only state intent.
+- **Ground truth comes from execution.** The hooks run the check themselves; no self-reported scores.
+- **Every gate has an honest exit.** `BLOCKED: <evidence>` is a success path, and you are the only bypass.
+- **Strong finish lines.** `.anw/verify` runs the whole fast suite, so no cheap hack passes it.
+- **One writer, one fresh-context reviewer.** No role-based agent teams.
+- **Contain the blast radius.** The OS sandbox is the security boundary. Hooks are a guardrail.
+- **Floating model aliases** (`opus`, `sonnet`), never pinned versions.
 
 ## Architecture Decision Records
 
-- [ADR-001](decisions/ADR-001-copilot-cli-dispatcher-fail-closed.md) — Copilot CLI dispatcher fails closed
-- [ADR-002](decisions/ADR-002-sentinel-stream-and-sidekick-delegation.md) — Sentinel-stream live rendering + real sidekick delegation (SDK-1)
+- [ADR-003](decisions/ADR-003-native-first-harness.md): native-first harness. It supersedes ADR-001
+  and ADR-002, which stay in [decisions/](decisions/) as history.

@@ -263,13 +263,27 @@
   - mutation check: 27 of 28 mutants killed, and the control stays green. The survivor (`doctor || exit 1` → `doctor`) is equivalent, because the CLI runs under `set -e`.
 - **Your step**: `make install`, then `make smoke` in a plain terminal. The result and `k/3` go into ADR-003, without extrapolating.
 
-### Step P1-9: Documentation
-- **Test** (extend `tests/no-legacy.bats`): PAPER.md no longer contains "automatically deleted after the next commit", and ARCHITECTURE.md no longer contains "does not support user-global hooks".
+### Step P1-9: Documentation ✅
+- **Test**:
+  - `tests/no-legacy.bats` (+3):
+    - README, ARCHITECTURE and CONTRIBUTING name no removed component;
+    - PAPER has an `## Erratum` and no longer says "automatically deleted after the next commit";
+    - neither PAPER nor ARCHITECTURE says Copilot "does not support user-global hooks";
+    - ADR-003 supersedes ADR-001 and ADR-002, and both say so in their status.
+  - `tests/install-copilot.bats`: the 4 COP-1 docs tests are rewritten as 2.
+    - README lists what `install global` really puts in `~/.copilot` (`hooks/anw.json`, `skills/`, `copilot-instructions.md`).
+    - ARCHITECTURE says the hooks are user-global in both tools.
+    - The removed assertions encoded claims that are no longer true: Copilot hooks are no longer repo-scoped, and the installer has never written `~/.copilot/settings.json`.
 - **Implement**:
-  - `docs/decisions/ADR-003-native-first-harness.md` covers the problem (E1–E2), the decision (native plus two hooks plus five skills plus the sandbox), the consequences and the smoke results. It supersedes ADR-002.
-  - PAPER: an erratum plainly saying the Claude gates were inert before HARNESS-2, and the architecture rewritten as native-first.
-  - ARCHITECTURE, README and CURRENT_SPRINT updated to match.
-- **Commit**: `docs: ADR-003 native-first harness, errata, architecture`.
+  - **ADR-003** (new): the problem (E1–E3), the decision (native + 2 hooks + 5 skills + sandbox), the consequences, the spike evidence, and a smoke-results table that stays empty until your first run. It supersedes ADR-001 as well as ADR-002, because the per-project Copilot dispatcher is gone too.
+  - **PAPER:** an erratum stating plainly that the Claude gates never fired before HARNESS-2, plus the three other false statements. The rest is rewritten as native-first, staying a design whitepaper: small-N demonstrations, every reference cited.
+  - **README, ARCHITECTURE and CONTRIBUTING** are rewritten to match the code.
+  - **CURRENT_SPRINT:** SDK-1 and COP-2 move to "Superseded".
+  - **`TODO.md`** is removed. Its one entry was a resolved item about the deleted confidence gate.
+- **Proof**:
+  - the docs tests failed on the old docs and pass now;
+  - 10 of 10 docs mutants are caught, and the control stays green;
+  - `make test` is green.
 
 ---
 
@@ -308,5 +322,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [x] P1-7 [x] P1-8 (your first `make smoke` pending) [ ] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
+- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [x] P1-7 [x] P1-8 (your first `make smoke` pending) [x] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
 - [ ] P2-* (optional)

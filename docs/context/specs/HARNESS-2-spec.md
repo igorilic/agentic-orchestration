@@ -1,6 +1,6 @@
 # HARNESS-2 — Native-first, minimal, verifiable harness (Claude Code + Copilot CLI)
 
-> Status: **Proposed, rev 2** (2026-10-07). **No custom agents**: the native harnesses do the agent work. This repo ships 2 hooks, 5 workflow skills, settings and instructions.
+> Status: **Accepted, rev 2** (proposed 2026-10-07; accepted in ADR-003, 2026-10-08; P0–P1 implemented). **No custom agents**: the native harnesses do the agent work. This repo ships 2 hooks, 5 workflow skills, settings and instructions.
 > Todo: `HARNESS-2-todo.md` · Spike and proof: `spikes/harness-2/` (`PROOF.md`, hooks, skills, instructions, config, 52 contract tests, live-run evidence)
 > Research window: **2026-08-01 → 2026-10-07**; older sources are marked *OLDER (date)*.
 > No controlled evaluation of this harness exists. §6 reports small live demonstrations, not effect sizes.

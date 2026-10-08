@@ -1,6 +1,7 @@
 # ADR-001 — Copilot CLI hooks: single dispatcher with fail-closed trap
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-003 (2026-10-08). Copilot CLI supports user-global hooks, so the
+  per-project dispatcher is gone; `guard.sh` keeps the fail-closed rule for both tools.
 - **Date**: 2026-05-02
 - **Related spec**: `docs/context/specs/COP-2-spec.md`
 - **Drivers**: requirements-engineer (R-1, R-2 findings); user accepted
