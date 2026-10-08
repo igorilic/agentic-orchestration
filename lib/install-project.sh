@@ -97,7 +97,9 @@ trust_verify() {
   file="${line#*  }"
   if grep -qxF "$line" "$trust" 2>/dev/null; then dim "$file is trusted"; return 0; fi
   echo ""; info "$file:"; sed 's/^/    /' "$file"; echo ""
-  ask "Trust it? It runs outside the agent sandbox, with your permissions, when an agent session that edited this repo ends. [y/N]"
+  local where="in a sandbox (network on; writes only to the repo, temp and caches; no reading your keys)"
+  [ -x /usr/bin/sandbox-exec ] || where="WITHOUT a sandbox on this system (no sandbox-exec), with your permissions"
+  ask "Trust it? It runs when an agent session that edited this repo ends, $where. [y/N]"
   read -r ans || ans=""
   case "$ans" in
     y|Y|yes) ;;

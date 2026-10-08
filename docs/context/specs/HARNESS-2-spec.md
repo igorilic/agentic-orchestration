@@ -287,7 +287,7 @@ Every Claude call uses `--permission-mode acceptEdits --permission-prompts none`
 - `.anw/verify` exists, and
 - `~/.claude/anw/trusted-verify` has the script's exact `shasum -a 256` line: its hash **and** its path, written by `ai-native-workflow trust`.
 
-The trust check exists because hooks run outside the sandbox. A cloned or modified script is skipped, and you're told (E14). Binding the hash to the path means a byte-identical copy in another repo isn't trusted either; generic scripts such as `exec go test ./...` are the same everywhere. What a trusted script runs is still code from the repo; see R14.
+The trust check exists because hooks run outside the sandbox. A cloned or modified script is skipped, and you're told (E14). Binding the hash to the path means a byte-identical copy in another repo isn't trusted either; generic scripts such as `exec go test ./...` are the same everywhere. What a trusted script runs is still code from the repo, so on macOS it runs under `sandbox-exec` with the agent's file limits and an open network (R14).
 
 Outcomes:
 - Green: the turn ends normally.
@@ -487,7 +487,13 @@ That is why the flow makes `.anw/verify` the full suite and `/check` a standard 
 - **R11** Native features move (skill `context: fork`, Copilot's rubber-duck). `doctor --smoke` detects breakage, and there are fewer moving parts than with custom agents.
 - **R12** Copilot may ignore `context`/`agent` in SKILL.md. Then `/check` runs inline there, and `/rubber-duck` adds the independence.
 - **R13** Edits made only through Bash don't mark the session. The pre-push verify and CI still run.
-- **R14** **The Claude Stop hook runs repo code outside the sandbox** (found in P1-5). Trust covers the script's text, not what it runs: `make test` executes the Makefile and tests the agent may have edited this session. So a prompt-injected test could write `~/.zshrc` or `~/.claude/settings.json` when the session ends. Copilot's hooks run inside its sandbox, so this is Claude-only. Mitigation: P1-5b runs the script under an OS sandbox mirroring the agent's.
+- **R14** **The Claude Stop hook runs repo code outside the sandbox** (found in P1-5). Trust covers the script's text, not what it runs: `make test` executes the Makefile and tests the agent may have edited this session. So a prompt-injected test could write `~/.zshrc` or `~/.claude/settings.json` when the session ends. Copilot's hooks run inside its sandbox, so this is Claude-only.
+  - **Mitigated in P1-5b:** `verify.sh` runs the script under `sandbox-exec`, with the agent's file limits mirrored from `config/claude-settings.json` and checked by a sync test. Writes go only to the repo, temp and caches, and never to the repo's `.git/hooks`, `.git/config`, `.claude/`, `.anw/`, `.github/hooks/`, `.vscode/` or `.mcp.json`. Keys and credentials (`~/.ssh`, `~/.aws`, `~/.azure`, `~/.kube`, `~/.gnupg`, gh/glab config, `.netrc`, `.git-credentials`, `.env*`, `*.pem`, `*.key`) can't be read.
+  - **Still open:**
+    - network is allowed, by your choice, so anything the tests *can* read can leave the machine;
+    - other repo files stay writable, as they are for the agent;
+    - without `sandbox-exec` (not macOS) the script runs unsandboxed, and `trust` says so;
+    - inside another sandbox (Copilot's hooks) the outer one is what contains it.
 
 ## 10. Out of scope
 

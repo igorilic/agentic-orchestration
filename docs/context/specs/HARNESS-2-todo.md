@@ -165,10 +165,21 @@
 - **Proof**: all 14 mutants are killed; the suite passes 409/0 inside the sandbox; a scratch Go repo gets a 23-line AGENTS.md, and git tracks `.anw/verify` while ignoring the rest of `.anw/`.
 - **Your step**: `make install` (new `verify.sh`), then `./ai-native-workflow trust` in this repo. `doctor` should then exit 0.
 
-### Step P1-5b: Run the Stop-hook verify inside a sandbox (R14) — proposed, needs your call
-- **Why**: Claude Code runs hooks outside its sandbox, so `verify.sh` runs repo code that the agent may have just written with your full permissions. Copilot's hooks are already sandboxed.
-- **Sketch**: on macOS, run `.anw/verify` under `sandbox-exec` with the agent's write allowlist (repo, `$TMPDIR`, the caches in `config/claude-settings.json`) and its read denies (`~/.ssh`, `~/.aws`, `~/.azure`, `.env`, keys).
-- **Your call**: network. Deny it (tests needing a package restore fail), or allow it (exfiltration of readable files stays possible).
+### Step P1-5b: Run the Stop-hook verify inside a sandbox (R14) ✅
+- **Why**: Claude Code runs hooks outside its sandbox, so `verify.sh` ran repo code that the agent may have just written with your full permissions. Copilot's hooks are already sandboxed.
+- **Decision (yours, 2026-10-08)**: network allowed.
+- **Implement**: `verify.sh` runs `.anw/verify` under `/usr/bin/sandbox-exec`, using a profile that mirrors the agent sandbox in `config/claude-settings.json`.
+  - **Writes:** only to the repo, temp and the caches, and never to the repo's `.git/hooks`, `.git/config`, `.claude/`, `.anw/`, `.github/hooks/`, `.vscode/` or `.mcp.json`.
+  - **Reads:** keys and credentials are blocked.
+  - **Fallbacks:** sandboxes don't nest, so inside one (Copilot's hooks, or an agent's Bash tool) the script runs directly and the outer sandbox contains it. Without `sandbox-exec` it runs unsandboxed, and the trust prompt says which applies.
+- **Test**: `tests/verify-sandbox.bats`.
+  - **A policy-sync test runs everywhere:** every cache and every `Read(~/…)` deny in the policy appears in the profile.
+  - **4 confinement tests** check that the script can write the repo, temp and caches, but can't write elsewhere in `$HOME`, plant git hooks or agent config, or read keys and `.env`. They need a real `sandbox-exec`, so inside any sandbox they skip.
+- **Proof**:
+  - the profile compiles: it reaches `sandbox_apply`, while broken controls fail at compile time with exit 65;
+  - the suite passes 414/0 with those 4 skipped inside the agent sandbox;
+  - your plain-terminal run (2026-10-08) passed 5/5 with no skips. The "can write" test needs a working profile, and the 3 "cannot" tests need real denials, so this checks both directions;
+  - the optional negative control (a copy without the sandbox should fail 4) hasn't run yet; the first attempt used BSD `sed -i ''`, which GNU sed rejects.
 
 ### Step P1-6: Native pipelines
 - **Test**: `tests/pipeline-safety.bats` (new):
@@ -251,5 +262,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [x] P1-5 [ ] P1-5b [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
+- [x] P1-4 [x] P1-5 [x] P1-5b [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9
 - [ ] P2-* (optional)

@@ -55,7 +55,7 @@ trusted() { grep -qxF "$(shasum -a 256 "$P/.anw/verify")" "$ANW_TRUST_FILE" 2>/d
   touch "$P/go.mod"
   run anw install project "$P" <<<"n"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"exec go test ./..."* && "$output" == *"outside the agent sandbox"* ]] || false
+  [[ "$output" == *"exec go test ./..."* && "$output" == *"sandbox"* ]] || false
   ! trusted || false
   run anw trust "$P" <<<"y"
   [ "$status" -eq 0 ]
