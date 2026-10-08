@@ -119,8 +119,19 @@ fi
 grep -qE '(^|[^[:alnum:]_-])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+commit([[:space:]]|$)' <<<"$cmd" || exit 0
 # No --amend exemption: amending can fold a test deletion into an existing commit just as well.
 
-staged="$(git diff --cached --name-only --diff-filter=ACMR)"
-deleted_tests="$(git diff --cached --name-only --diff-filter=D | grep -E "$TEST_RE" || true)"
+# Judge what the commit will contain. A command that stages first (`git add … && git commit`) or
+# commits with -a/--all takes the working tree, not today's index; `git add` also takes new files.
+# ponytail: `git commit <paths>` with no `git add` is still judged on the index.
+range=(--cached); untracked=""
+if grep -qE '(^|[^[:alnum:]_-])git([[:space:]]+-[^[:space:]]+([[:space:]]+[^-[:space:]][^[:space:]]*)?)*[[:space:]]+add([[:space:]]|$)' <<<"$cmd"; then
+  range=(HEAD); untracked="$(git ls-files --others --exclude-standard)"
+elif grep -qE 'commit[^|;&]*[[:space:]](-[a-zA-Z]*a[a-zA-Z]*|--all)([[:space:]]|$)' <<<"$cmd"; then
+  range=(HEAD)
+fi
+git rev-parse -q --verify HEAD >/dev/null || range=(--cached) # first commit: no HEAD to diff against
+
+staged="$( { git diff --name-only --diff-filter=ACMR "${range[@]}"; printf '%s\n' "$untracked"; } | grep -v '^$' || true)"
+deleted_tests="$(git diff --name-only --diff-filter=D "${range[@]}" | grep -E "$TEST_RE" || true)"
 test_files="$(grep -E "$TEST_RE" <<<"$staged" || true)"
 src_files="$(grep -vE "$TEST_RE" <<<"$staged" | grep -vE '\.(md|txt|rst|adoc|lock)$|(^|/)(docs|spikes)/|^\.github/|(^|/)(LICENSE|CHANGELOG)' || true)"
 
@@ -128,7 +139,9 @@ problems=""
 [ -n "$deleted_tests" ] && problems="${problems}deletes test files: $(tr '\n' ' ' <<<"$deleted_tests"); "
 
 if [ -n "$staged" ]; then
-  added_skips="$(git diff --cached -U0 -- . ':(exclude)*.md' | grep -E '^\+[^+]' | grep -E "$SKIP_RE" || true)"
+  added_skips="$( { git diff -U0 "${range[@]}" -- . ':(exclude)*.md' | grep -E '^\+[^+]' || true
+    grep -v '\.md$' <<<"$untracked" | while IFS= read -r f; do [ -f "$f" ] && sed 's/^/+/' "$f" || true; done || true
+  } | grep -E "$SKIP_RE" || true)"
   [ -n "$added_skips" ] && problems="${problems}adds skip/focus markers: $(head -3 <<<"$added_skips" | tr '\n' ' '); "
 fi
 
@@ -136,7 +149,7 @@ if [ -n "$test_files" ]; then
   # A removed assertion line in an already-committed test is the classic reward hack
   # (weaken the check instead of fixing the code). Brand-new tests have no removed lines.
   # shellcheck disable=SC2086 # one pathspec per test file; ponytail: paths with spaces split
-  removed_asserts="$(git diff --cached -U0 -- $test_files | grep -E '^-[^-]' | grep -cE "$ASSERT_RE" || true)"
+  removed_asserts="$(git diff -U0 "${range[@]}" -- $test_files | grep -E '^-[^-]' | grep -cE "$ASSERT_RE" || true)"
   [ "${removed_asserts:-0}" -gt 0 ] && problems="${problems}removes or rewrites $removed_asserts assertion line(s) in existing tests; "
 fi
 

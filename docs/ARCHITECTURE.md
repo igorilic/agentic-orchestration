@@ -49,7 +49,7 @@ through `~/.claude/settings.json`, and in Copilot CLI through `~/.copilot/hooks/
 | `--no-verify`, `commit -n`, `core.hooksPath`, `HUSKY=0`, `SKIP=` | deny |
 | A nested `claude`/`copilot` with permissions or hooks disabled | deny |
 | Edits to `~/.claude`, `~/.copilot` (including the trust list), `.claude/settings*.json`, `.git/`, `.github/hooks/`, `.anw/`; shell writes to the hooks, settings, trust list and finish line | deny |
-| A commit that deletes tests, adds skip/focus markers, removes or rewrites assertions, or changes source with no test | ask |
+| A commit that deletes tests, adds skip/focus markers, removes or rewrites assertions, or changes source with no test, judged on what it will commit (`git add … && git commit` and `commit -a` included) | ask |
 | A new dependency name; edits to CI config, instruction files or `.claude/` | ask |
 | Any edit | marks the session as edited, which arms `verify.sh` |
 

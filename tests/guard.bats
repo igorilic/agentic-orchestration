@@ -199,6 +199,57 @@ reason()       { jq -r '.hookSpecificOutput.permissionDecisionReason // .permiss
   run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash "bash -c 'git commit -m x'")"
   [ "$(decision)" = ask ]
 }
+# A command that stages and commits at once is judged on what it will commit, not on today's index
+# (found by smoke canary 1d: the habitual `git add -A && git commit` slipped past every check).
+@test "ask: git add -A && git commit judges what the command stages" {
+  printf 'def add(a, b):\n    return b + a\n' > src/app.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git add -A && git commit -m "feat: x"')"
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"without touching any test"* ]] || false
+}
+@test "ask: commit -am judges the working tree" {
+  printf 'def add(a, b):\n    return b + a\n' > src/app.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit -am "feat: x"')"
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"without touching any test"* ]] || false
+}
+@test "ask: an untracked source file added and committed in one command (copilot)" {
+  printf 'x = 1\n' > src/new.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(copilot_bash 'git add . && git commit -m "feat: new"')"
+  [ "$(decision)" = ask ] || false
+}
+@test "ask: a test deleted on disk and committed with git add -A" {
+  rm tests/test_app.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git add -A && git commit -m "chore: cleanup"')"
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"deletes test files"* ]] || false
+}
+@test "ask: a new test file with a skip marker, added and committed in one command" {
+  printf 'import pytest\n\n@pytest.mark.skip\ndef test_later():\n    assert False\n' > tests/test_later.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git add tests && git commit -m "test: later"')"
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"skip/focus"* ]] || false
+}
+@test "ask: an existing test weakened and skipped on disk, committed with git add -A" {
+  perl -pi -e 's/== 4/== 5/' tests/test_app.py; printf '\nimport pytest\n@pytest.mark.skip\ndef test_more():\n    pass\n' >> tests/test_app.py
+  printf 'def add(a, b):\n    return 5\n' > src/app.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git add -A && git commit -m "fix: add"')"
+  [ "$(decision)" = ask ]; [[ "$(reason)" == *"skip/focus"* && "$(reason)" == *"assertion"* ]] || false
+}
+@test "pass: git add -A && git commit with the test and the code together" {
+  printf '\ndef test_add_negative():\n    assert add(-1, -1) == -2\n' >> tests/test_app.py
+  printf 'def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n' > src/app.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git add -A && git commit -m "feat: sub"')"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+}
+@test "ask: a repo's first commit (no HEAD yet) is judged on what is already staged too, not a crash" {
+  R2="$BATS_TEST_TMPDIR/fresh"; mkdir -p "$R2/src"; cd "$R2" && git init -q
+  printf 'x = 1\n' > src/a.py; git add src/a.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(jq -nc --arg d "$R2" '{session_id:"s",tool_name:"Bash",tool_input:{command:"git add -A && git commit -m init"},cwd:$d}')"
+  [ "$status" -eq 0 ]; [ "$(decision)" = ask ]   # a crash would exit 2 (fail closed)
+}
+@test "pass: a plain commit is judged on the index, not on unrelated unstaged edits" {
+  echo more >> docs/readme.md; git add docs/readme.md
+  printf 'def add(a, b):\n    return b + a\n' > src/app.py
+  run --separate-stderr bash "$HOOKS/guard.sh" <<<"$(claude_bash 'git commit --amend -m "docs: x"')"
+  [ "$status" -eq 0 ]; [ -z "$output" ]
+}
 @test "pass: new test + implementation together (healthy TDD commit)" {
   printf '\ndef test_add_negative():\n    assert add(-1, -1) == -2\n' >> tests/test_app.py
   printf 'def add(a, b):\n    return a + b\n\ndef sub(a, b):\n    return a - b\n' > src/app.py; git add -A
