@@ -1,26 +1,7 @@
 #!/usr/bin/env bash
-# ai-native-workflow — CLI for AI-native development workflows
-# Installs hooks, skills, agents AND runs multi-agent pipelines.
-#
-# Usage:
-#   ai-native-workflow install global            Install global hooks, skills, settings
-#   ai-native-workflow install project [path]    Install project files (auto-detects stack)
-#   ai-native-workflow install all [path]        Install both global + project
-#   ai-native-workflow run gitlab-feature <ID>   Run GitLab feature pipeline (Copilot + Jira)
-#   ai-native-workflow run gitlab-incident <ID>  Run GitLab incident pipeline (Troubleshooter)
-#   ai-native-workflow run github-feature [file] Run GitHub feature pipeline (Claude Code)
-#   ai-native-workflow run github-issue <ID>     Run GitHub issue fix pipeline (Claude Code)
-#   ai-native-workflow run status                Show active pipeline state
-#   ai-native-workflow run resume                Resume pipeline from last checkpoint
-#
-# Flags:
-#   --allowed-questions [N]  Let agents ask up to N clarifying questions (default: 3)
-#   ai-native-workflow detect [path]             Detect stack without installing
-#   ai-native-workflow status                    Show what's installed
-#   ai-native-workflow uninstall global          Remove global installation
-#   ai-native-workflow uninstall project [path]  Remove project files
-#   ai-native-workflow help                      Show this help
-#   ai-native-workflow version                   Show version
+# ai-native-workflow — a minimal harness for Claude Code and Copilot CLI: two hooks, a
+# settings policy, short instructions and a few skills (no custom agents), plus headless
+# pipelines that chain native sessions. `ai-native-workflow help` lists the commands.
 
 set -euo pipefail
 

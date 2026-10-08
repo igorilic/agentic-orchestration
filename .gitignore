@@ -1,8 +1,8 @@
 .DS_Store
-.tdd-skip
 .claude/settings.local.json
-# Runtime pipeline state, audit log, and confidence logs (#17.2)
-.anw/
+# Runtime state (pipeline state, stage transcripts); the finish line .anw/verify stays tracked
+.anw/*
+!.anw/verify
 node_modules/
 *.env
 

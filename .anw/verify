@@ -1,0 +1,3 @@
+#!/bin/sh
+# Finish line for agentic-orchestration: the full bats suite (~150 s).
+exec make test

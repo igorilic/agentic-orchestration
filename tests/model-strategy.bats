@@ -17,16 +17,6 @@ REPO_ROOT="$BATS_TEST_DIRNAME/.."
   ! rg -q '\b(Opus|Sonnet|Haiku) [0-9]+\.[0-9]+' "$REPO_ROOT"
 }
 
-@test "model-strategy: Claude agent frontmatter uses floating tier aliases" {
-  for f in "$REPO_ROOT"/agents/claude-code/*.md; do
-    model="$(grep -m1 '^model:' "$f" | awk '{print $2}')"
-    case "$model" in
-      opus|sonnet|haiku) ;;
-      *) echo "non-floating model in $(basename "$f"): '$model'"; return 1 ;;
-    esac
-  done
-}
-
 @test "model-strategy: PAPER + README describe agents by tier, not version" {
   grep -q -- '-tier' "$REPO_ROOT/PAPER.md"
   grep -q -- '-tier' "$REPO_ROOT/README.md"

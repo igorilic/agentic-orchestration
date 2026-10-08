@@ -214,17 +214,26 @@
 - **Proof**: all 18 mutants are killed (bypass flag, prompting, check can edit, stdin leak, defaults to yes, red or untrusted verify, BLOCKED ignored, Jira without asking, …).
 - **Your step**: a live run on a toy repo, in a plain terminal, which spends a few model calls. The command is in the P1-6 summary.
 
-### Step P1-7: Delete the legacy code from the repo
-- **Test**: `tests/no-legacy.bats` (new):
-  - `agents/` does not exist;
-  - these do not exist:
-    - skills: `tdd`, `skip-tdd`, `override-confidence`, `pipeline-*`, `brainstorm`;
-    - hooks: `tdd-gate.sh`, `confidence-gate.sh`, `session-start.sh`;
-    - scripts: `scripts/confidence*.sh`;
-  - no file outside `docs/context/specs/` and `docs/decisions/` mentions `CLAUDE_TOOL_INPUT`, `confidence.jsonl`, `.tdd-skip`, `override-confidence`, `sidekick` or `@@ANW`.
-- **Implement**: delete those files and their tests.
-- **Commit**: `refactor!: remove custom agents, confidence gate, bypass skills and sentinel protocol`.
-- **Proof**: `make test` is green.
+### Step P1-7: Delete the legacy code from the repo ✅
+- **Test**: `tests/no-legacy.bats` (3).
+  - These are gone:
+    - `agents/`, `scripts/`, `demo/`, `templates/` and `config/settings.json`;
+    - the skills `tdd`, `skip-tdd`, `override-confidence`, `brainstorm` and `pipeline-*`;
+    - the hooks `tdd-gate.sh`, `confidence-gate.sh` and `session-start.sh`;
+    - `lib/render-stream.sh`, `lib/milestones.sh`, `tests/fixtures/` and `tests/lib/`.
+  - No code mentions `CLAUDE_TOOL_INPUT`, `confidence.jsonl`, `.tdd-skip`, `override-confidence`, `sidekick`, `@@ANW` or the old CLAUDE.md renderer. The code is `lib/`, `hooks/`, `skills/`, `config/`, `instructions/`, the CLI, the Makefile, `.github/` and `.gitignore`.
+  - The one exception is the installer's `RETIRED_*` lists, which name old files so they can be cleaned out of homes an earlier version set up.
+  - Docs are P1-9. CI and `make lint` no longer glob the deleted `scripts/`.
+- **Implement**:
+  - **Deleted:** 63 files, among them the dead `write_file` and `render_pipeline_and_stacks_md` helpers, `MAGENTA` and the `.tdd-skip` status warning.
+  - **Test files:** the review-skill tests from `diff-reviewer.bats` moved to `review-skills.bats`.
+  - **Pointers:** `clusters` now points at `/incident`, and the dispatcher header is accurate.
+  - **This repo's `.gitignore`:** now `.anw/*` + `!.anw/verify`, so its finish line is tracked, as P1-5 does for projects.
+- **Removed tests:** 237 tests of the deleted components. The suite goes 391 → 157, with 3 new.
+- **Proof**:
+  - `make test` passes 157/0 inside the sandbox, with the 4 sandbox tests skipped;
+  - lint and shellcheck are clean;
+  - all 5 legacy-returns mutants are caught, and a control with the legitimate retire list stays green.
 
 ### Step P1-8: `make smoke` — live canaries (opt-in; costs tokens; run after every model-alias move)
 - **Implement**: `scripts/smoke.sh`. It builds temp repos and runs headless `claude -p --model haiku` and `copilot -p` against the **installed** harness:
@@ -274,6 +283,10 @@
   - a `view`-role kubeconfig exported as `KUBECONFIG` for `/incident` and the pipelines;
   - Azure Reader plus Log Analytics Reader.
   - *Proof:* `kubectl auth can-i delete pods --context <prod>` → `no`.
+- **P2-6 Shell writes to CI config get an ask too** (found in P1-7).
+  - `guard.sh` asks before Edit/Write changes to `.github/workflows/`, `.gitlab-ci.yml` and the like, but a shell script editing them gets no ask. In P1-7 an agent changed `.github/workflows/test.yml` through python, with no prompt.
+  - *Proof:* `python3 -c "open('.github/workflows/x.yml','w')"` → ask.
+- **P2-7 Copilot MCP tools to read-only (R15).** Narrow `tools: ["*"]` in `~/.copilot/mcp-config.json` to each server's read tools. Your config, not the repo.
 
 ---
 
@@ -281,5 +294,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
+- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [x] P1-7 [ ] P1-8 [ ] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
 - [ ] P2-* (optional)

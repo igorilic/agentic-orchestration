@@ -4,12 +4,12 @@
 
 @test "mktemp never hard-codes /tmp (honor TMPDIR so the suite runs inside agent sandboxes)" {
   cd "$BATS_TEST_DIRNAME/.."
-  run grep -rn -E 'mktemp( -d)? /tmp/' tests lib hooks scripts ai-native-workflow
+  run grep -rn -E 'mktemp( -d)? /tmp/' tests lib hooks ai-native-workflow
   [ "$status" -eq 1 ] || { echo "$output"; false; }
 }
 
 @test "mktemp always gets a template (macOS mktemp without one ignores TMPDIR and writes to /var/folders)" {
   cd "$BATS_TEST_DIRNAME/.."
-  run grep -rn -E 'mktemp( -d)?([)"]|[[:space:]]*$)' tests lib hooks scripts ai-native-workflow
+  run grep -rn -E 'mktemp( -d)?([)"]|[[:space:]]*$)' tests lib hooks ai-native-workflow
   [ "$status" -eq 1 ] || { echo "$output"; false; }
 }

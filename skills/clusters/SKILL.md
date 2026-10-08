@@ -3,7 +3,7 @@ name: clusters
 description: >
   Multi-cluster reference data for troubleshooting across EMEA, APAC, NAM.
   Contains kubectl contexts, ArgoCD cluster names, and Log Analytics
-  workspace details per region. Auto-loaded by the troubleshooter agent.
+  workspace details per region. Used by /incident.
 disable-model-invocation: true
 ---
 

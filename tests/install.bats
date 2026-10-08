@@ -89,45 +89,6 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# CTX-1 Step 5: Claude Code agent prompts use docs/context/
-# ---------------------------------------------------------------------------
-
-@test "agents/claude-code: no spec/todo/requirements paths under .anw/specs/" {
-  # Spec, todo, requirements, bugfix, brainstorm, testplan artifacts must reference docs/context/
-  # Confidence jsonl stays under .anw/specs/ — excluded by the negative lookahead pattern below
-  ! rg -q '\.anw/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
-    "$BATS_TEST_DIRNAME/../agents/claude-code/"
-}
-
-@test "agents/claude-code: confidence jsonl path under .anw/specs/ remains" {
-  rg -q '\.anw/specs/.*-confidence\.jsonl' \
-    "$BATS_TEST_DIRNAME/../agents/claude-code/qa.md" \
-    "$BATS_TEST_DIRNAME/../agents/claude-code/reviewer.md" \
-    "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
-}
-
-@test "agents/claude-code: ARCHITECTURE and CONVENTIONS reads point at docs/context/" {
-  rg -q 'docs/context/ARCHITECTURE\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
-  rg -q 'docs/context/CONVENTIONS\.md' "$BATS_TEST_DIRNAME/../agents/claude-code/architect.md"
-}
-
-# ---------------------------------------------------------------------------
-# CTX-1 Step 6: Copilot CLI agent prompts use docs/context/
-# ---------------------------------------------------------------------------
-
-@test "agents/copilot-cli: no spec/todo/requirements paths under .anw/specs/" {
-  ! rg -q '\.anw/specs/[^$]*-(spec|todo|requirements|bugfix|brainstorm|testplan)' \
-    "$BATS_TEST_DIRNAME/../agents/copilot-cli/"
-}
-
-@test "agents/copilot-cli: confidence jsonl path under .anw/specs/ remains" {
-  rg -q '\.anw/specs/.*-confidence\.jsonl' \
-    "$BATS_TEST_DIRNAME/../agents/copilot-cli/qa.agent.md" \
-    "$BATS_TEST_DIRNAME/../agents/copilot-cli/reviewer.agent.md" \
-    "$BATS_TEST_DIRNAME/../agents/copilot-cli/architect.agent.md"
-}
-
-# ---------------------------------------------------------------------------
 # CTX-1 Step 8: ai-native-workflow embedded heredocs use docs/context/
 # ---------------------------------------------------------------------------
 
@@ -146,49 +107,8 @@ teardown() {
 }
 
 # ---------------------------------------------------------------------------
-# CTX-1 Step 9: hooks/session-start.sh reads sprint from docs/context/
+# CTX-1 Step 10: skills/ reference docs/context/
 # ---------------------------------------------------------------------------
-
-@test "hooks: session-start reads sprint from docs/context/CURRENT_SPRINT.md" {
-  local proj
-  proj="$(mktemp -d "$BATS_TMPDIR/aw-session-start-XXXXXX")"
-  mkdir -p "$proj/docs/context"
-  echo "SPRINT_MARKER_XYZ" > "$proj/docs/context/CURRENT_SPRINT.md"
-  output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
-  rm -rf "$proj"
-  echo "$output" | grep -q "SPRINT_MARKER_XYZ"
-}
-
-@test "hooks: session-start does NOT read sprint from old .context/CURRENT_SPRINT.md (hard-cut)" {
-  local proj
-  proj="$(mktemp -d "$BATS_TMPDIR/aw-session-start-XXXXXX")"
-  mkdir -p "$proj/.context"
-  echo "OLD_SPRINT_MARKER_XYZ" > "$proj/.context/CURRENT_SPRINT.md"
-  output=$(CLAUDE_PROJECT_DIR="$proj" bash "$BATS_TEST_DIRNAME/../hooks/session-start.sh" 2>/dev/null)
-  rm -rf "$proj"
-  ! echo "$output" | grep -q "OLD_SPRINT_MARKER_XYZ"
-}
-
-@test "hooks: session-start.sh source references docs/context/CURRENT_SPRINT.md" {
-  rg -q 'docs/context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
-}
-
-@test "hooks: session-start.sh source does NOT reference .context/CURRENT_SPRINT.md" {
-  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../hooks/session-start.sh"
-}
-
-# ---------------------------------------------------------------------------
-# CTX-1 Step 10: templates/AGENTS.md and skills/ reference docs/context/
-# ---------------------------------------------------------------------------
-
-@test "docs: templates/AGENTS.md does not reference .context/CURRENT_SPRINT.md" {
-  ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
-}
-
-@test "docs: templates/AGENTS.md does not reference .anw/specs/ for spec/todo paths" {
-  # Allow docs/context/ARCHITECTURE.md and docs/context/CONVENTIONS.md (those stay)
-  ! rg -q '\.anw/specs/' "$BATS_TEST_DIRNAME/../templates/AGENTS.md"
-}
 
 @test "docs: skills/ do not reference .context/CURRENT_SPRINT.md" {
   ! rg -q '\.context/CURRENT_SPRINT\.md' "$BATS_TEST_DIRNAME/../skills/"

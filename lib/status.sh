@@ -23,11 +23,6 @@ show_status() {
   elif verify_is_trusted .; then success ".anw/verify (trusted)"
   else warn ".anw/verify is not trusted — review it, then: ai-native-workflow trust"; fi
 
-  if [ -f ".tdd-skip" ]; then
-    warn "TDD bypass is ACTIVE"
-    dim "$(cat .tdd-skip)"
-  fi
-
   # Shown, never sourced: the file lives in the (possibly untrusted) repo.
   if [ -f "$STATE_FILE" ]; then
     echo ""

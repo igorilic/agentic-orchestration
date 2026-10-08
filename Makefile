@@ -10,12 +10,12 @@ help: ## Show this help
 test: ## Run the full bats suite
 	bats tests/
 
-test-file: ## Run one test file: make test-file FILE=tests/confidence.bats
+test-file: ## Run one test file: make test-file FILE=tests/guard.bats
 	bats $(FILE)
 
-lint: ## Syntax-check the installer, lib modules, hooks, and scripts
+lint: ## Syntax-check the installer, lib modules and hooks
 	bash -n ai-native-workflow
-	@for f in lib/*.sh hooks/*.sh scripts/*.sh skills/*/*.bash; do \
+	@for f in lib/*.sh hooks/*.sh; do \
 		[ -e "$$f" ] && bash -n "$$f" || true; \
 	done
 	@echo "lint OK"
