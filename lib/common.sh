@@ -10,6 +10,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+# shellcheck disable=SC2034 # used by lib/render-stream.sh until P1-7 removes it
 MAGENTA='\033[0;35m'
 BOLD='\033[1m'
 DIM='\033[2m'
@@ -21,7 +22,6 @@ success() { echo -e "${GREEN}✓${NC} $*"; }
 warn()    { echo -e "${YELLOW}⚠${NC} $*"; }
 error()   { echo -e "${RED}✗${NC} $*" >&2; }
 header()  { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
-pstep()   { echo -e "\n${BOLD}${MAGENTA}▸ Step $1:${NC} $2"; }
 dim()     { echo -e "${DIM}  $*${NC}"; }
 ask()     { echo -en "${YELLOW}?${NC} $* "; }
 

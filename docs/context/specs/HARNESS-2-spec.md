@@ -371,11 +371,17 @@ Copilot doesn't document `context` or `agent` in SKILL.md, so treat `/check` the
 - **Don't set `disableBypassPermissionsMode` here.** It also suppresses `--allow-all-tools`, which `copilot -p` requires. Deny rules (which beat `--allow-all`), the sandbox and the hooks do the work instead.
 
 ### 5.6 Pipelines and installer (repo)
-- **Pipeline stages** call the native CLIs with skills and model flags (flow F). There is no `--agent` and no bypass flag.
-  - **Claude:** `--permission-mode acceptEdits --permission-prompts none`, so anything that would prompt is denied. The user-level sandbox applies.
-  - **Copilot:** `--allow-all-tools` (required for `-p`) plus `--deny-tool` rules and `--secret-env-vars`, with no `--allow-all-paths`.
-- **Outward actions stay in the script.** Push, PR/MR and Jira writes happen only after your confirmation, and only once the trusted `.anw/verify` passes.
-- **The live renderer** reads `--output-format stream-json` events from Claude and `--output-format json` events from Copilot, instead of model-printed sentinels (D1). The sidekick and sentinel prompt text go away with the agents.
+- **Pipeline stages** call the native CLIs with skills and model flags (flow F), one fresh session each, with stdin closed. There is no `--agent` and no bypass flag.
+  - **What a stage may never run** is the "ask" and "deny" Bash rules of `config/claude-settings.json`, the same policy as your interactive sessions. That covers push, PR/MR and Jira writes, `gh`/`glab api`, and mutating kubectl/helm.
+  - **Claude:** `--permission-mode acceptEdits --permission-prompts none`, so anything that would prompt is denied. The policy rules go in `--disallowedTools`, and the check stage also gets Edit/Write/MultiEdit/NotebookEdit. The plan and check stages use `--model opus`, the steps use sonnet. The user-level sandbox applies.
+  - **Copilot:** `--allow-all-tools` (required for `-p`) and `--no-ask-user`. The policy rules become `--deny-tool=shell(…)`, and the check stage also gets `--deny-tool=write`. Tokens go in `--secret-env-vars`. In the implement and check stages every MCP server in `mcp-config.json` is disabled. There is no `--allow-all-paths`.
+- **Outward actions stay in the script, each on your yes (Enter means no).**
+  - The trusted `.anw/verify` runs first, in the same sandbox as the Stop hook (`verify.sh --run`).
+  - Red, or no trusted script, needs an explicit "push anyway".
+  - Push and the PR/MR follow.
+  - For GitLab pipelines, the MR link goes to Jira: through the `jira` CLI after a confirm, or printed for you to paste if there's no CLI.
+- **The live renderer** reads Claude's `--output-format stream-json` events (D1): one line per tool call, then the answer. Copilot stages print their text output (`-s`). The sidekick and sentinel protocol go away in P1-7.
+- **State** is parsed from `.anw/.pipeline-state`, never sourced. `run resume` continues from the last finished stage, and an existing `docs/context/specs/<id>.md` is used instead of re-planning.
 - **`install global`:**
   - copies the hooks;
   - merges the settings;
@@ -494,6 +500,7 @@ That is why the flow makes `.anw/verify` the full suite and `/check` a standard 
     - other repo files stay writable, as they are for the agent;
     - without `sandbox-exec` (not macOS) the script runs unsandboxed, and `trust` says so;
     - inside another sandbox (Copilot's hooks) the outer one is what contains it.
+- **R15** **Copilot's MCP servers can write** (found in P1-6). Your `mcp-config.json` gives `jira`, `confluence` and the others `tools: ["*"]`. The pipeline disables every MCP server in the implement and check stages. But the plan and incident stages need Jira to read the ticket, so a prompt-injected plan stage could still comment or transition through MCP. Mitigation: narrow each server's `tools` to its read tools (a P0 follow-up). Shell posting is already denied.
 
 ## 10. Out of scope
 

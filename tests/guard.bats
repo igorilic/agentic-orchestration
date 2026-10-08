@@ -296,6 +296,16 @@ claude_stop() { jq -nc --arg d "$REPO" --argjson a "${1:-false}" --arg m "${2:-}
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"
   [[ "$(jq -r .systemMessage <<<"$output")" == *"new or changed"* ]] || false
 }
+@test "verify --run: scripts (the pipeline's pre-push check) run the trusted check and get its status" {
+  mk_verify 'echo RAN; exit 3'
+  run --separate-stderr bash "$HOOKS/verify.sh" --run "$REPO"
+  [ "$status" -eq 3 ] && [ "$output" = RAN ] || false
+}
+@test "verify --run: an untrusted script is never run (exit 2)" {
+  mkdir -p .anw && printf '#!/bin/sh\ntouch PWNED\n' > .anw/verify && chmod +x .anw/verify
+  run --separate-stderr bash "$HOOKS/verify.sh" --run "$REPO"
+  [ "$status" -eq 2 ] && [ ! -e PWNED ] || false
+}
 @test "verify: repos without .anw/verify are untouched (opt-in)" {
   edited
   run --separate-stderr bash "$HOOKS/verify.sh" <<<"$(claude_stop)"

@@ -7,24 +7,10 @@
 # guard.sh denies agent edits to .anw/, so the agent cannot rewrite its own finish line.
 set -uo pipefail
 
-payload="$(cat)"
-field() { jq -r "($1) // empty" <<<"$payload" 2>/dev/null; }
-
-marker="${TMPDIR:-/tmp}/anw-edited-$(field '.session_id // .sessionId')"
-[ -f "$marker" ] || exit 0
-
-cd "$(field '.cwd // .workingDirectory')" 2>/dev/null || cd "${CLAUDE_PROJECT_DIR:-$PWD}" || exit 0
-root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[ -x "$root/.anw/verify" ] || exit 0
-phys="$(cd "$root" && pwd -P)"
-
 # Hooks run OUTSIDE the sandbox, so only run a .anw/verify whose exact content you approved at
 # this exact path (like `direnv allow`). A cloned, copied or agent-modified script is never executed.
 trust="${ANW_TRUST_FILE:-$HOME/.claude/anw/trusted-verify}"
-if ! grep -qxF "$(shasum -a 256 "$phys/.anw/verify")" "$trust" 2>/dev/null; then
-  jq -nc --arg p "$root/.anw/verify" --arg r "$root" '{systemMessage:("⚠️ Not run: " + $p + " is new or changed, or trusted only for another repo. Review it, then run: ai-native-workflow trust " + ($r | @sh))}'
-  exit 0
-fi
+trusted() { grep -qxF "$(shasum -a 256 "$phys/.anw/verify")" "$trust" 2>/dev/null; }
 
 # What a trusted script runs (tests, Makefile) may be code the agent just wrote, so it runs in a
 # sandbox with the agent's own file limits (config/claude-settings.json, kept in sync by
@@ -56,6 +42,31 @@ sandboxed() {
     "$@"
   fi
 }
+
+# Scripts (the pipeline's pre-push check): `verify.sh --run [dir]` runs that repo's trusted check
+# the same way and exits with its status; 2 means there is no trusted script to run.
+if [ "${1:-}" = --run ]; then
+  root="$(git -C "${2:-.}" rev-parse --show-toplevel 2>/dev/null)" || root="${2:-.}"
+  phys="$(cd "$root" && pwd -P)"
+  [ -x "$phys/.anw/verify" ] && trusted || { echo "verify.sh: $phys/.anw/verify is missing or not trusted (ai-native-workflow trust)" >&2; exit 2; }
+  cd "$phys" && sandboxed ./.anw/verify
+  exit
+fi
+
+payload="$(cat)"
+field() { jq -r "($1) // empty" <<<"$payload" 2>/dev/null; }
+
+marker="${TMPDIR:-/tmp}/anw-edited-$(field '.session_id // .sessionId')"
+[ -f "$marker" ] || exit 0
+
+cd "$(field '.cwd // .workingDirectory')" 2>/dev/null || cd "${CLAUDE_PROJECT_DIR:-$PWD}" || exit 0
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+[ -x "$root/.anw/verify" ] || exit 0
+phys="$(cd "$root" && pwd -P)"
+if ! trusted; then
+  jq -nc --arg p "$root/.anw/verify" --arg r "$root" '{systemMessage:("⚠️ Not run: " + $p + " is new or changed, or trusted only for another repo. Review it, then run: ai-native-workflow trust " + ($r | @sh))}'
+  exit 0
+fi
 
 if out="$(cd "$root" && sandboxed ./.anw/verify 2>&1)"; then rm -f "$marker"; exit 0; fi
 

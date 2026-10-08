@@ -32,7 +32,7 @@ show_status() {
   if [ -f "$STATE_FILE" ]; then
     echo ""
     header "Active Pipeline"
-    grep -E '^(PIPELINE|ID|CURRENT_STEP|STATUS|TIMESTAMP)=' "$STATE_FILE" | sed 's/^/  /' || true
+    grep -E '^(PIPELINE|ID|STAGE|TIMESTAMP)=' "$STATE_FILE" | sed 's/^/  /' || true
   fi
 
   echo ""

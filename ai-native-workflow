@@ -27,19 +27,10 @@ set -euo pipefail
 VERSION="3.0.0"
 CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"
 COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"
-BACKUP_SUFFIX=".bak.$(date +%Y%m%d%H%M%S)"
 SPEC_DIR="docs/context/specs"
 SPRINT_FILE="docs/context/CURRENT_SPRINT.md"
 RUNTIME_DIR=".anw"
 STATE_FILE="${RUNTIME_DIR}/.pipeline-state"
-CONTEXT_DIR="$SPEC_DIR"   # backwards-compat alias — drop after one release
-ALLOWED_QUESTIONS=0   # 0 = disabled; N = max questions per agent run
-LAST_AGENT_OUTPUT=""  # captured after each agent run for question detection
-LAST_AGENT_TOOL=""    # "copilot" or "claude" — set by run_*_agent
-LAST_AGENT_NAME=""    # agent name — set by run_*_agent
-LAST_AGENT_PROMPT=""  # prompt used — set by run_*_agent
-AW_DRY_RUN="${AW_DRY_RUN:-0}"   # set to 1 to skip agent invocations (testing / dry-run)
-AW_SPEC_ID="${AW_SPEC_ID:-}"    # override spec id (used with AW_DRY_RUN)
 
 
 # ── Resolve this script's real directory (through symlinks) to locate lib/ ──
@@ -92,39 +83,10 @@ for _anw_mod in common detect pipeline-core pipelines install-global install-pro
 done
 unset _anw_mod
 
-# Source confidence CLI helpers if available (write_active_spec,
-# emit_step_verdict, build_pr_body).
-if [ -f "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh" ]; then
-  # shellcheck source=scripts/confidence-cli.sh
-  source "$_ANW_SCRIPT_DIR/scripts/confidence-cli.sh"
-fi
-
 main() {
-  # --- Parse flags (remove from positional args) ---
-  local args=()
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --allowed-questions=*)
-        ALLOWED_QUESTIONS="${1#*=}"
-        ;;
-      --allowed-questions)
-        if [[ "${2:-}" =~ ^[0-9]+$ ]]; then
-          ALLOWED_QUESTIONS="$2"
-          shift
-        else
-          ALLOWED_QUESTIONS=3  # default: 3 questions
-        fi
-        ;;
-      *)
-        args+=("$1")
-        ;;
-    esac
-    shift
-  done
-
-  local command="${args[0]:-help}"
-  local subcommand="${args[1]:-}"
-  local target="${args[2]:-}"
+  local command="${1:-help}"
+  local subcommand="${2:-}"
+  local target="${3:-}"
 
   case "$command" in
     install)

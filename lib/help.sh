@@ -20,33 +20,15 @@ show_help() {
                                 AGENTS.md, CLAUDE.md and docs/context/ (stack auto-detected)
     install all [path]          Install both global + project
 
-  PIPELINE COMMANDS
-    run gitlab-feature <ID>     GitLab feature development pipeline
-                                Jira → requirements-engineer → qa (test plan)
-                                → architect → tdd-developer → qa → reviewer → MR
-
-    run gitlab-incident <ID>    GitLab incident response pipeline
-                                Jira → troubleshooter → [document OR fix]
-                                → tdd-developer → qa → reviewer → MR
-
-    run github-feature [file]   GitHub feature development pipeline
-                                specs.md/input → requirements-engineer
-                                → GitHub issue → architect → tdd-developer
-                                → qa → reviewer → PR
-
-    run github-issue <ID>       GitHub issue investigation & fix pipeline
-                                Issue #ID → troubleshooter (investigate)
-                                → architect (plan) → tdd-developer → qa
-                                → reviewer → PR (Closes #ID)
-
-    run status                  Show active pipeline state
-    run resume                  Resume pipeline from last checkpoint
-
-  FLAGS (for pipeline commands)
-    --allowed-questions [N]     Let agents ask up to N clarifying questions
-                                (default N=3). Agents pause and prompt for
-                                answers before continuing. Without this flag,
-                                agents make assumptions and document them.
+  PIPELINE COMMANDS (each stage is a fresh claude -p / copilot -p session; no bypass flags)
+    run github-feature [file]   Claude: /plan → you approve → one session per step → /check
+                                (read-only) → trusted .anw/verify → push + PR on your yes
+    run github-issue <N>        The same, planned from GitHub issue #N; the PR closes it
+    run gitlab-feature <ID>     Copilot: the same, planned from Jira ticket <ID>; MR via glab
+    run gitlab-incident <ID>    Copilot: read-only /incident → you decide → the fix flow above
+    run status                  Show the active pipeline
+    run resume                  Continue it from the last finished stage
+                                Agents never push or post: the script does, after you confirm.
 
   OTHER COMMANDS
     detect [path]               Show detected stacks without installing
@@ -64,18 +46,16 @@ show_help() {
     ai-native-workflow run gitlab-feature PROJ-123
     ai-native-workflow run gitlab-incident PROJ-456
     ai-native-workflow run github-feature specs.md
-    ai-native-workflow run github-feature           # interactive input
-    ai-native-workflow run github-issue 42           # investigate & fix issue #42
-    ai-native-workflow run github-feature --allowed-questions    # agents can ask 3 Qs
-    ai-native-workflow run gitlab-feature PROJ-123 --allowed-questions 5
+    ai-native-workflow run github-feature           # describe it interactively
+    ai-native-workflow run github-issue 42
     ai-native-workflow run status
     ai-native-workflow run resume
     ai-native-workflow detect ~/code/my-frontend
     ai-native-workflow status
 
   PREREQUISITES
-    run gitlab-feature:    copilot, glab, jira MCP
-    run gitlab-incident:   copilot, glab, az, kubectl
+    run gitlab-feature:    copilot (Jira MCP to read the ticket), glab; jira CLI to post the MR link
+    run gitlab-incident:   copilot, glab, az, kubectl (read-only); jira CLI optional
     run github-issue:      claude, gh
     run github-feature:    claude, gh
 
@@ -99,31 +79,9 @@ show_help() {
       docs/context/             Architecture, conventions, specs, sprint
       docs/decisions/           ADR directory
 
-  AGENT ROSTER
-
-    requirements-engineer (Opus-tier)  → elicit & formalize requirements
-    architect (Opus-tier)              → design, spec, atomic plan
-    tdd-developer (Sonnet-tier)        → RED→GREEN→REFACTOR per step
-    qa (Opus-tier)                     → adversarial test + gap hunt
-    reviewer (Sonnet-tier)             → code review, user triages
-    troubleshooter (Opus-tier)         → incident investigation + diagnosis
-
-  COPILOT CLI USAGE
-
-    Copilot CLI agents mirror Claude Code agents with .agent.md format.
-    Installed to ~/.copilot/agents/ (or $COPILOT_HOME/agents/).
-
-    Interactive:
-      copilot                               # start session
-      /agent                                # pick from agent list
-
-    Direct:
-      copilot --agent=requirements-engineer --prompt "Analyze PROJ-123"
-      copilot --agent=architect --prompt "Plan JWT auth feature"
-      copilot --agent=tdd-developer --prompt "Step 1 of PROJ-123-todo.md"
-      copilot --agent=qa --prompt "Verify the changes"
-      copilot --agent=reviewer --prompt "Review the changes"
-      copilot --agent=troubleshooter --prompt "Investigate PROJ-456"
+  DAY TO DAY (interactive, both tools; no custom agents)
+    /plan <ticket> → implement one step at a time → /check → /pr    (Copilot: plus /rubber-duck)
+    /incident <ticket> investigates read-only; you decide what happens next
 
 HELP
 }

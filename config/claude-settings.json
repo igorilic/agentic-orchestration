@@ -58,7 +58,12 @@
       "Bash(glab issue note:*)",
       "Bash(glab api:*)",
       "mcp__confluence__create_page",
-      "mcp__confluence__update_page"
+      "mcp__confluence__update_page",
+      "Bash(jira issue comment:*)",
+      "Bash(jira issue create:*)",
+      "Bash(jira issue edit:*)",
+      "Bash(jira issue move:*)",
+      "Bash(jira issue assign:*)"
     ],
     "deny": [
       "Read(**/.env)",

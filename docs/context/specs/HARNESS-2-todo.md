@@ -181,19 +181,38 @@
   - your plain-terminal run (2026-10-08) passed 5/5 with no skips. The "can write" test needs a working profile, and the 3 "cannot" tests need real denials, so this checks both directions;
   - your negative control (the same file, on a copy with the sandbox switched off): the 3 "cannot" tests fail, while the sync and "can write" tests pass, as they should without a sandbox. So the confinement tests catch both a missing sandbox and an over-tight one.
 
-### Step P1-6: Native pipelines
-- **Test**: `tests/pipeline-safety.bats` (new):
-  - no `--agent=`, `--dangerously-skip-permissions`, `--allow-all-paths`, `--yolo` or `--allow-all-urls` anywhere in `lib/` or `ai-native-workflow`;
-  - Claude stages pass `--permission-mode acceptEdits --permission-prompts none` and per-stage `--model` (opus for plan and check, sonnet for implement);
-  - the check stage passes `--disallowedTools Edit,Write,MultiEdit,NotebookEdit`;
-  - Copilot stages pass `--deny-tool 'shell(git push)'` and the mutating-kubectl denies, plus `--secret-env-vars`;
-  - before `git push`, the script runs `.anw/verify` only if trusted, and aborts on red unless you confirm (driven through the existing `confirm` fd seam);
-  - no agent prompt posts to Jira; the script does it after `confirm`.
-- **Implement**: in `lib/pipelines.sh` and `lib/pipeline-core.sh`:
-  - the stages become `/plan`, "implement step N" and `/check`;
-  - the renderer consumes `stream-json` / Copilot JSON events instead of sentinels (D1), or is removed.
-- **Commit**: `feat(pipeline)!: native stages, no bypass flags, agents never post`.
-- **Proof**: `ai-native-workflow run github-feature <toy-spec.md>` completes on a toy repo with the sandbox on.
+### Step P1-6: Native pipelines ✅
+- **Test**: `tests/pipeline-safety.bats` (12). Stub CLIs record their arguments and stdin and play the stage, and pushes go to a real local bare remote.
+  - **Static:** no `--agent`, `--dangerously-skip-permissions`, `bypassPermissions`, `--allow-all(-paths|-urls)` or `--yolo` anywhere in `lib/` or `ai-native-workflow`.
+  - **Claude stages**, in order (plan → step 1 → step 2 → check):
+    - `-p` first, `--permission-mode acceptEdits --permission-prompts none`, and the policy's push/post rules in `--disallowedTools`;
+    - plan and check on opus, steps on sonnet;
+    - only the check stage denies Edit/Write/MultiEdit/NotebookEdit;
+    - no agent ever reads stdin, so your answers reach only the script.
+  - **Copilot stages:** `--allow-all-tools --no-ask-user`, the policy as `--deny-tool=shell(…)` (git push, glab mr create, kubectl apply/delete, …) and `--secret-env-vars` with the tokens. The check stage also gets `--deny-tool=write`, and the implement and check stages get `--disable-mcp-server` for each configured server.
+  - **Flow:**
+    - a declined plan stops before any code, and `run resume` continues without re-planning;
+    - a `BLOCKED:` step stops the pipeline;
+    - a red `.anw/verify` blocks the push unless you say so, and an untrusted one is never run;
+    - `github-issue` plans from the issue, and its PR closes it.
+  - **GitLab:**
+    - no agent prompt asks to post, and the Jira comment goes through the `jira` CLI only on your yes (printed when there's no CLI);
+    - `gitlab-incident` runs a read-only `/incident`, then you decide, and the fix is planned from the report;
+    - ticket ids are validated, including ones git accepts as branch names, such as `--force` or `$(id)`;
+    - the live renderer skips stray non-JSON lines instead of ending the pipe.
+- **Implement**:
+  - **Rewritten:** `lib/pipeline-core.sh` and `lib/pipelines.sh` (1,561 → 256 lines).
+  - **`verify.sh --run`:** the pipeline's pre-push check, the same trust gate and sandbox as the Stop hook.
+  - **Policy:** `jira issue comment|create|edit|move|assign` were added to "ask".
+  - **Removed:**
+    - the `--allowed-questions` flag and the Q&A loop;
+    - the agent runners, triage loop, spinner, audit log and old `source`-based state;
+    - the agent-created GitHub issue;
+    - the confidence-gate wiring;
+    - the help's agent roster.
+- **Removed tests:** `pipeline-core-stream.bats`, `pipelines-capture.bats` and `sdk-1-integration.bats` (33 tests), plus 4 pipeline-wiring tests in `cli-confidence.bats`, all of them testing the removed agent pipeline.
+- **Proof**: all 18 mutants are killed (bypass flag, prompting, check can edit, stdin leak, defaults to yes, red or untrusted verify, BLOCKED ignored, Jira without asking, …).
+- **Your step**: a live run on a toy repo, in a plain terminal, which spends a few model calls. The command is in the P1-6 summary.
 
 ### Step P1-7: Delete the legacy code from the repo
 - **Test**: `tests/no-legacy.bats` (new):
@@ -262,5 +281,5 @@
 
 - [x] P0-1 [x] P0-2 [x] P0-3 [x] P0-4 [x] P0-5 [x] P0-6 — applied 2026-10-07; see PROOF.md E16 for results, fixes and your manual follow-ups
 - [x] P1-0 [x] P1-1 [x] P1-2 [x] P1-3 — repo hooks are byte-identical to the installed copies; 51 contract tests; suite 482/482 inside the sandbox
-- [x] P1-4 [x] P1-5 [x] P1-5b [ ] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
+- [x] P1-4 [x] P1-5 [x] P1-5b [x] P1-6 [ ] P1-7 [ ] P1-8 [ ] P1-9 — live since 2026-10-08: you ran `make install` and `trust`, and `doctor` reports no problems (hooks, skills and managed blocks all match in both tools; this repo's `.anw/verify` is trusted at its path)
 - [ ] P2-* (optional)
