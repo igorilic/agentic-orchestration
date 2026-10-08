@@ -35,6 +35,8 @@ show_help() {
     status                      Show installation status + pipeline state
     doctor                      Like status, but exits 1 on drift, a custom agent,
                                 or an untrusted .anw/verify in this repo
+    doctor --smoke              Then run the live canaries (real model calls; after
+                                every model or tool update, in a plain terminal)
     trust [path]                Review a repo's .anw/verify and approve it for the Stop hook
     uninstall global            Remove our hooks, hook wiring and unmodified skills
     uninstall project [path]    Remove the old per-project Copilot hooks

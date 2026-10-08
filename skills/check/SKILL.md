@@ -19,3 +19,4 @@ Review a change you did not write. Assume nothing it claims; evidence beats narr
    - mocks the unit under test, or swallows errors
    - adds tests that would also pass without the change
 5. Report only what you would block the merge for: file:line, why, and a failing repro (command plus output). If nothing blocks, say so in one line.
+6. End with exactly one line: `Verdict: block` or `Verdict: pass`.

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help test test-file lint install install-project status uninstall
+.PHONY: help test test-file smoke lint install install-project status uninstall
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -12,6 +12,9 @@ test: ## Run the full bats suite
 
 test-file: ## Run one test file: make test-file FILE=tests/guard.bats
 	bats $(FILE)
+
+smoke: ## Live canaries against the installed harness (real model calls; run after model/tool updates)
+	./ai-native-workflow doctor --smoke
 
 lint: ## Syntax-check the installer, lib modules and hooks
 	bash -n ai-native-workflow

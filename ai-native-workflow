@@ -140,7 +140,9 @@ main() {
       trust_verify "${subcommand:-.}"
       ;;
     doctor)
-      doctor
+      doctor || exit 1
+      # Live canaries (real model calls), only against an install that matches this repo.
+      if [ "$subcommand" = --smoke ]; then bash "$_ANW_SCRIPT_DIR/tests/smoke.sh"; fi
       ;;
     uninstall)
       case "$subcommand" in
