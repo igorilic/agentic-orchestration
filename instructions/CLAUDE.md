@@ -2,6 +2,7 @@
 
 - Solo full-stack developer · fish on macOS · CLIs: gh, glab, kubectl, az, docker, make
 - Conventional Commits. Explain before anything destructive. Prefer asking over assuming.
+- `az`, `glab`, `gh`, `kubectl`, `helm`, `docker`, `git push`, `git fetch` and `git pull` run outside the sandbox, with my logins, only as a plain call. Don't pipe or chain them (`|`, `&&`, `;`); use their own filters (`--query`, `--jq`, `-o`) or redirect to a file. Inside the sandbox they fail with `Operation not permitted` or an x509 error. If a login has expired, ask me to log in.
 
 ## Working agreements
 - Behavior changes start with a failing test. Keep diffs small; one step at a time.

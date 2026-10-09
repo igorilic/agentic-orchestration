@@ -165,6 +165,15 @@ JSON
 }
 
 # --- environment ----------------------------------------------------------------------
+@test "instructions: Claude learns that the CLIs the sandbox excludes leave it only as a plain call" {
+  # Claude Code keeps a whole call sandboxed unless every command in it is excluded, so
+  # `az … | jq` runs sandboxed, where az can't read your login. The rule must name every one.
+  line="$(grep -F 'plain call' "$REPO/instructions/CLAUDE.md")" || { echo "no plain-call rule"; false; }
+  while IFS= read -r c; do
+    [[ "$line" == *"\`${c% \*}\`"* ]] || { echo "the rule doesn't name \`${c% \*}\`"; false; }
+  done < <(jq -r '.sandbox.excludedCommands[]' "$REPO/config/claude-settings.json")
+}
+
 @test "install works through a symlinked entrypoint (brew layout)" {
   mkdir -p "$SANDBOX/bin"; ln -s "$INSTALLER" "$SANDBOX/bin/ai-native-workflow"
   HOME="$SANDBOX/home" PATH="$STUB:$PATH" CLAUDE_HOME="$C" COPILOT_HOME="$P" "$SANDBOX/bin/ai-native-workflow" install global
