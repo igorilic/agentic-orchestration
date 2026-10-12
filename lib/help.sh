@@ -69,6 +69,7 @@ show_help() {
       hooks/verify.sh           Stop gate: runs the repo's trusted .anw/verify
       settings.json             Claude: permissions, sandbox, hook wiring (merged)
       hooks/anw.json            Copilot: preToolUse + agentStop wiring
+      settings.json             Copilot: sandbox off, so every CLI uses your logins (merged)
       CLAUDE.md                 Claude: your preamble + managed working agreements
       copilot-instructions.md   Copilot: your preamble + managed working agreements
       skills/*                  Copies: plan, check, verify, incident, pr, explore,

@@ -13,7 +13,7 @@ uninstall_global() {
   ANW_STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
   # Unwire before deleting: an entry pointing at a missing guard.sh blocks every tool call.
   if [ -f "$CLAUDE_DIR/settings.json" ]; then
-    rewrite_settings "$ANW_JQ_STRIP"' strip | if .hooks == {} then del(.hooks) else . end'
+    rewrite_settings "$CLAUDE_DIR" "$ANW_JQ_STRIP"' strip | if .hooks == {} then del(.hooks) else . end'
     success "Removed our hook entries from ${CLAUDE_DIR/#$HOME/~}/settings.json"
   fi
   rm -f "$COPILOT_DIR/hooks/anw.json"
@@ -27,7 +27,7 @@ uninstall_global() {
     done
     success "Removed hooks and unmodified skills from ${home/#$HOME/~}"
   done
-  warn "Kept: CLAUDE.md / copilot-instructions.md (delete the managed block by hand), the permission and sandbox policy in settings.json (pre-install copy in anw-backup/), and anw-backup/"
+  warn "Kept: CLAUDE.md / copilot-instructions.md (delete the managed block by hand), the permission and sandbox policy in both settings.json files (pre-install copy in anw-backup/), and anw-backup/"
   echo ""
   success "Global uninstall complete"
 }

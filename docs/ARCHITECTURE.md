@@ -91,7 +91,7 @@ Each stage is a fresh headless session with stdin closed, running a skill:
 | Stage | Claude (`github-feature`, `github-issue`) | Copilot (`gitlab-feature`, `gitlab-incident`) |
 |---|---|---|
 | plan | `/plan` on opus, then you approve | `/plan`, then you approve |
-| each step | "implement step N" on sonnet | the same, MCP servers disabled |
+| each step | "implement step N" on sonnet | the same |
 | check | `/check` on opus, edit tools disallowed | `/check` with `--deny-tool=write` |
 
 - Claude runs with `--permission-mode acceptEdits --permission-prompts none`. Copilot runs with
@@ -109,7 +109,7 @@ Each stage is a fresh headless session with stdin closed, running a skill:
 | Where | What |
 |---|---|
 | `~/.claude/` | `hooks/guard.sh`, `hooks/verify.sh`; the policy merged into `settings.json` (your keys kept); a managed block in `CLAUDE.md`; `skills/` |
-| `~/.copilot/` | the same two hooks plus `hooks/anw.json`; a managed block in `copilot-instructions.md`; `skills/` |
+| `~/.copilot/` | the same two hooks plus `hooks/anw.json`; `sandbox.enabled: false` merged into `settings.json` (your keys kept); a managed block in `copilot-instructions.md`; `skills/` |
 | a project (`install project`) | `.anw/verify` for the detected stack (never overwritten; trusted on your `y`); a short `AGENTS.md` that `CLAUDE.md` imports; `.gitignore` rules `.anw/*` + `!.anw/verify`; `docs/context/`, `docs/decisions/` |
 
 Older installs are cleaned up: retired agents, skills and hooks move to `<home>/anw-backup/<stamp>/`.
@@ -139,7 +139,9 @@ Older installs are cleaned up: retired agents, skills and hooks move to `<home>/
 - **Every gate has an honest exit.** `BLOCKED: <evidence>` is a success path, and you are the only bypass.
 - **Strong finish lines.** `.anw/verify` runs the whole fast suite, so no cheap hack passes it.
 - **One writer, one fresh-context reviewer.** No role-based agent teams.
-- **Contain the blast radius.** The OS sandbox is the security boundary. Hooks are a guardrail.
+- **Contain the blast radius.** In Claude the OS sandbox is the security boundary. Hooks are a guardrail.
+  Copilot runs unsandboxed so every CLI and MCP server works with your logins; its containment is
+  the hooks, the deny rules and your own settings.
 - **Floating model aliases** (`opus`, `sonnet`), never pinned versions.
 
 ## Architecture Decision Records

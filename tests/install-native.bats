@@ -188,10 +188,24 @@ JSON
   anw install global
   [ -z "$(ls -A "$SANDBOX/home")" ]
 }
-@test "Copilot's own config files are never touched" {
+@test "Copilot's config.json and mcp-config.json are never touched; settings.json keeps your keys" {
   mkdir -p "$P"; for f in settings.json config.json mcp-config.json; do echo '{"mine":1}' > "$P/$f"; done
   anw install global
-  for f in settings.json config.json mcp-config.json; do [ "$(cat "$P/$f")" = '{"mine":1}' ] || { echo "touched: $f"; false; }; done
+  for f in config.json mcp-config.json; do [ "$(cat "$P/$f")" = '{"mine":1}' ] || { echo "touched: $f"; false; }; done
+  jq -e '.mine == 1' "$P/settings.json"
+}
+
+# --- Copilot sandbox ---------------------------------------------------------------
+# Every Copilot session gets every CLI on the machine with your logins. Copilot can't exempt a
+# command from its sandbox, so the sandbox is off; your policy in it is kept for /sandbox enable.
+@test "copilot sandbox: install turns it off and keeps your sandbox policy and other keys" {
+  mkdir -p "$P"
+  echo '{"theme":"dark","sandbox":{"enabled":true,"userPolicy":{"filesystem":{"deniedPaths":["/k"]}}}}' > "$P/settings.json"
+  anw install global
+  jq -e '.theme == "dark" and .sandbox.enabled == false and .sandbox.userPolicy.filesystem.deniedPaths == ["/k"]' "$P/settings.json"
+  cp "$P/settings.json" "$SANDBOX/first.json"
+  anw install global
+  cmp "$SANDBOX/first.json" "$P/settings.json"
 }
 @test "a fresh install backs nothing up, and a re-install with nothing changed writes no backup" {
   anw install global

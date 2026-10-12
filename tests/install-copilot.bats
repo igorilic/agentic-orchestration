@@ -6,7 +6,7 @@
 ROOT="$BATS_TEST_DIRNAME/.."
 
 @test "docs: README lists what install global puts in ~/.copilot" {
-  for p in '~/.copilot/hooks/anw.json' '~/.copilot/skills/' '~/.copilot/copilot-instructions.md'; do
+  for p in '~/.copilot/hooks/anw.json' '~/.copilot/skills/' '~/.copilot/copilot-instructions.md' '~/.copilot/settings.json'; do
     grep -qF "$p" "$ROOT/README.md" || { echo "README.md does not mention $p"; false; }
   done
 }

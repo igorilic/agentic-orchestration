@@ -19,14 +19,16 @@ ANW_JQ_STRIP='
   def strip: if .hooks then .hooks |= (
       with_entries(.value |= [ .[] | .hooks |= (. // [] | map(select(ours | not))) | select((.hooks | length) > 0) ])
       | with_entries(select(.value | length > 0))) else . end;'
-# jq: union-merge the policy ($p, hook paths rebased onto $hd) into the input.
-ANW_JQ_MERGE='
+# jq: objects merge key by key, arrays gain the missing items, policy scalars win.
+ANW_JQ_UNION='
   def union($a; $b):
     if ($a | type) == "object" and ($b | type) == "object" then
       reduce ($b | keys_unsorted[]) as $k ($a; .[$k] = union($a[$k]; $b[$k]))
     elif ($a | type) == "array" and ($b | type) == "array" then
       $a + [ $b[] | select(. as $x | any($a[]; . == $x) | not) ]
-    else $b end;
+    else $b end;'
+# jq: union-merge the policy ($p, hook paths rebased onto $hd) into the input.
+ANW_JQ_MERGE="$ANW_JQ_UNION"'
   ($p[0] | .hooks |= walk(if type == "string" then sub("~/\\.claude/hooks"; $hd) else . end)) as $policy
   | union(strip; $policy)'
 
@@ -62,6 +64,9 @@ install_copilot_harness() {
       preToolUse: [{type: "command", bash: ("bash " + ($g | @sh)), timeoutSec: 15}],
       agentStop:  [{type: "command", bash: ("bash " + ($v | @sh)), timeoutSec: 600}]}}' > "$COPILOT_DIR/hooks/anw.json"
   success "${COPILOT_DIR/#$HOME/~}/hooks/anw.json"
+  # Copilot can't exempt a command from its sandbox, so it is off: every CLI runs with your logins.
+  rewrite_settings "$COPILOT_DIR" --slurpfile p "$_ANW_SCRIPT_DIR/config/copilot-settings.json" "$ANW_JQ_UNION"' union(.; $p[0])'
+  success "${COPILOT_DIR/#$HOME/~}/settings.json (sandbox off, so every CLI uses your logins; your settings kept)"
   install_instructions "$COPILOT_DIR" copilot-instructions.md "$_ANW_SCRIPT_DIR/instructions/copilot-instructions.md"
   install_skills "$COPILOT_DIR"
   retire_agents "$COPILOT_DIR" .agent.md
@@ -153,16 +158,17 @@ install_instructions() {
   success "${target/#$HOME/~}"
 }
 
-# Rewrite settings.json through a jq filter (args passed to jq; a missing file
-# reads as null); back up only on change.
+# rewrite_settings <home> <jq args…>: rewrite <home>/settings.json through a jq filter
+# (a missing file reads as null); back up only on change.
 rewrite_settings() {
-  local target="$CLAUDE_DIR/settings.json" tmp
+  local home="$1" target="$1/settings.json" tmp
+  shift
   tmp="$(mktemp "${TMPDIR:-/tmp}/aw-settings-XXXXXX")"
   if [ -f "$target" ]; then set -- "$@" "$target"; else set -- -n "$@"; fi
   if ! jq "$@" > "$tmp"; then
     rm -f "$tmp"; error "${target/#$HOME/~} is not valid JSON — left unchanged"; return 1
   fi
-  if cmp -s "$tmp" "$target"; then rm -f "$tmp"; else backup_copy "$CLAUDE_DIR" settings.json; mv "$tmp" "$target"; fi
+  if cmp -s "$tmp" "$target"; then rm -f "$tmp"; else backup_copy "$home" settings.json; mv "$tmp" "$target"; fi
 }
 
 # Union-merge the policy: your keys, rules and hooks survive; our hook entries
@@ -172,6 +178,6 @@ merge_claude_settings() {
   mkdir -p "$CLAUDE_DIR"
   # shellcheck disable=SC2088 # literal ~: Claude Code expands it, and it is what the shipped policy uses
   if [ "$CLAUDE_DIR" = "$HOME/.claude" ]; then hooks_dir='~/.claude/hooks'; else hooks_dir="$CLAUDE_DIR/hooks"; fi
-  rewrite_settings --slurpfile p "$_ANW_SCRIPT_DIR/config/claude-settings.json" --arg hd "$hooks_dir" "$ANW_JQ_STRIP$ANW_JQ_MERGE"
+  rewrite_settings "$CLAUDE_DIR" --slurpfile p "$_ANW_SCRIPT_DIR/config/claude-settings.json" --arg hd "$hooks_dir" "$ANW_JQ_STRIP$ANW_JQ_MERGE"
   success "${CLAUDE_DIR/#$HOME/~}/settings.json (policy merged; your settings kept)"
 }

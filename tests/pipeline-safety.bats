@@ -131,7 +131,7 @@ seq_of() { basename "$1" | cut -d. -f1; }                                       
 }
 
 # --- gitlab (copilot) ---------------------------------------------------------------------
-@test "gitlab-feature: copilot stages get deny rules, stripped secrets, no MCP while coding, and no bypass" {
+@test "gitlab-feature: copilot stages get deny rules, stripped secrets, every MCP server, and no bypass" {
   mkdir -p "$COPILOT_HOME"; echo '{"mcpServers":{"jira":{},"confluence":{}}}' > "$COPILOT_HOME/mcp-config.json"
   run anw run gitlab-feature PROJ-1 <<<$'y\ny\ny'
   [ "$status" -eq 0 ] || { echo "$output"; false; }
@@ -143,8 +143,8 @@ seq_of() { basename "$1" | cut -d. -f1; }                                       
     ! grep -qE -- '^--(agent|yolo|allow-all-paths|allow-all-urls|allow-all)(=|$)' "$f" || false
   done
   has "$chk" --deny-tool=write; ! grep -qxF -- --deny-tool=write "$s1" || false
-  for f in "$s1" "$chk"; do has "$f" --disable-mcp-server=jira; has "$f" --disable-mcp-server=confluence; done
-  ! grep -q -- --disable-mcp-server "$plan" || false     # the plan reads the ticket
+  # Your MCP servers are yours to scope (mcp-config.json tools); no stage switches them off.
+  for f in "$plan" "$s1" "$chk"; do ! grep -q -- --disable-mcp-server "$f" || false; done
   pushed feature/PROJ-1
   grep -q 'Closes PROJ-1' "$(call_with glab mr)"
 }

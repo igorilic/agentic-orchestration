@@ -22,7 +22,7 @@ against their real hook payloads.
 |---|---|
 | `guard.sh` (before every command and edit) | Denies hook bypasses (`--no-verify`, …), nested agents without permissions, and writes to the harness itself. **Asks you** before a commit that deletes or weakens tests or changes code with no test, before a new dependency, and before CI or instruction edits. |
 | `verify.sh` (when an editing turn ends) | Runs the repo's `.anw/verify`, your full fast suite, but only a script you approved by hash and path, and on macOS inside a sandbox. While it's red, the agent keeps working or ends with `BLOCKED:`. |
-| Settings (merged into Claude's `settings.json`) | OS sandbox with an egress allowlist; secrets unreadable; asks before push, PR/MR and comments; denies force-push and mutating cluster commands. In Copilot, turn its sandbox on with `/sandbox`. |
+| Settings (merged into Claude's `settings.json`) | OS sandbox with an egress allowlist; secrets unreadable; asks before push, PR/MR and comments; denies force-push and mutating cluster commands. Copilot runs **without** its sandbox: `install global` turns it off in `~/.copilot/settings.json`, so every CLI and MCP server works with your logins, in sessions and pipeline stages alike. The hooks and deny rules still apply; anything beyond that (`/sandbox enable`, narrowing MCP `tools` in `mcp-config.json`) is your call. |
 | Skills | `/plan`, `/check` (fresh context, read-only), `/verify`, `/incident` (read-only), `/pr` |
 | Agents | Native only: the main session, plan mode, built-in subagents. No custom agents. |
 

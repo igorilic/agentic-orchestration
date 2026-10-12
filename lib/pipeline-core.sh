@@ -25,7 +25,7 @@ policy_bash_rules() {
 # One fresh session. Its transcript goes to $RUN_DIR/<name>.log. Fails if the session fails or
 # ends with "BLOCKED:", which is shown to you.
 run_stage() {
-  local tool="$1" kind="$2" name="$3" prompt="$4" log="$RUN_DIR/$3.log" rc=0 result rule server args=()
+  local tool="$1" kind="$2" name="$3" prompt="$4" log="$RUN_DIR/$3.log" rc=0 result rule args=()
   header "▸ $name ($tool)"
   dim "$prompt"
   if [ "$tool" = claude ]; then
@@ -41,12 +41,7 @@ run_stage() {
       args+=("--deny-tool=$(sed -E 's/^Bash\(([^:)]*)(:\*)?\)$/shell(\1)/' <<<"$rule")")
     done <<<"$(policy_bash_rules)"
     [ "$kind" = check ] && args+=(--deny-tool=write)
-    # Coding and review need no MCP servers, so none of them (Jira, Confluence, …) is reachable there.
-    case "$kind" in implement|check)
-      for server in $(jq -r '.mcpServers // {} | keys[]' "$COPILOT_DIR/mcp-config.json" 2>/dev/null); do
-        args+=("--disable-mcp-server=$server")
-      done ;;
-    esac
+    # Every stage keeps all your MCP servers; what their tools may do is set in your mcp-config.json.
     copilot -p "$prompt" --allow-all-tools --no-ask-user -s --no-color --secret-env-vars="$SECRET_ENV_VARS" \
       "${args[@]}" </dev/null 2>&1 | tee "$log" || rc="${PIPESTATUS[0]}"
     result="$(cat "$log")"

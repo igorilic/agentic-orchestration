@@ -214,8 +214,10 @@ be evaded [13], so CI and branch protection remain the ground truth.
 
 The Claude policy turns the OS sandbox on with an egress allowlist and makes secrets unreadable at
 the OS level. It asks before push, PR/MR creation and comments. It denies force-push and mutating
-cluster commands, and it disables the permission-bypass mode [8]. Copilot uses its own sandbox and
-deny rules; pipelines pass the same policy as `--deny-tool` rules.
+cluster commands, and it disables the permission-bypass mode [8]. Copilot runs without its sandbox:
+it cannot exempt a single command, and its users need every CLI and MCP server with their own
+logins. It keeps the hooks and the deny rules (pipelines pass the policy as `--deny-tool` rules);
+further containment is left to the user.
 
 ### 3.8 Model strategy
 
@@ -307,7 +309,9 @@ These are demonstrations of the mechanisms, not estimates of how often they work
 
 A hook that pattern-matches shell text stops the naive bypass, not a determined injection [17].
 The harness therefore puts the hard limits in the OS sandbox and the settings. It uses the hooks
-for what they do well: running the check, asking at commit time, and failing closed.
+for what they do well: running the check, asking at commit time, and failing closed. In Copilot,
+which runs unsandboxed (§3.7), the hooks and deny rules are the only harness limits; the rest is the
+user's call.
 
 ### 6.2 Honest exits beat clever detectors
 
