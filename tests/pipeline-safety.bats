@@ -31,7 +31,8 @@ tool="$(basename "$0")"; n=$(( $(cat "$STUB_LOG/n" 2>/dev/null || echo 0) + 1 ))
 printf '%s\n' "$@" > "$STUB_LOG/$n.$tool"; cat > "$STUB_LOG/$n.stdin"
 say() { if [ "$tool" = claude ]; then jq -nc --arg t "$1" '{type:"result",subtype:"success",is_error:false,result:$t}'; else echo "$1"; fi; }
 case "$2" in
-  /incident*) f="${2##* }"; mkdir -p "$(dirname "$f")"; printf '# Incident\nRoot cause: a null config.\n' > "$f"; say "Report: $f" ;;
+  /incident*) f="${2##* }"; mkdir -p "$(dirname "$f")"
+    printf '<!doctype html>\n<html lang="en" class="dark">\n<head><title>Incident</title></head>\n<body>\n  <p>Root cause: a <code>null</code> config &amp; no default.</p>\n</body>\n</html>\n' > "$f"; say "Report: $f" ;;
   /plan*) f="${2##* }"; mkdir -p "$(dirname "$f")"
     printf '<!doctype html>\n<html lang="en" class="dark">\n<head><title>Toy feature</title></head>\n<body>\n  <h3 id="step-1">Step 1</h3><p>Greet &amp; wave.</p><h3 id="step-2">Step 2</h3>\n</body>\n</html>\n' > "$f"; say "Plan: $f" ;;
   Implement\ step*) s="$(sed -n 's/^Implement step \([0-9]*\).*/\1/p' <<<"$2")"
@@ -182,9 +183,12 @@ seq_of() { basename "$1" | cut -d. -f1; }                                       
   [ "$status" -eq 0 ]
   inc="$(call_with copilot /incident)"; has "$inc" '--deny-tool=shell(kubectl delete)'
   ! call_with copilot /plan || false
+  [ -f docs/context/specs/INC-9-incident.html ] && grep -qF 'write the report to docs/context/specs/INC-9-incident.html' "$inc" || false
+  [[ "$output" == *"Root cause: a null config & no default."* ]] || { echo "$output"; false; }
+  [[ "$output" != *"<code>"* && "$output" != *"&amp;"* ]] || { echo "$output"; false; }
   run anw run gitlab-incident INC-9 <<<$'y\ny\ny'
   [ "$status" -eq 0 ] || { echo "$output"; false; }
-  call_with copilot '/plan docs/context/specs/INC-9-incident.md' >/dev/null
+  call_with copilot '/plan docs/context/specs/INC-9-incident.html' >/dev/null
   [ "$(calls copilot | grep -c .)" -ge 5 ]
   pushed fix/INC-9
 }
