@@ -10,7 +10,7 @@ pipeline_github_feature() {  # [spec file | description]
   local input="${1:-}" id
   require_claude; require_gh; repo_root || return 1
   if [ -f "$input" ]; then
-    id="$(basename "$input" .md)"; id="${id//[^A-Za-z0-9._-]/-}"; input="the spec in $input"
+    id="$(basename "$input")"; id="${id%.*}"; id="${id//[^A-Za-z0-9._-]/-}"; input="the spec in $input"
   else
     if [ -z "$input" ]; then ask "Describe the feature:"; read -r input || true; fi
     [ -n "$input" ] || { error "Nothing to plan"; return 1; }
