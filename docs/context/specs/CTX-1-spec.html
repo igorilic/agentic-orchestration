@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>CTX-1 — Split tracked specs from runtime state (option G)</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">CTX-1 — Split tracked specs from runtime state (option G)</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Status:</strong> Proposed <strong>Date:</strong> 2026-05-04 <strong>Owner:</strong> architect → tdd-developer <strong>Source:</strong> <code>spikes/context-sharing/FINDINGS.md</code>, <code>spikes/context-sharing/option-g-migration.md</code>, <code>spikes/context-sharing/EVALUATION.md</code> <strong>Branch:</strong> <code>feat/context-split</code></p>
+<hr />
+<h2 id="problem-statement">Problem Statement</h2>
+<p><code>.context/</code> today mixes two categorically different artifacts:</p>
+<ol type="1">
+<li><strong>Reviewable artifacts</strong> — <code>CURRENT_SPRINT.md</code>, feature specs (<code>&lt;id&gt;-&lt;n&gt;.md</code>), todo plans (<code>&lt;id&gt;-todo.md</code>), requirements docs (<code>&lt;id&gt;-requirements.md</code>). These are human-readable architecture decisions and sprint state. Reviewers want them in PRs. They survive across machines and developers.</li>
+<li><strong>Runtime artifacts</strong> — <code>.pipeline-state</code> (single-writer cursor), <code>.pipeline-audit.log</code> (dense operational log), <code>&lt;id&gt;-confidence.jsonl</code> (append-only event log written constantly by agents). These are local-only, single-writer, and merge-unfriendly.</li>
+</ol>
+<p>The repo's <code>.gitignore</code> currently ignores <code>.context/</code> wholesale (commit <code>2b7a274</code>). That was a defensible reaction to "all tracked" polluting <code>main</code>, but it lost the "specs are reviewable architecture" half. The result: cross-machine work loses specs (boundary B3 in the explorer's matrix), and PRs hide the design.</p>
+<p>The spike's recommendation (<code>FINDINGS.md</code>) is <strong>option G — split tracked vs runtime</strong>. This spec implements G.</p>
+<h2 id="context">Context</h2>
+<ul>
+<li>Repo is <code>agentic-orchestration</code>, a CLI that ships hooks/skills/agents for AI-native dev workflows.</li>
+<li>The <code>architect</code>, <code>qa</code>, <code>reviewer</code>, <code>requirements-engineer</code>, <code>troubleshooter</code> agents (×2 — Claude Code variant + Copilot CLI variant) all reference <code>.context/specs/</code> and <code>.context/CURRENT_SPRINT.md</code> directly in their prompt templates.</li>
+<li>The <code>ai-native-workflow</code> script ships these prompts as heredocs into <code>~/.claude/agents/</code> and <code>~/.copilot/agents/</code> during <code>install global</code>. Both source files (<code>agents/*/...md</code>) AND the embedded heredocs in <code>ai-native-workflow</code> need updating.</li>
+<li>Hooks: <code>hooks/session-start.sh</code> reads <code>.context/CURRENT_SPRINT.md</code>. <code>hooks/confidence-gate.sh</code> reads <code>.context/specs/&lt;id&gt;-confidence.jsonl</code> (unchanged path).</li>
+<li>Scripts: <code>scripts/confidence-cli.sh</code> references <code>.context/specs/&lt;id&gt;-confidence.jsonl</code> (unchanged path).</li>
+<li>Tests: 105 bats tests pass today. <code>tests/cli-confidence.bats</code> and <code>tests/confidence-gate-hook.bats</code> mkdir <code>.context/specs/</code> and write jsonl logs there. Those paths are RUNTIME — they stay.</li>
+<li>Existing similar pattern in repo: <code>docs/superpowers/specs/</code> and <code>docs/superpowers/plans/</code> already live under <code>docs/</code>. The new <code>docs/context/</code> slots in alongside.</li>
+<li>Local in-flight spec: <code>BREW-1</code> (CURRENT_SPRINT.md, BREW-1-anw-script-dir-symlink.md, BREW-1-todo.md) currently in <code>.context/</code>. Untracked. Must migrate as part of this work.</li>
+</ul>
+<h2 id="decisions-resolved-from-the-requests-open-questions">Decisions Resolved (from the request's open questions)</h2>
+<h3 id="d1-where-do-tracked-specs-live--docscontext">D1. Where do tracked specs live? → <code>docs/context/</code></h3>
+<p>Justification:</p>
+<ul>
+<li>Matches existing <code>docs/superpowers/specs/</code> and <code>docs/superpowers/plans/</code> convention; reviewers already look in <code>docs/</code> for design docs.</li>
+<li>Keeps <code>.context/</code> semantically clean: after this change, <code>.context/</code> contains per-project installer-seeded reference docs (ARCHITECTURE, CONVENTIONS, GLOSSARY — tracked in consumer projects) and runtime artifacts (.pipeline-state, .pipeline-audit.log, *.jsonl — gitignored). Sprint board and spec markdown move to <code>docs/context/</code> where they are always tracked.</li>
+<li>A flatter <code>docs/specs/</code> would collide with any future per-feature specs the project itself ships (e.g., a "user docs" section). <code>docs/context/</code> is purpose-named and bounded.</li>
+<li>Keeping the old <code>.context/</code> path "now that it's no longer fully gitignored" was considered and rejected: the current <code>.gitignore</code> line <code>.context/</code> is already in <code>main</code>. Changing it to a multi-line allow-list works, but mixes tracked and runtime files in the same directory, which makes <code>git status</code> noisier and weakens the conceptual split that's the whole point of option G.</li>
+</ul>
+<h3 id="d2-confidence-audit-jsonl--stays-at-contextspecsid-confidencejsonl">D2. Confidence audit jsonl → stays at <code>.context/specs/&lt;id&gt;-confidence.jsonl</code></h3>
+<p>Justification:</p>
+<ul>
+<li>It's a runtime artifact (append-only, written by agents during a pipeline run). It belongs with the other runtime files in <code>.context/</code>.</li>
+<li>Hook (<code>hooks/confidence-gate.sh:29</code>), CLI helper (<code>scripts/confidence-cli.sh:28,54,64,76</code>), and 38 test references in <code>tests/cli-confidence.bats</code> already use this path. Moving it is pure churn.</li>
+<li>The <code>option-g-migration.md</code> table explicitly keeps it at the existing path.</li>
+</ul>
+<h3 id="d3-in-flight-migration--one-time-git-mv-of-brew-1-files">D3. In-flight migration → one-time <code>git mv</code> of BREW-1 files</h3>
+<p>The local untracked files at <code>.context/CURRENT_SPRINT.md</code>, <code>.context/specs/BREW-1-anw-script-dir-symlink.md</code>, <code>.context/specs/BREW-1-todo.md</code> move to <code>docs/context/...</code> paths in Step 7 of the todo. Done as part of this branch so the BREW-1 work is unblocked the moment this lands.</p>
+<h3 id="d4-backwards-compatibility--hard-cut">D4. Backwards compatibility → hard-cut</h3>
+<p>Per the request's recommendation. Solo developer, single in-flight spec, agents are template prompts (no runtime fallback to "old path"). Hard-cut keeps the implementation small and the model behavior unambiguous.</p>
+<h2 id="proposed-solution">Proposed Solution</h2>
+<h3 id="final-layout">Final layout</h3>
+<pre><code>docs/
+  context/
+    CURRENT_SPRINT.md                      # tracked, PR-reviewable
+    specs/
+      &lt;id&gt;-&lt;n&gt;.md                          # tracked — feature spec
+      &lt;id&gt;-todo.md                         # tracked — atomic plan
+      &lt;id&gt;-requirements.md                 # tracked — requirements doc
+      templates/
+        feature-spec.md                    # tracked — installer-seeded template
+.context/
+  .pipeline-state                          # gitignored — single-writer cursor
+  .pipeline-audit.log                      # gitignored — operational log
+  ARCHITECTURE.md                          # tracked NOTE: stays in .context/ (per-project doc, installer-seeded)
+  CONVENTIONS.md                           # tracked NOTE: stays in .context/ (per-project doc, installer-seeded)
+  GLOSSARY.md                              # tracked NOTE: stays in .context/ (per-project doc, installer-seeded)
+  specs/
+    &lt;id&gt;-confidence.jsonl                  # gitignored — append-only audit log</code></pre>
+<p><strong>Note on <code>ARCHITECTURE.md</code> / <code>CONVENTIONS.md</code> / <code>GLOSSARY.md</code>:</strong> These three are installer-seeded "fill in for your project" docs. They are NOT pipeline artifacts. They live under <code>.context/</code> today. We DO NOT move them in this spec — they're per-project documentation, not pipeline state. Agent prompts that read them (<code>Read .context/ARCHITECTURE.md</code>) keep that exact path. The split is specifically about the three pipeline-produced artifacts: sprint, specs, todos, plus the runtime files.</p>
+<p>This is consistent with FINDINGS: the recommendation is to move <code>CURRENT_SPRINT.md</code> and spec markdown files. ARCHITECTURE/CONVENTIONS/GLOSSARY are not in scope for option G.</p>
+<h3 id="gitignore-change"><code>.gitignore</code> change</h3>
+<p>Currently:</p>
+<pre><code>.context/</code></pre>
+<p>After (replace that single line):</p>
+<pre><code>.context/.pipeline-state
+.context/.pipeline-audit.log
+.context/specs/*.jsonl
+.context/specs/templates/</code></pre>
+<p>(The <code>templates/</code> entry is defensive — when the project installer seeds <code>.context/specs/templates/feature-spec.md</code> for a fresh project, that file is also runtime/local boilerplate. The actual canonical template moves to <code>docs/context/specs/templates/</code>. See Step 4.)</p>
+<p>Effect: <code>.context/specs/*.md</code> is no longer ignored, but in this repo nothing under <code>.context/</code> other than the runtime files exists after migration. ARCHITECTURE.md / CONVENTIONS.md / GLOSSARY.md are tracked and remain so (they're not under any of the four ignore patterns).</p>
+<h3 id="path-constants-in-ai-native-workflow">Path constants in <code>ai-native-workflow</code></h3>
+<p>Currently (lines 30-31):</p>
+<pre><code>CONTEXT_DIR=&quot;.context/specs&quot;
+STATE_FILE=&quot;.context/.pipeline-state&quot;</code></pre>
+<p>After:</p>
+<pre><code>SPEC_DIR=&quot;docs/context/specs&quot;             # tracked specs, todos, requirements
+SPRINT_FILE=&quot;docs/context/CURRENT_SPRINT.md&quot;
+RUNTIME_DIR=&quot;.context&quot;                    # gitignored runtime root
+STATE_FILE=&quot;${RUNTIME_DIR}/.pipeline-state&quot;
+AUDIT_LOG=&quot;${RUNTIME_DIR}/.pipeline-audit.log&quot;
+CONFIDENCE_LOG_DIR=&quot;${RUNTIME_DIR}/specs&quot; # confidence jsonl path (unchanged)</code></pre>
+<p>(<code>CONTEXT_DIR</code> is renamed to <code>SPEC_DIR</code> for clarity — the variable was always about spec markdown, never confidence logs. Keep an alias <code>CONTEXT_DIR="$SPEC_DIR"</code> for one release if any external script references it, but <code>rg</code> shows none — drop the alias.)</p>
+<p>The audit log path in <code>ai-native-workflow:246</code> (<code>AUDIT_LOG=".context/.pipeline-audit.log"</code>) becomes the new <code>AUDIT_LOG</code> constant defined at the top.</p>
+<h2 id="acceptance-criteria">Acceptance Criteria</h2>
+<ul>
+<li><p><strong>AC-1:</strong> <code>docs/context/</code> exists and is tracked. After migration it contains <code>CURRENT_SPRINT.md</code>, <code>specs/BREW-1-anw-script-dir-symlink.md</code>, <code>specs/BREW-1-todo.md</code> (the in-flight files), and <code>specs/templates/feature-spec.md</code>. Verified by sandbox install (see Step 12 smoke test). Running <code>ai-native-workflow install project</code> materializes the file in the consumer project's <code>docs/context/specs/templates/</code>.</p></li>
+<li><p><strong>AC-2:</strong> <code>.gitignore</code> no longer contains the bare line <code>.context/</code>. It DOES contain <code>.context/.pipeline-state</code>, <code>.context/.pipeline-audit.log</code>, and <code>.context/specs/*.jsonl</code>. Verified: <code>grep -E '^\.context/' .gitignore</code> shows the three explicit entries and not the bare directory.</p></li>
+<li><p><strong>AC-3:</strong> All 6 agent prompt files under <code>agents/claude-code/{architect,qa,reviewer}.md</code> and <code>agents/copilot-cli/{architect,qa,reviewer}.agent.md</code> read/write specs from <code>docs/context/specs/</code> for <code>&lt;id&gt;-spec.md</code>, <code>&lt;id&gt;-todo.md</code>, and <code>&lt;id&gt;-requirements.md</code>. Confidence jsonl path stays <code>.context/specs/&lt;id&gt;-confidence.jsonl</code>. Verified: <code>rg '\.context/specs/.*-(spec|todo|requirements)\.md' agents/</code> returns no matches; <code>rg 'docs/context/specs' agents/</code> returns matches for both flavors.</p></li>
+<li><p><strong>AC-4:</strong> <code>requirements-engineer</code> agent files (<code>agents/claude-code/requirements-engineer.md</code>, <code>agents/copilot-cli/requirements-engineer.agent.md</code>) write requirements to <code>docs/context/specs/&lt;id&gt;-requirements.md</code>.</p></li>
+<li><p><strong>AC-5:</strong> <code>troubleshooter</code> agent file (<code>agents/claude-code/troubleshooter.md</code>) writes bugfix specs and todos to <code>docs/context/specs/</code>.</p></li>
+<li><p><strong>AC-6:</strong> The <code>ai-native-workflow</code> CLI uses <code>SPEC_DIR=docs/context/specs</code> and <code>SPRINT_FILE=docs/context/CURRENT_SPRINT.md</code> everywhere it references those artifacts. The runtime constants <code>STATE_FILE</code>, <code>AUDIT_LOG</code>, and confidence-jsonl directory remain under <code>.context/</code>. Verified: <code>rg '\.context/specs/.*-(spec|todo|requirements)\.md' ai-native-workflow</code> returns no matches; <code>rg '\.context/CURRENT_SPRINT' ai-native-workflow</code> returns no matches.</p></li>
+<li><p><strong>AC-7:</strong> All embedded agent prompts inside <code>ai-native-workflow</code> heredocs (the ones used to install agent files into <code>~/.claude/agents/</code> and <code>~/.copilot/agents/</code>) reference the new paths. Verified: same <code>rg</code> checks as AC-6 cover the heredoc bodies.</p></li>
+<li><p><strong>AC-8:</strong> <code>templates/AGENTS.md</code> references <code>docs/context/CURRENT_SPRINT.md</code> for sprint updates and <code>docs/context/specs/</code> for spec lookups. The "Read <code>.context/ARCHITECTURE.md</code>" / "Read <code>.context/CONVENTIONS.md</code>" lines stay unchanged (those files don't move).</p></li>
+<li><p><strong>AC-9:</strong> The installer's <code>install_project_agents_md</code> heredoc (which generates per-project <code>AGENTS.md</code>) emits the new paths to match <code>templates/AGENTS.md</code>.</p></li>
+<li><p><strong>AC-10:</strong> The installer's <code>install_project_context</code> (line 3770) creates <code>docs/context/CURRENT_SPRINT.md</code> and <code>docs/context/specs/templates/feature-spec.md</code> instead of <code>.context/CURRENT_SPRINT.md</code> and <code>.context/specs/templates/feature-spec.md</code>. The ARCHITECTURE/CONVENTIONS/GLOSSARY seeding in <code>.context/</code> stays unchanged (per Decision D-scope).</p></li>
+<li><p><strong>AC-11:</strong> <code>install_project_gitignore</code> adds <code>.context/.pipeline-state</code>, <code>.context/.pipeline-audit.log</code>, <code>.context/specs/*.jsonl</code> to the per-project <code>.gitignore</code> instead of relying on the user already ignoring <code>.context/</code>. (In this repo's own <code>.gitignore</code>, the same change is applied directly.)</p></li>
+<li><p><strong>AC-12:</strong> <code>hooks/session-start.sh</code> reads sprint from <code>docs/context/CURRENT_SPRINT.md</code> (with fallback-free behavior — if missing, it just skips, same as today). The same heredoc embedded in <code>ai-native-workflow</code> (line ~1979) is updated.</p></li>
+<li><p><strong>AC-13:</strong> README.md and <code>docs/ARCHITECTURE.html</code> reflect the new convention. Pipeline diagrams show <code>docs/context/specs/&lt;id&gt;-requirements.md</code> etc. The per-project "what gets installed" tables name <code>docs/context/</code> as the tracked location alongside <code>.context/</code> for runtime.</p></li>
+<li><p><strong>AC-14:</strong> All 105 existing bats tests still pass. <code>cli-confidence.bats</code> and <code>confidence-gate-hook.bats</code> continue to use <code>.context/specs/&lt;id&gt;-confidence.jsonl</code> (runtime path is unchanged).</p></li>
+<li><p><strong>AC-15:</strong> A new bats test (in <code>tests/install.bats</code>) verifies that <code>install project</code> into a sandbox creates <code>docs/context/CURRENT_SPRINT.md</code> and <code>docs/context/specs/templates/feature-spec.md</code>, and that the per-project <code>.gitignore</code> written by the installer contains the three runtime ignore entries (not the bare <code>.context/</code>).</p></li>
+<li><p><strong>AC-16:</strong> A new bats test verifies that the in-repo <code>.gitignore</code> does NOT match the bare line <code>.context/</code> — instead it lists the three runtime patterns. (This guards against regression on this repo specifically.)</p></li>
+<li><p><strong>AC-17:</strong> The skill files under <code>skills/</code> that mention <code>.context/specs/</code> or <code>.context/CURRENT_SPRINT.md</code> for spec/sprint work (not <code>ARCHITECTURE.md</code>/<code>CONVENTIONS.md</code>) are updated: <code>skills/ticket/SKILL.md</code>, <code>skills/session-report/SKILL.md</code>, <code>skills/brainstorm/SKILL.md</code>, <code>skills/pipeline-{gitlab,github}-{feature,incident}/SKILL.md</code>. These ship via the installer and must match the agent prompts.</p></li>
+<li><p><strong>AC-18:</strong> The skip-tdd file marker (<code>docs(context): migrate ...</code> commit) carries <code>.tdd-skip</code> for the doc-only migration step (Step 7) per the request's constraint.</p></li>
+</ul>
+<h2 id="risks">Risks</h2>
+<ul>
+<li><p><strong>R1: Heredoc churn.</strong> <code>ai-native-workflow</code> embeds copies of the agent prompts (lines 2293, 2463, 2707, 2769, 2774, 2779, 2798, 3075-3076, 3197, 3199, 3226, 3238, 3241-3244, 3635, 3670, 3675-3677, 3713, 3740, 3743, 3746, 3762, 3890-3892). Every one needs review. <strong>Mitigation:</strong> Step 9 runs <code>rg</code> checks listed in AC-6/AC-7 as a smoke test. Manually diff before committing.</p></li>
+<li><p><strong>R2: Existing 105 tests rely on <code>.context/specs/</code>.</strong> They use that path correctly — for confidence jsonl. We must NOT change those tests. <strong>Mitigation:</strong> clear separation in Step 1: the <code>.gitignore</code> change only adds entries for <code>.pipeline-state</code>, <code>.pipeline-audit.log</code>, <code>*.jsonl</code>, NOT <code>.context/specs/*.md</code>.</p></li>
+<li><p><strong>R3: User may have local <code>.context/specs/</code> files NOT tracked elsewhere.</strong> <code>git status</code> shows BREW-1 + sprint board are the only ones today; verify before Step 7's <code>git mv</code>.</p></li>
+<li><p><strong>R4: External users with installed <code>~/.claude/agents/architect.md</code> from a prior version.</strong> They re-run <code>install global</code> to update. We surface this in commit message + README.</p></li>
+<li><p><strong>R5: Confidence-gate hook path resolution.</strong> Hook uses <code>$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl</code>. Unchanged. Verified by running existing <code>confidence-gate-hook.bats</code> post-migration.</p></li>
+</ul>
+<h2 id="out-of-scope">Out of Scope</h2>
+<ul>
+<li>Option H (CLI runtime-sync helper, <code>aw context push/pull</code>). Spike has the prototype; FINDINGS says build only when cross-machine resume becomes a real workflow. Not now.</li>
+<li>Moving <code>.context/ARCHITECTURE.md</code>, <code>.context/CONVENTIONS.md</code>, <code>.context/GLOSSARY.md</code>. They're per-project installer-seeded files, not pipeline artifacts. The agent prompts' <code>Read .context/ARCHITECTURE.md</code> lines stay intact.</li>
+<li>Adding <code>.gitattributes export-ignore</code> for <code>docs/context/</code> (FINDINGS notes this for if-the-repo-goes-public). Repo is private; defer.</li>
+<li>Creating an ADR for this decision. The spike's three markdown files (FINDINGS, EVALUATION, option-g-migration) already serve that role; an ADR adds churn without new info. If a reviewer asks for one, follow up in a separate one-step plan.</li>
+</ul>
+<h2 id="technical-design">Technical Design</h2>
+<h3 id="components-touched">Components touched</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>File(s)</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent prompts</td>
+<td><code>agents/claude-code/{architect,qa,reviewer,requirements-engineer,troubleshooter}.md</code></td>
+<td>sed <code>\.context/specs/</code> → <code>docs/context/specs/</code> for spec/todo/requirements/bugfix paths; <code>\.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>. KEEP <code>\.context/specs/&lt;id&gt;-confidence.jsonl</code>, <code>.context/ARCHITECTURE.md</code>, <code>.context/CONVENTIONS.md</code>.</td>
+</tr>
+<tr>
+<td>Agent prompts</td>
+<td><code>agents/copilot-cli/{architect,qa,reviewer,requirements-engineer}.agent.md</code></td>
+<td>Same.</td>
+</tr>
+<tr>
+<td>CLI</td>
+<td><code>ai-native-workflow</code></td>
+<td>New constants <code>SPEC_DIR</code>, <code>SPRINT_FILE</code>, <code>RUNTIME_DIR</code>. Update embedded heredocs in agent install blocks and the <code>install_project_agents_md</code> AGENTS.md heredoc. Update <code>install_project_context</code> to create <code>docs/context/</code> instead of <code>.context/CURRENT_SPRINT.md</code>. Update <code>install_project_gitignore</code> to write the three explicit ignore lines.</td>
+</tr>
+<tr>
+<td>Templates</td>
+<td><code>templates/AGENTS.md</code></td>
+<td>Replace <code>.context/CURRENT_SPRINT.md</code> and <code>.context/specs/</code> references for spec/sprint work. KEEP <code>.context/ARCHITECTURE.md</code>, <code>.context/CONVENTIONS.md</code>.</td>
+</tr>
+<tr>
+<td>Hooks</td>
+<td><code>hooks/session-start.sh</code></td>
+<td><code>\.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>.</td>
+</tr>
+<tr>
+<td>Hooks</td>
+<td><code>hooks/confidence-gate.sh</code></td>
+<td>Unchanged (confidence jsonl path is unchanged).</td>
+</tr>
+<tr>
+<td>Scripts</td>
+<td><code>scripts/confidence-cli.sh</code></td>
+<td>Unchanged.</td>
+</tr>
+<tr>
+<td>Skills</td>
+<td><code>skills/ticket/SKILL.md</code>, <code>skills/session-report/SKILL.md</code>, <code>skills/brainstorm/SKILL.md</code>, <code>skills/pipeline-*/SKILL.md</code></td>
+<td>Replace spec/sprint paths.</td>
+</tr>
+<tr>
+<td>Repo gitignore</td>
+<td><code>.gitignore</code></td>
+<td>Replace <code>.context/</code> with three explicit entries.</td>
+</tr>
+<tr>
+<td>Repo docs</td>
+<td><code>README.md</code>, <code>docs/ARCHITECTURE.html</code></td>
+<td>Update path mentions in tables and pipeline diagrams.</td>
+</tr>
+<tr>
+<td>Tests</td>
+<td><code>tests/install.bats</code></td>
+<td>Add 3 new tests (AC-15, AC-16, plus per-project gitignore content).</td>
+</tr>
+<tr>
+<td>In-flight files</td>
+<td><code>.context/CURRENT_SPRINT.md</code>, <code>.context/specs/BREW-1-*.md</code></td>
+<td><code>git mv</code> to <code>docs/context/...</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="sed-style-mapping-audit-reference-not-a-literal-command">Sed-style mapping (audit reference, not a literal command)</h3>
+<pre><code># spec/todo/requirements/bugfix paths (TRACKED)
+\.context/specs/&lt;id&gt;-&lt;n&gt;\.md                  → docs/context/specs/&lt;id&gt;-&lt;n&gt;.md
+\.context/specs/&lt;id&gt;-spec\.md                 → docs/context/specs/&lt;id&gt;-spec.md
+\.context/specs/&lt;id&gt;-todo\.md                 → docs/context/specs/&lt;id&gt;-todo.md
+\.context/specs/&lt;id&gt;-requirements\.md         → docs/context/specs/&lt;id&gt;-requirements.md
+\.context/specs/&lt;id&gt;-bugfix\.md               → docs/context/specs/&lt;id&gt;-bugfix.md
+\.context/specs/&lt;id&gt;-brainstorm\.md           → docs/context/specs/&lt;id&gt;-brainstorm.md
+\.context/specs/&lt;id&gt;-testplan\.md             → docs/context/specs/&lt;id&gt;-testplan.md
+\.context/specs/&lt;short-name&gt;\.md              → docs/context/specs/&lt;short-name&gt;.md
+\.context/specs/templates/feature-spec\.md    → docs/context/specs/templates/feature-spec.md
+\.context/specs/                               → docs/context/specs/    (when followed by spec/todo/requirements text)
+\.context/CURRENT_SPRINT\.md                  → docs/context/CURRENT_SPRINT.md
+
+# UNCHANGED (runtime / per-project docs)
+\.context/specs/&lt;id&gt;-confidence\.jsonl        → (no change — runtime)
+\.context/\.pipeline-state                     → (no change — runtime)
+\.context/\.pipeline-audit\.log                → (no change — runtime)
+\.context/ARCHITECTURE\.md                     → (no change — per-project doc)
+\.context/CONVENTIONS\.md                      → (no change — per-project doc)
+\.context/GLOSSARY\.md                         → (no change — per-project doc)</code></pre>
+<p>When a string is <code>.context/specs/</code> without a filename suffix (e.g., "Check <code>.context/specs/</code> for feature specifications"), apply judgment: if the surrounding sentence is about spec/todo/requirements documents, change to <code>docs/context/specs/</code>; if it's specifically about confidence jsonl, leave it. The Edit tool with surrounding context is the right approach, not a blunt sed.</p>
+<h3 id="migration-of-in-flight-files">Migration of in-flight files</h3>
+<pre class="bash"><code>mkdir -p docs/context/specs
+git mv .context/CURRENT_SPRINT.md docs/context/CURRENT_SPRINT.md
+git mv .context/specs/BREW-1-anw-script-dir-symlink.md docs/context/specs/
+git mv .context/specs/BREW-1-todo.md docs/context/specs/
+# .context/specs/ may now be empty; leave the directory itself — runtime files still expected here</code></pre>
+<h3 id="test-strategy">Test Strategy</h3>
+<ul>
+<li><strong>Existing tests (105):</strong> must still pass. Run <code>bats tests/</code> after each step.</li>
+<li><strong>New tests in <code>tests/install.bats</code>:</strong>
+<ol type="1">
+<li><code>install project</code> writes <code>docs/context/CURRENT_SPRINT.md</code>.</li>
+<li><code>install project</code> writes <code>docs/context/specs/templates/feature-spec.md</code>.</li>
+<li><code>install project</code> writes a project <code>.gitignore</code> containing the three runtime ignore entries.</li>
+<li><code>install project</code> does NOT write a bare <code>.context/</code> to the project <code>.gitignore</code>.</li>
+</ol></li>
+</ul>
+<p>These four assertions land as a single bats test file or as additions to <code>install.bats</code>. Step 8 in todo handles this.</p>
+<ul>
+<li><strong>Manual smoke in Step 9:</strong> run <code>rg '\.context/(specs/[^c]|CURRENT_SPRINT)' .</code> (excluding <code>.git</code>, <code>spikes/</code>, the confidence-jsonl path, and architecture/conventions/glossary mentions) and confirm zero matches outside the explicitly-allowed list.</li>
+</ul>
+<h2 id="open-questions">Open Questions</h2>
+<p>None blocking. The four decision points (D1–D4 above) are resolved in this spec.</p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SDK-1 — Todo plan (atomic TDD steps)</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">SDK-1 — Todo plan (atomic TDD steps)</h1>
+<time class="sp-article__date" datetime="2026-07-13"><span class="sp-bar"></span><span style="margin-left:.75rem">July 13, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p>Spec: <code>docs/context/specs/SDK-1-spec.html</code> ADR: <code>docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.html</code> Driver: tdd-developer. Total: 6 (Track A) + 10 (Track B, incl. integration) = 16 steps.</p>
+</blockquote>
+<p>Two tracks. The <strong>sentinel grammar is frozen in the spec (OQ-1)</strong> and is the shared contract: Track A teaches agents to <em>emit</em> it; Track B <em>renders + persists</em> it.</p>
+<p><strong>A → B dependency (explicit):</strong> Track B steps B1–B8 are built against committed fixtures that match the frozen grammar and can proceed in parallel with Track A. The <strong>integration step B9</strong> and all real-world value require Track A merged (agents actually emitting sentinels/delegations). <strong>A-1 is a hard GO/NO-GO gate</strong> for the delegation half — do not build A-2..A-5 until it passes. <strong>A-6 is independent of the A-1 gate</strong> — it adds narration + <code>verdict</code>, no <code>Task</code>/sidekick dispatch — and can land any time after A-5. <strong>No Track B step <em>hard</em>-depends on A-6:</strong> the renderer persists whatever it is fed, and B-1..B-9 run against committed fixtures. B-9's e2e fixture <em>may optionally</em> be widened to the full five-agent stream + verdicts to exercise A-6 end-to-end, but the true dependency is the <strong>real live view / full-pipeline fidelity</strong> — without A-6 the live view goes dark during <code>requirements-engineer</code> and <code>reviewer</code>, and <code>verdict</code> has no producer.</p>
+<p>Each step: one RED test runnable today (<code>bats tests/&lt;file&gt;.bats</code>), one TDD cycle (~30 min), one commit (or test+impl as two commits per local TDD style). The renderer mechanics are already de-risked in <code>spikes/sdk-1-renderer/</code> — Track B <strong>ports and reuses</strong> them, it does not redesign them.</p>
+<hr />
+<h2 id="track-a--sidekick-delegation--full-pipeline-sentinel-emission-6-steps">Track A — Sidekick delegation + full-pipeline sentinel emission (6 steps)</h2>
+<h3 id="step-a-1-sidekick-agent-skeleton--tasksidekick-dispatch-smoke-test-gate">Step A-1: Sidekick agent skeleton + <code>Task</code>→sidekick dispatch smoke test (GATE)</h3>
+<ul>
+<li><strong>Test</strong>:
+<ul>
+<li><code>tests/sidekick-agent.bats</code>: after <code>install global</code> into a sandbox <code>CLAUDE_HOME</code>, <code>agents/sidekick.md</code> is present (installer glob picks it up with zero installer changes); frontmatter asserts <code>model: haiku</code> and <code>tools:</code> is exactly <code>Read, Write, Edit, Glob, Grep</code> (no <code>Bash</code>, no <code>Task</code>).</li>
+<li><strong>Manual GO/NO-GO gate (documented in the step, not a bats unit):</strong> add <code>Task</code> to a single heavy agent temporarily and run a real <code>claude --agent=tdd-developer -p "delegate a trivial file-scaffold to the sidekick"</code> against the installed CLI; confirm the parent dispatches to <code>sidekick</code> by name and gets a result. If dispatch fails → <strong>STOP Track A</strong>, fall back to narrated-only badge (Risk R1), revisit mechanism before A-2.</li>
+</ul></li>
+<li><strong>Implement</strong>: <code>agents/claude-code/sidekick.md</code> skeleton (frontmatter only + one-line role).</li>
+<li><strong>Files</strong>: <code>agents/claude-code/sidekick.md</code> (new), <code>tests/sidekick-agent.bats</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(sidekick): assert sidekick agent contract + install wiring</code> then <code>feat(sidekick): add haiku sidekick agent skeleton</code>.</li>
+</ul>
+<h3 id="step-a-2-sidekick-prompt-body--mechanical-allowlist--refuse-if-judgment">Step A-2: Sidekick prompt body — mechanical allowlist + refuse-if-judgment</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/sidekick-agent.bats</code> (extend): the body contains a mechanical-only allowlist section, an explicit "refuse and hand back if the task requires judgment" clause, and a forbidden-actions list (no git/CI/migrations/deploys/test-assertions/design).</li>
+<li><strong>Implement</strong>: fill in <code>sidekick.md</code> body per spec OQ-6.</li>
+<li><strong>Files</strong>: <code>agents/claude-code/sidekick.md</code> (modified), <code>tests/sidekick-agent.bats</code> (modified).</li>
+<li><strong>Commit</strong>: <code>test(sidekick): assert mechanical-only prompt constraints</code> then <code>docs(sidekick): constrain sidekick to mechanical allowlist</code>.</li>
+</ul>
+<h3 id="step-a-3-add-task-tool-to-the-three-heavy-agents">Step A-3: Add <code>Task</code> tool to the three heavy agents</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/agent-delegation.bats</code> (new): <code>tdd-developer.md</code>, <code>qa.md</code>, <code>architect.md</code> each have <code>Task</code> present in their <code>tools:</code> frontmatter line; <code>reviewer.md</code> and <code>requirements-engineer.md</code> do <strong>not</strong> (delegation scoped to the 3 MVP agents).</li>
+<li><strong>Implement</strong>: one-line <code>tools:</code> edit adding <code>Task</code> to the 3 agents.</li>
+<li><strong>Files</strong>: <code>agents/claude-code/{tdd-developer,qa,architect}.md</code> (modified), <code>tests/agent-delegation.bats</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(agents): assert Task tool scoped to the 3 heavy agents</code> then <code>feat(agents): grant Task tool to tdd-developer, qa, architect</code>.</li>
+</ul>
+<h3 id="step-a-4-per-agent-delegation-allowlist--parent-review-gate-contract">Step A-4: Per-agent delegation allowlist + parent-review-gate contract</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/agent-delegation.bats</code> (extend): each of the 3 agent bodies contains its spec OQ-3 allowlist AND a parent-review-gate clause ("vet sidekick output before accepting; emit an accept milestone or a <code>deleg_reject</code>").</li>
+<li><strong>Implement</strong>: add the delegation + review-gate section to each of the 3 agent bodies.</li>
+<li><strong>Files</strong>: <code>agents/claude-code/{tdd-developer,qa,architect}.md</code> (modified), <code>tests/agent-delegation.bats</code> (modified).</li>
+<li><strong>Commit</strong>: <code>test(agents): assert per-agent allowlist + review gate</code> then <code>docs(agents): add delegation allowlist + parent-review gate</code>.</li>
+</ul>
+<h3 id="step-a-5-sentinel-emission-contract-in-the-heavy-agents-grammar-redacted-prefix">Step A-5: Sentinel-emission contract in the heavy agents (grammar, redacted prefix)</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/agent-delegation.bats</code> (extend): each of the 3 agent bodies documents the frozen sentinel grammar and instructs emitting <code>phase</code>/<code>step</code>/<code>deleg</code>/<code>deleg_reject</code>/<code>done</code> milestones; asserts the collision rule is honored — <strong>no literal <code>@@ANW|</code> line appears in the agent files</strong> (grammar is documented with the redacted prefix per OQ-1).</li>
+<li><strong>Implement</strong>: add the sentinel-emission section (redacted-prefix grammar) to each agent body.</li>
+<li><strong>Files</strong>: <code>agents/claude-code/{tdd-developer,qa,architect}.md</code> (modified), <code>tests/agent-delegation.bats</code> (modified).</li>
+<li><strong>Commit</strong>: <code>test(agents): assert sentinel-emission contract + no literal prefix</code> then <code>docs(agents): teach heavy agents to emit milestone sentinels</code>.</li>
+</ul>
+<h3 id="step-a-6-full-pipeline-narration--verdict-for-the-non-delegating-agents">Step A-6: Full-pipeline narration + verdict for the non-delegating agents</h3>
+<blockquote>
+<p>Closes the emission-scope gap qa + reviewer flagged on A-5 (spec OQ-1 emission-scope matrix + AC-14): A-3..A-5 taught <strong>only</strong> the 3 delegating agents to narrate, so the live view goes dark during <code>requirements-engineer</code> and <code>reviewer</code>, and the <code>verdict</code> event (parsed by the renderer, emitted by the demo from qa + reviewer) had <strong>no producer</strong>. Emission ≠ delegation: this step adds narration to the two non-delegating agents and the <code>verdict</code> producer to qa + reviewer, WITHOUT granting either a <code>Task</code>/sidekick (delegation scope is untouched — OQ-3 stands).</p>
+</blockquote>
+<ul>
+<li><strong>Test</strong>: <code>tests/agent-delegation.bats</code> (extend), reusing the established <code>section()</code>/<code>subsection()</code>/<code>gut_section()</code> slicers + the <code>SENTINEL_REDACTION_SENTENCE</code> anchor + the <code>! grep -F '@@ANW|'</code> collision guard verbatim (no new mechanics):
+<ul>
+<li><strong>Narration (all-agent emission):</strong> <code>reviewer.md</code> and <code>requirements-engineer.md</code> each gain a <code>## Emitting milestone sentinels</code> section documenting <code>phase</code>/<code>step</code>/<code>done</code> + the <code>run｜ok｜fail</code> statuses. Assert with a <strong>narration-only</strong> helper (e.g. <code>assert_narration_section</code>: phase/step/ done/run/ok/fail) — do NOT reuse <code>assert_sentinel_section</code>, which also requires <code>deleg</code>/<code>deleg_reject</code> and stays scoped to the 3 delegating agents. Each is section-scoped and carries the exact <code>SENTINEL_REDACTION_SENTENCE</code>.</li>
+<li><strong>Verdict producer (scoped to qa + reviewer):</strong> add an <code>assert_verdict_clause</code> helper anchoring the <code>verdict｜&lt;band&gt;｜&lt;score&gt;</code> grammar <strong>field-order-anchored</strong> (band before score) with <code>&lt;band&gt;</code> ∈ <code>GREEN｜YELLOW｜RED</code> (matches <code>render.sh:259-271</code>); assert it inside <code>qa.md</code>'s existing sentinel section (extended) and <code>reviewer.md</code>'s new section, and assert <code>architect.md</code> + <code>tdd-developer.md</code> do <strong>NOT</strong> document <code>verdict</code> (verdict scope = the 2 producing agents, mirroring the existing 3-vs-2 scoping tests).</li>
+<li><strong>Reversed invariant (deliberate, called out):</strong> the two existing tests <em>"reviewer body: no Emitting milestone sentinels section"</em> and <em>"requirements-engineer body: no Emitting milestone sentinels section"</em> are <strong>replaced</strong> by the positive narration assertions above — this REVERSES the A-5 invariant on purpose. The <em>"reviewer/requirements-engineer body: no Delegating to the sidekick section"</em> and the no-<code>Task</code>-tool tests are <strong>kept unchanged</strong> (delegation scope is untouched; narration ≠ delegation).</li>
+<li><strong>Collision guard extended:</strong> add the body-wide <code>! echo "$bd" | grep -qF '@@ANW|'</code> no-literal- prefix test for <code>reviewer.md</code> + <code>requirements-engineer.md</code> (both now document the grammar).</li>
+<li><strong>Mutation guards (reuse the A-5 patterns):</strong> a <code>gut_section</code> guard for each new narration section (heading kept, content removed → assertion fails) and an <code>invert_sentinel_mutant</code> polarity guard for each new/extended redaction clause (reviewer, requirements-engineer, and qa's verdict addition) — same section-scoped, mutation-resistant, field-order-anchored style as A-4/A-5.</li>
+</ul></li>
+<li><strong>Implement</strong>: add a <strong>narration-only</strong> <code>## Emitting milestone sentinels</code> section (redacted-prefix grammar; <code>phase</code>/<code>step</code>/<code>done</code> only; no Delegating section) to <code>reviewer.md</code> and <code>requirements-engineer.md</code>; add the <code>verdict｜&lt;band&gt;｜&lt;score&gt;</code> event (band ∈ GREEN｜YELLOW｜RED) to <code>qa.md</code>'s existing sentinel section and to <code>reviewer.md</code>'s new section. <strong>No <code>tools:</code> / <code>Task</code> changes</strong> — narration adds no delegation, so A-6 does not depend on the A-1 dispatch gate.</li>
+<li><strong>Files</strong>: <code>agents/claude-code/{reviewer,requirements-engineer,qa}.md</code> (modified), <code>tests/agent-delegation.bats</code> (modified).
+<blockquote>
+<p>Coordination: a concurrent A-5 F2/F3 loop is hardening <code>qa.md</code>'s sentinel section + <code>tests/agent-delegation.bats</code>. A-6 lands <strong>after</strong> A-5 is merged; rebase onto the final A-5 helpers rather than assuming the names above.</p>
+</blockquote></li>
+<li><strong>Commit</strong>: <code>test(agents): assert full-pipeline narration + verdict producer (reverses A-5 invariant)</code> then <code>docs(agents): narrate phase/step/done for all agents + emit verdict from qa &amp; reviewer</code>.</li>
+</ul>
+<hr />
+<h2 id="track-b--live-milestone-visualization">Track B — Live milestone visualization</h2>
+<h3 id="step-b-1-port-the-spike-renderer-to-librender-streamsh--golden-regression">Step B-1: Port the spike renderer to <code>lib/render-stream.sh</code> + golden regression</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/render-stream.bats</code> (new): pipe a committed fixture sentinel stream into <code>bash lib/render-stream.sh --plain</code> and assert output is <strong>byte-identical</strong> to a committed golden file; include the spike's crux cases — embedded <code>|</code> in a two-field <code>step|ok</code> free-text, and an embedded <code>|</code> in a single-field <code>done</code> (must render intact, per the spike bug fix).</li>
+<li><strong>Implement</strong>: port <code>spikes/sdk-1-renderer/render.sh</code> to <code>lib/render-stream.sh</code>, <code>source</code>-ing <code>lib/common.sh</code> for colors/frames instead of duplicating. No mechanic changes.</li>
+<li><strong>Files</strong>: <code>lib/render-stream.sh</code> (new), <code>tests/render-stream.bats</code> (new), <code>tests/fixtures/sdk-1/basic.sentinels</code> (new), <code>tests/fixtures/sdk-1/basic.golden</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(render): golden regression for ported renderer</code> then <code>feat(render): port de-risked spike renderer to lib/render-stream.sh</code>.</li>
+</ul>
+<h3 id="step-b-2-renderer-arity-validation-drop-malformed-sentinels">Step B-2: Renderer arity validation (drop malformed sentinels)</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/render-stream.bats</code> (extend): <code>@@ANW·|step|run</code> with no text is <strong>not</strong> rendered as <code>⏺ run</code>; an unknown event type <code>@@ANW·|bogus|x</code> is dropped; neither crashes the renderer. (Use the redacted prefix in prose; real fixtures use the literal prefix.)</li>
+<li><strong>Implement</strong>: add per-event arity guards to <code>lib/render-stream.sh</code> (OQ-1 hardening).</li>
+<li><strong>Files</strong>: <code>lib/render-stream.sh</code> (modified), <code>tests/render-stream.bats</code> (modified), <code>tests/fixtures/sdk-1/malformed.sentinels</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(render): malformed sentinels are dropped, not mis-rendered</code> then <code>feat(render): validate sentinel arity, drop malformed lines</code>.</li>
+</ul>
+<h3 id="step-b-3-milestones-jsonl-writer-libmilestonesshappend_milestone">Step B-3: Milestones JSONL writer <code>lib/milestones.sh::append_milestone</code></h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/milestones.bats</code> (new): <code>append_milestone</code> with the OQ-2 fields writes one <code>jq -e .</code>-valid single-line object to <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code>; asserts each field value; two calls → two lines (append-only); text with an embedded <code>|</code> and quotes is preserved.</li>
+<li><strong>Implement</strong>: <code>lib/milestones.sh</code> with <code>append_milestone()</code> (new orchestrator-side writer; reuse only confidence.jsonl's field/format conventions).</li>
+<li><strong>Files</strong>: <code>lib/milestones.sh</code> (new), <code>tests/milestones.bats</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(milestones): append_milestone writes valid JSONL</code> then <code>feat(milestones): add orchestrator-side milestones JSONL writer</code>.</li>
+</ul>
+<h3 id="step-b-4-renderer-persists-milestones-orchestrator-injected-fields">Step B-4: Renderer persists milestones (orchestrator-injected fields)</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/render-stream.bats</code> (extend): run the renderer with <code>AW_SPEC_ID=SDK-1 AW_PIPELINE_STEP=4.2 AW_AGENT=tdd-developer AW_TIER=sonnet</code> over a fixture that includes a <code>deleg</code>; assert milestones.jsonl gains lines with those injected fields correct, the delegation line has <code>event=deleg</code> + <code>delegated_to=haiku</code> + <code>parent_text</code> set to the active milestone (canonical event token per the OQ-2 vocab reconciliation — was <code>delegation</code>).</li>
+<li><strong>Implement</strong>: wire <code>lib/render-stream.sh</code> to call <code>append_milestone</code> for each finalized event, reading injected context from env; <code>source lib/milestones.sh</code>.</li>
+<li><strong>Files</strong>: <code>lib/render-stream.sh</code> (modified), <code>tests/render-stream.bats</code> (modified), <code>tests/fixtures/sdk-1/delegation.sentinels</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(render): renderer persists injected milestone fields</code> then <code>feat(render): append milestones as sentinels are finalized</code>.</li>
+</ul>
+<h3 id="step-b-5-agent_tier-lookup">Step B-5: <code>agent_tier()</code> lookup</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/pipeline-core-stream.bats</code> (new): <code>agent_tier architect</code>→<code>opus</code>, <code>agent_tier qa</code>→<code>opus</code>, <code>agent_tier tdd-developer</code>→<code>sonnet</code>, <code>agent_tier sidekick</code>→<code>haiku</code>, unknown→default.</li>
+<li><strong>Implement</strong>: <code>agent_tier()</code> in <code>lib/pipeline-core.sh</code>.</li>
+<li><strong>Files</strong>: <code>lib/pipeline-core.sh</code> (modified), <code>tests/pipeline-core-stream.bats</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(pipeline): agent_tier maps agents to tiers</code> then <code>feat(pipeline): add agent_tier lookup</code>.</li>
+</ul>
+<h3 id="step-b-6-extract-run_agent_streamed--errexitpipestatus-safe-pipe-behavior-preserving">Step B-6: Extract <code>run_agent_streamed</code> — errexit/PIPESTATUS-safe pipe (behavior-preserving)</h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/pipeline-core-stream.bats</code> (extend) using a fake <code>claude</code> shim on <code>PATH</code> (passthrough = <code>cat</code>, spinner still on): (a) agent stdout is shown; (b) a non-zero shim exit is propagated via <code>${PIPESTATUS[0]}</code>, logs <code>AGENT_ERROR</code>, returns non-zero; (c) a zero exit returns 0 and logs <code>AGENT_OK</code>. Behavior must match today's semantics under <code>set -euo pipefail</code>.</li>
+<li><strong>Implement</strong>: extract <code>run_agent_streamed</code> helper; convert <code>run_claude_agent</code> to <code>claude … 2&gt;&amp;1 | cat</code> capturing <code>${PIPESTATUS[0]}</code>; keep the existing spinner + audit paths for now.</li>
+<li><strong>Files</strong>: <code>lib/pipeline-core.sh</code> (modified), <code>tests/pipeline-core-stream.bats</code> (modified), <code>tests/fixtures/sdk-1/fake-claude.sh</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(pipeline): pipe preserves exit semantics via PIPESTATUS</code> then <code>refactor(pipeline): stream run_claude_agent through an errexit-safe pipe</code>.</li>
+</ul>
+<h3 id="step-b-7-attach-renderer--milestones-remove-generic-spinner-capture-debug-log">Step B-7: Attach renderer + milestones; remove generic spinner; capture debug log</h3>
+<blockquote>
+<p>Closes B-6/qa-F1: streaming (B-6) left <code>LAST_AGENT_OUTPUT</code> empty, which silently regressed <code>--allowed-questions</code>/<code>handle_agent_questions</code> to dead code on <code>pipeline_github_feature</code> after <code>requirements-engineer</code>/<code>architect</code> (see the <code>ponytail:</code> comment at <code>lib/pipeline-core.sh:301</code>). This step's <code>tee</code> closes both gaps with one capture point, not just the debug-log half.</p>
+</blockquote>
+<ul>
+<li><strong>Test</strong>: <code>tests/pipeline-core-stream.bats</code> (extend) with a fake <code>claude</code> emitting sentinels: rendered milestones appear live; <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code> is populated with injected <code>spec_id</code>/<code>pipeline_step</code>/<code>agent</code>/<code>tier</code>; non-sentinel lines are suppressed from the live view but present in the debug log (AC-8); assert <strong>no</strong> <code>spinner_start</code>/<code>spinner_stop</code> on the streamed path and no leftover feeder/ticker/spinner processes after the run (incl. a shim that dies mid-stream). Also: a fake <code>claude</code> emitting a <code>QUESTION: ...</code> line through the streamed path with <code>ALLOWED_QUESTIONS&gt;0</code> set → assert <code>handle_agent_questions</code> detects it and re-prompts (reuse the stub-override pattern from <code>tests/cli-confidence.bats:249</code> to isolate the assertion from the rest of <code>run_claude_agent</code>'s dependencies).</li>
+<li><strong>Implement</strong>: swap the <code>cat</code> passthrough for <code>bash "$RENDER"</code> with injected env; remove <code>spinner_start</code>/<code>spinner_stop</code> from the streamed path (replace-not-coexist); <code>tee</code> the raw stream to a debug log (closes the audit gap) <strong>and</strong> restore <code>LAST_AGENT_OUTPUT</code> from that same tee'd capture so <code>--allowed-questions</code>/<code>handle_agent_questions</code> works again on the streamed path.</li>
+<li><strong>Files</strong>: <code>lib/pipeline-core.sh</code> (modified), <code>tests/pipeline-core-stream.bats</code> (modified).</li>
+<li><strong>Commit</strong>: <code>test(pipeline): live render + milestones + suppressed non-sentinel output</code> then <code>feat(pipeline): live sentinel render replaces generic spinner</code>.</li>
+</ul>
+<h3 id="step-b-8-costquality-summary-scriptsmilestones-summarysh">Step B-8: Cost/quality summary <code>scripts/milestones-summary.sh</code></h3>
+<ul>
+<li><strong>Test</strong>: <code>tests/milestones-summary.bats</code> (new): given a fixture milestones.jsonl with N delegations (some rejected), the script reports total delegations, accept vs reject counts, and per-agent delegation counts.</li>
+<li><strong>Implement</strong>: <code>scripts/milestones-summary.sh</code> (jq over the JSONL).</li>
+<li><strong>Files</strong>: <code>scripts/milestones-summary.sh</code> (new), <code>tests/milestones-summary.bats</code> (new), <code>tests/fixtures/sdk-1/summary.jsonl</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(summary): milestones-summary reports delegation metrics</code> then <code>feat(summary): add milestones cost/quality summary script</code>.</li>
+</ul>
+<h3 id="step-b-9-integration-end-to-end-streamed-step-on-pipeline_github_feature">Step B-9 (Integration): end-to-end streamed step on <code>pipeline_github_feature</code></h3>
+<blockquote>
+<p>Closes B-7/reviewer-F0: <code>AW_SPEC_ID</code>/<code>AW_PIPELINE_STEP</code> were never exported anywhere in <code>lib/pipelines.sh</code>, so <code>append_milestone</code>'s spec_id guard silently drops every write in production — <code>milestones.jsonl</code> only ever existed under hand-injected test env. This step wires the real env exports AND proves it with an integration test that drives the real pipeline path.</p>
+</blockquote>
+<ul>
+<li><strong>Test</strong>: <code>tests/sdk-1-integration.bats</code> (new): with a fake <code>claude</code> on <code>PATH</code> emitting a realistic one-step stream (<code>phase → step run/ok → deleg haiku → step ok "reviewed &amp; accepted" → done</code>), drive the streamed <code>run_claude_agent</code> path for one pipeline step and assert: (1) live render output present; (2) a complete <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code> including the delegation <strong>and</strong> its accept milestone; (3) agent exit semantics preserved (success + a forced failure case); (4) <code>scripts/milestones-summary.sh</code> reports 1 delegation, 1 accept, 0 reject. <strong>Must drive the real <code>lib/pipelines.sh</code> path</strong> (e.g. call <code>pipeline_github_feature</code> itself, or the smallest real function/step within it that reaches <code>run_claude_agent</code>) — <strong>not</strong> hand-injected <code>AW_SPEC_ID</code>/<code>AW_PIPELINE_STEP</code>/<code>AW_AGENT</code>/<code>AW_TIER</code> env set directly by the test, which is how B-4/B-7's renderer-level tests isolate the renderer and would NOT catch this gap. Assert <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code> is non-empty after a real step run through that path.</li>
+<li><strong>Implement</strong>: only glue/wiring needed to make the end-to-end path run (no new behavior), plus: (1) export <code>AW_SPEC_ID="$id"</code> once near the top of each pipeline function in <code>lib/pipelines.sh</code> (e.g. <code>pipeline_github_feature</code>) so it's set for every <code>run_claude_agent</code> call within it; (2) set <code>AW_PIPELINE_STEP="&lt;step&gt;"</code> at each individual <code>run_claude_agent</code> call site (e.g. <code>AW_PIPELINE_STEP="4.$i" run_claude_agent "tdd-developer" "Step $i of $todo_file"</code>) so the milestone line records which step actually produced it. Without both, <code>append_milestone</code>'s spec_id guard keeps dropping every write in production, per the reviewer-F0 gap above.</li>
+<li><strong>Files</strong>: <code>lib/pipelines.sh</code> (modified), <code>tests/sdk-1-integration.bats</code> (new), <code>tests/fixtures/sdk-1/e2e.sentinels</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(sdk-1): end-to-end streamed step with delegation</code> then <code>feat(sdk-1): wire live streaming + delegation into github-feature</code>.</li>
+</ul>
+<h3 id="step-b-10-fix-issue_url-capture-broken-by-b-7-stdout-suppression">Step B-10: Fix issue_url capture broken by B-7 stdout suppression</h3>
+<blockquote>
+<p>Closes reviewer/qa's B-9 🔴 ship-blocker: <code>pipeline_github_feature</code>'s Step 2 (<code>lib/pipelines.sh</code>) captured the created GitHub issue URL via <code>run_claude_agent ... 2&gt;&amp;1 | tail -1</code> on <code>run_claude_agent</code>'s stdout. Since B-7, that stdout is the renderer's rendered glyph stream plus <code>run_claude_agent</code>'s own <code>success</code>/<code>header</code> lines (<code>lib/common.sh</code>) — not the agent's raw text — so <code>tail -1</code> silently captured <code>✓ requirements-engineer completed</code> instead of the URL. <code>issue_num</code> (<code>grep -oE '[0-9]+$'</code>) came back empty and Step 7 silently dropped <code>Closes #N</code> from the PR body. Affects <code>pipeline_github_feature</code> (the MVP) only; <code>pipeline_github_issue</code> has no such capture.</p>
+</blockquote>
+<ul>
+<li><strong>Test</strong>: <code>tests/pipelines-capture.bats</code> (new): source <code>lib/pipelines.sh</code> and unit-test a new <code>extract_issue_url()</code> helper directly (cheaper than extending the e2e past its Step-1 pause) — set <code>LAST_AGENT_OUTPUT</code> to realistic mixed fixtures (<code>@@ANW|phase|…</code>/<code>@@ANW|step|…</code>/<code>@@ANW|done|…</code> sentinel lines interleaved with the plain <code>https://github.com/o/r/issues/42</code> line, URL not last) and assert extraction yields the URL and the downstream <code>issue_num</code> derives <code>42</code>. Covers: URL not on the last line; a sentinel <code>done</code> line as the literal last line (the exact case that fools a naive <code>tail -1</code>); multiple URL-shaped lines (last one wins); no URL present (empty, not a sentinel line). RED before <code>extract_issue_url</code> exists (<code>command not found</code> on every case); GREEN after.</li>
+<li><strong>Implement</strong>: extract a small <code>extract_issue_url()</code> helper in <code>lib/pipelines.sh</code> that greps the URL pattern out of <code>LAST_AGENT_OUTPUT</code> (restored from the tee'd debug log since B-7 — <code>lib/pipeline-core.sh:342</code>) rather than trusting line position; run <code>run_claude_agent</code> as a plain statement (not <code>$(... | tail -1)</code>) so <code>LAST_AGENT_OUTPUT</code> populates as usual, then call <code>extract_issue_url</code> to set <code>issue_url</code>. <code>issue_num</code> derivation is unchanged. No changes to <code>run_claude_agent</code>/render/milestones internals.</li>
+<li><strong>Files</strong>: <code>lib/pipelines.sh</code> (modified), <code>tests/pipelines-capture.bats</code> (new).</li>
+<li><strong>Commit</strong>: <code>test(pipeline): issue_url survives B-7 stdout suppression</code> then <code>fix(pipeline): capture issue_url from LAST_AGENT_OUTPUT not the rendered stream</code>.</li>
+</ul>
+<hr />
+<h2 id="status-checklist">Status checklist</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />A-1 Sidekick skeleton + Task dispatch smoke GATE — <strong>GO</strong> (smoke test passed: smoke-parent→Task→sidekick created hello.txt; verified 2026-07-01)</label></li>
+<li><label><input type="checkbox" checked="" />A-2 Sidekick mechanical-only prompt body</label></li>
+<li><label><input type="checkbox" checked="" />A-3 Task tool on the 3 heavy agents</label></li>
+<li><label><input type="checkbox" checked="" />A-4 Per-agent allowlist + parent-review gate</label></li>
+<li><label><input type="checkbox" checked="" />A-5 Sentinel-emission contract (redacted prefix) — hardened (field-order + prefix adjacency/case guards)</label></li>
+<li><label><input type="checkbox" checked="" />A-6 Full-pipeline narration (all agents) + verdict producer (qa &amp; reviewer) — no-deleg guard added</label></li>
+<li><label><input type="checkbox" checked="" />B-1 Port renderer → lib/render-stream.sh + golden</label></li>
+<li><label><input type="checkbox" checked="" />B-2 Renderer arity validation</label></li>
+<li><label><input type="checkbox" checked="" />B-3 append_milestone JSONL writer</label></li>
+<li><label><input type="checkbox" checked="" />B-4 Renderer persists injected milestone fields</label></li>
+<li><label><input type="checkbox" checked="" />B-5 agent_tier lookup</label></li>
+<li><label><input type="checkbox" checked="" />B-6 run_agent_streamed errexit/PIPESTATUS pipe (behavior-preserving) — restores AGENT_OK/AGENT_ERROR reachability (was dead code on bare failure)</label></li>
+<li><label><input type="checkbox" checked="" />B-7 Attach renderer + milestones, remove spinner, debug log — restores LAST_AGENT_OUTPUT; surfaced a pre-existing (out-of-scope) bug in handle_agent_questions' interactive answer loop</label></li>
+<li><label><input type="checkbox" checked="" />B-8 milestones-summary cost/quality script</label></li>
+<li><label><input type="checkbox" checked="" />B-9 Integration: end-to-end streamed step with delegation — drives the real <code>ai-native-workflow run github-feature</code> entrypoint; RED before Part-1 wiring, GREEN after</label></li>
+<li><label><input type="checkbox" checked="" />B-10 Fix issue_url capture broken by B-7 stdout suppression — closes reviewer/qa's B-9 🔴 ship-blocker; extract_issue_url() reads LAST_AGENT_OUTPUT, not the rendered stream</label></li>
+</ul>
+</content>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

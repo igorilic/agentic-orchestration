@@ -18,6 +18,6 @@ REPO_ROOT="$BATS_TEST_DIRNAME/.."
 }
 
 @test "model-strategy: PAPER + README describe agents by tier, not version" {
-  grep -q -- '-tier' "$REPO_ROOT/PAPER.md"
+  grep -q -- '-tier' "$REPO_ROOT/PAPER.html"
   grep -q -- '-tier' "$REPO_ROOT/README.md"
 }

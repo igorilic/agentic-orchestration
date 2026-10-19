@@ -163,8 +163,8 @@ teardown() {
   rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../README.md"
 }
 
-@test "docs: ARCHITECTURE.md mentions docs/context/" {
-  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+@test "docs: ARCHITECTURE.html mentions docs/context/" {
+  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.html"
 }
 
 @test "docs: README.md does not reference old .anw/specs/ tracked artifact paths" {
@@ -174,10 +174,11 @@ teardown() {
     "$BATS_TEST_DIRNAME/../README.md"
 }
 
-@test "docs: ARCHITECTURE.md does not reference old .anw/specs/ tracked artifact paths" {
+@test "docs: ARCHITECTURE.html does not reference old .anw/specs/ tracked artifact paths" {
   # Pipeline diagrams used to show → .anw/specs/<id>-requirements.md; those must now show docs/context/
-  ! rg -q '\.anw/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
-    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+  # (HTML writes <id> as &lt;id&gt;)
+  ! rg -q '\.anw/specs/(<|&lt;)id(>|&gt;)-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.html"
 }
 
 # ---------------------------------------------------------------------------

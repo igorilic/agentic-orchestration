@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>COP-2: Install Copilot CLI hooks per-project (TDD + confidence gates)</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">COP-2: Install Copilot CLI hooks per-project (TDD + confidence gates)</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p>Source: <code>docs/context/specs/COP-2-requirements.html</code> (requirements-engineer) Defaults accepted by user on 2026-05-02 (<code>go</code>). ADR: <code>docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.html</code></p>
+</blockquote>
+<h2 id="1-problem-statement">1. Problem statement</h2>
+<p>Engineers using GitHub Copilot CLI in a repo today have <strong>no enforcement</strong> of the TDD gate or the confidence gate. The Claude side has these gates (global <code>~/.claude/hooks/*.sh</code> registered in <code>settings.json</code>), but Copilot CLI hooks are <strong>repo-scoped only</strong> — they live under <code>.github/hooks/</code> and have a different payload contract (JSON on stdin, stdout <code>permissionDecision</code> instead of exit code).</p>
+<p><code>ai-native-workflow install project</code> already creates Copilot <strong>instructions</strong> (<code>.github/copilot-instructions.md</code>, <code>.github/instructions/*</code>), but does NOT create hook artifacts. We need to extend <code>install_project</code> so that, for any repo where the user runs the per-project installer, an equivalent enforcement path exists for Copilot CLI driving the same workflow.</p>
+<h2 id="2-context">2. Context</h2>
+<h3 id="21-hook-contract-differences-claude-vs-copilot">2.1 Hook contract differences (Claude vs Copilot)</h3>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>Claude (global)</th>
+<th>Copilot CLI (per-repo)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Config location</td>
+<td><code>~/.claude/settings.json</code></td>
+<td><code>.github/hooks/copilot-cli-policy.json</code></td>
+</tr>
+<tr>
+<td>Script location</td>
+<td><code>~/.claude/hooks/*.sh</code></td>
+<td><code>.github/hooks/&lt;script&gt;.sh</code> + <code>.github/hooks/scripts/&lt;helpers&gt;</code></td>
+</tr>
+<tr>
+<td>Payload</td>
+<td>Env vars (<code>CLAUDE_TOOL_INPUT</code>, etc.)</td>
+<td>JSON on stdin; <code>toolArgs</code> is a JSON-stringified blob (parse twice)</td>
+</tr>
+<tr>
+<td>Filter</td>
+<td><code>matcher: "Bash"</code> in JSON</td>
+<td>None — script-side filter on <code>toolName == "bash"</code></td>
+</tr>
+<tr>
+<td>Block</td>
+<td><code>exit 2</code></td>
+<td>Print <code>{"permissionDecision":"deny","permissionDecisionReason":"..."}</code></td>
+</tr>
+<tr>
+<td>Crash → default</td>
+<td>Block (exit non-zero treated as block)</td>
+<td><strong>Allow</strong> (no JSON printed → action proceeds)</td>
+</tr>
+<tr>
+<td>Timeout</td>
+<td>We set 10–15s</td>
+<td>Default 30s; we set 10–15s explicitly</td>
+</tr>
+</tbody>
+</table>
+<p>The crash-default difference is the load-bearing safety concern. ADR-001 records the dispatcher + trap pattern that fixes it.</p>
+<h3 id="22-source-of-truth-files">2.2 Source-of-truth files</h3>
+<ul>
+<li>Hook to port: <code>hooks/tdd-gate.sh</code>, <code>hooks/confidence-gate.sh</code></li>
+<li>Scorer to vendor per-project: <code>scripts/confidence.sh</code></li>
+<li>Integration point: <code>ai-native-workflow</code> lines 3465–3518 (<code>install_project</code>) and lines 3882–4022 (<code>install_project_copilot</code>).</li>
+<li>Test fixtures pattern: <code>tests/install.bats</code>, <code>tests/confidence-gate-hook.bats</code>, <code>tests/lib/confidence-helpers.bash</code>.</li>
+</ul>
+<h2 id="3-proposed-solution">3. Proposed solution</h2>
+<h3 id="31-architecture-decisions-recorded-in-adr-001">3.1 Architecture decisions (recorded in ADR-001)</h3>
+<p>The user accepted defaults on the open questions:</p>
+<ul>
+<li><strong>OQ-1 → single dispatcher.</strong> One script handles both gates. Rationale: Copilot's short-circuit behavior is undocumented; folding both gates into one script gives deterministic ordering (TDD gate first, then confidence gate) and one trap/filter site to maintain.</li>
+<li><strong>OQ-2 → single canonical policy file.</strong> No multi-file merging.</li>
+<li><strong>OQ-3 → cwd resolution: payload first, fallback <code>git rev-parse --show-toplevel</code>.</strong> If the payload <code>cwd</code> doesn't sit inside a repo, fall back to walking up.</li>
+<li><strong>OQ-4 → vendor <code>confidence.sh</code> per-project.</strong> Copy from <code>$_ANW_SCRIPT_DIR/scripts/confidence.sh</code> to <code>.github/hooks/scripts/confidence.sh</code> at install time. Self-contained; works for Copilot-only users with no Claude install.</li>
+<li><strong>OQ-5 → write deny reason to BOTH stdout JSON and stderr.</strong> Belt-and- suspenders for surfacing.</li>
+<li><strong>OQ-6 → ship a <code>.github/hooks/README.md</code> stub</strong> so reviewers don't delete what looks like config noise.</li>
+</ul>
+<h3 id="32-file-layout-produced-by-the-installer">3.2 File layout produced by the installer</h3>
+<pre><code>&lt;project&gt;/
+└── .github/
+    └── hooks/
+        ├── README.md                       # stub explaining the hooks
+        ├── copilot-cli-policy.json         # registers the dispatcher
+        ├── copilot-cli-dispatcher.sh       # single dispatcher script
+        └── scripts/
+            └── confidence.sh               # vendored copy of scorer</code></pre>
+<h3 id="33-dispatcher-script--control-flow">3.3 Dispatcher script — control flow</h3>
+<pre><code>read stdin payload (once)
+trap ERR -&gt; emit_deny &quot;Copilot hook crashed unexpectedly&quot;
+parse toolName
+if toolName != &quot;bash&quot;: print allow JSON, exit 0
+parse toolArgs.command (double jq)
+resolve PROJECT_DIR:
+  - try payload .cwd
+  - if not a git repo: cd into .cwd (or pwd) and `git rev-parse --show-toplevel`
+  - if still not resolvable: emit_deny &quot;cannot resolve project dir&quot;
+
+# Gate 1: TDD
+if command matches &#39;git\s+commit&#39; and not &#39;--amend&#39;:
+  if .tdd-skip exists: allow
+  elif staged-files all-spike: allow
+  elif staged-files include test: allow
+  else: emit_deny &quot;TDD GATE: ...&quot;
+
+# Gate 2: confidence
+if command matches &#39;(gh\s+pr\s+create|glab\s+mr\s+create)&#39;:
+  read .git/aw/active-spec
+  invoke vendored confidence.sh on log
+  on RED + structural-only + .tdd-skip: log auto-bypass, allow
+  on RED + behavioral + .tdd-skip: emit_deny &quot;use /override-confidence&quot;
+  on RED + valid override marker: consume marker, log, allow
+  on RED + malformed override: rm marker, emit_deny
+  on RED + nothing: emit_deny &quot;RED ...&quot;
+  on YELLOW: print warning to stderr, allow
+  on GREEN: allow
+
+# fall-through (any other bash command)
+print allow JSON, exit 0</code></pre>
+<h3 id="34-emit_deny-helper-the-safety-pattern">3.4 <code>emit_deny</code> helper (the safety pattern)</h3>
+<pre class="bash"><code>emit_deny() {
+  local reason=&quot;${1:-hook crashed; failing closed}&quot;
+  jq -nc --arg r &quot;$reason&quot; &#39;{permissionDecision:&quot;deny&quot;, permissionDecisionReason:$r}&#39;
+  # Note: no stderr output. bats merges stderr into stdout, and emoji banners
+  # in stderr break jq -e parsing of $output in tests. The JSON reason is
+  # sufficient for Copilot UI surfacing. See ADR-001 §Decision point 5.
+  exit 0   # exit 0; Copilot reads decision from stdout JSON
+}
+trap &#39;emit_deny &quot;Copilot hook crashed unexpectedly&quot;&#39; ERR</code></pre>
+<h3 id="35-copilot-cli-policyjson-schema">3.5 <code>copilot-cli-policy.json</code> schema</h3>
+<pre class="json"><code>{
+  &quot;version&quot;: 1,
+  &quot;hooks&quot;: {
+    &quot;preToolUse&quot;: [
+      {
+        &quot;type&quot;: &quot;command&quot;,
+        &quot;bash&quot;: &quot;./copilot-cli-dispatcher.sh&quot;,
+        &quot;cwd&quot;: &quot;.github/hooks&quot;,
+        &quot;timeoutSec&quot;: 15,
+        &quot;comment&quot;: &quot;ai-native-workflow TDD + confidence gate dispatcher&quot;
+      }
+    ]
+  }
+}</code></pre>
+<h3 id="36-idempotency-strategy">3.6 Idempotency strategy</h3>
+<ul>
+<li><strong>Dispatcher script + vendored scorer + README</strong>: overwrite on every install (these are tool-owned). If user has hand-edited the dispatcher, back up to <code>&lt;file&gt;.bak.&lt;ts&gt;</code> then overwrite (mirrors <code>backup_if_exists</code> pattern at line 64 of <code>ai-native-workflow</code>).</li>
+<li><strong><code>copilot-cli-policy.json</code></strong>: <code>jq</code> merge. If the file exists with user-added <code>preToolUse</code> entries, merge our dispatcher entry in, deduping by <code>bash</code> field path. Mirrors the <code>install_global_settings</code> jq-merge at line 1818–1828.</li>
+</ul>
+<h2 id="4-acceptance-criteria">4. Acceptance criteria</h2>
+<p>All criteria are testable. Tests live in <code>tests/install-project-copilot-hooks.bats</code> (installer) and <code>tests/copilot-cli-dispatcher.bats</code> (script behavior).</p>
+<table>
+<thead>
+<tr>
+<th>ID</th>
+<th>Criterion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AC-1</td>
+<td>After <code>install project</code>, <code>.github/hooks/copilot-cli-policy.json</code> exists, parses as JSON, and has exactly one <code>preToolUse</code> entry with <code>bash</code> = <code>./copilot-cli-dispatcher.sh</code>.</td>
+</tr>
+<tr>
+<td>AC-2</td>
+<td>After <code>install project</code>, <code>.github/hooks/copilot-cli-dispatcher.sh</code> exists, has mode <code>0755</code>, contains the <code>trap 'emit_deny ...' ERR</code> line and the <code>toolName == "bash"</code> filter.</td>
+</tr>
+<tr>
+<td>AC-3</td>
+<td>After <code>install project</code>, <code>.github/hooks/scripts/confidence.sh</code> exists with mode <code>0755</code> and is byte-identical to <code>&lt;repo&gt;/scripts/confidence.sh</code>.</td>
+</tr>
+<tr>
+<td>AC-4</td>
+<td>TDD gate path: dispatcher run with payload <code>{toolName:"bash", toolArgs:"{\"command\":\"git commit -m x\"}", cwd:&lt;repo&gt;}</code>, no test files staged → stdout JSON has <code>permissionDecision: "deny"</code>, reason contains <code>TDD GATE</code>.</td>
+</tr>
+<tr>
+<td>AC-5</td>
+<td>TDD gate path: same setup, <code>.tdd-skip</code> present → stdout JSON has no <code>deny</code> (allow); stderr mentions bypass.</td>
+</tr>
+<tr>
+<td>AC-6</td>
+<td>TDD gate path: command is <code>git commit --amend</code> → allow.</td>
+</tr>
+<tr>
+<td>AC-7</td>
+<td>TDD gate path: staged files include <code>foo_test.go</code> → allow.</td>
+</tr>
+<tr>
+<td>AC-8</td>
+<td>TDD gate path: spike-only commit (all paths under <code>spikes/</code>) → allow.</td>
+</tr>
+<tr>
+<td>AC-9</td>
+<td>Confidence gate path: payload command <code>gh pr create</code>, RED aggregate verdict, no override → deny with reason containing <code>RED</code> and gate names; verdict event appended to log.</td>
+</tr>
+<tr>
+<td>AC-10</td>
+<td>Confidence gate path: GREEN verdict → allow; verdict event appended to log.</td>
+</tr>
+<tr>
+<td>AC-11</td>
+<td>Confidence gate path: RED + override marker present with valid reason → marker file removed, override event appended, allow.</td>
+</tr>
+<tr>
+<td>AC-12</td>
+<td>Confidence gate path: RED + <code>.tdd-skip</code> + structural-only gates (<code>NO_AC</code>, <code>AC_NOT_TESTED</code>) → auto-bypass event logged, allow.</td>
+</tr>
+<tr>
+<td>AC-13</td>
+<td>Confidence gate path: RED + <code>.tdd-skip</code> + behavioral gate (<code>TEST_FAILED</code>) → deny with reason containing "use /override-confidence".</td>
+</tr>
+<tr>
+<td>AC-14</td>
+<td>Confidence gate path: command is <code>glab mr create</code> (not <code>gh pr create</code>) and verdict RED → deny (parity).</td>
+</tr>
+<tr>
+<td>AC-15</td>
+<td>Fail-closed: dispatcher invoked with malformed JSON (<code>set -u</code> triggers ERR trap) → stdout JSON has <code>permissionDecision: "deny"</code> with reason <code>Copilot hook crashed unexpectedly</code>.</td>
+</tr>
+<tr>
+<td>AC-16</td>
+<td>Filter: payload <code>toolName: "read_file"</code> → stdout JSON has <code>permissionDecision: "allow"</code>, no scorer/git invocations (assert by trace logging or by absence of <code>.context/specs/*.jsonl</code> updates).</td>
+</tr>
+<tr>
+<td>AC-17</td>
+<td><code>cwd</code> resolution: payload <code>.cwd</code> is a sub-directory of the repo → dispatcher resolves to repo root via <code>git rev-parse --show-toplevel</code>.</td>
+</tr>
+<tr>
+<td>AC-18</td>
+<td>Idempotency: re-running <code>install project</code> produces no diff in working tree on second run (<code>git status --porcelain</code> empty after first run committed).</td>
+</tr>
+<tr>
+<td>AC-19</td>
+<td>Idempotency / merge: pre-existing <code>copilot-cli-policy.json</code> with a custom <code>preToolUse</code> entry preserves the custom entry AND adds our dispatcher entry, deduped by <code>bash</code> path.</td>
+</tr>
+<tr>
+<td>AC-20</td>
+<td>Backup-on-content-mismatch: hand-edited <code>copilot-cli-dispatcher.sh</code> is backed up to <code>&lt;file&gt;.bak.&lt;ts&gt;</code> before being overwritten.</td>
+</tr>
+<tr>
+<td>AC-21</td>
+<td><code>.github/hooks/README.md</code> exists and mentions both gates.</td>
+</tr>
+<tr>
+<td>AC-22</td>
+<td>All existing 160 bats tests still pass — no regression on Claude-side install or hooks.</td>
+</tr>
+<tr>
+<td>AC-23</td>
+<td>Both deny and stderr surfaces carry the same human-readable reason text (OQ-5).</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5-technical-design">5. Technical design</h2>
+<h3 id="51-new-installer-function">5.1 New installer function</h3>
+<pre class="bash"><code># In ai-native-workflow, called from install_project() after install_project_copilot
+# and before install_project_gitignore.
+install_project_copilot_hooks() {
+  local project_dir=&quot;$1&quot;
+  local hooks_dir=&quot;$project_dir/.github/hooks&quot;
+  local scripts_dir=&quot;$hooks_dir/scripts&quot;
+
+  mkdir -p &quot;$scripts_dir&quot;
+
+  # 1. Vendor confidence.sh
+  cp &quot;$_ANW_SCRIPT_DIR/scripts/confidence.sh&quot; &quot;$scripts_dir/confidence.sh&quot;
+  chmod 0755 &quot;$scripts_dir/confidence.sh&quot;
+
+  # 2. Write dispatcher (heredoc; backup on mismatch)
+  local dispatcher=&quot;$hooks_dir/copilot-cli-dispatcher.sh&quot;
+  write_dispatcher_with_backup &quot;$dispatcher&quot;
+  chmod 0755 &quot;$dispatcher&quot;
+
+  # 3. Write/merge policy JSON
+  write_or_merge_copilot_policy &quot;$hooks_dir/copilot-cli-policy.json&quot;
+
+  # 4. Write README stub if missing
+  [ -f &quot;$hooks_dir/README.md&quot; ] || write_copilot_hooks_readme &quot;$hooks_dir/README.md&quot;
+
+  # 5. jq-not-found warning (FR-6)
+  command -v jq &gt;/dev/null 2&gt;&amp;1 || warn &quot;jq not found — Copilot hooks need jq at runtime&quot;
+}</code></pre>
+<h3 id="52-dispatcher-script-structure-high-level">5.2 Dispatcher script structure (high level)</h3>
+<p>The dispatcher lives in the installer as a heredoc (mirrors how <code>install_global_hooks</code> ships <code>tdd-gate.sh</code>). The heredoc body imports its bypass-marker logic verbatim from the Claude scripts but adapts input parsing and output emission. See section 3.3 for control flow and 3.4 for the trap.</p>
+<h3 id="53-policy-json-merge">5.3 Policy JSON merge</h3>
+<p>Reuses the same <code>jq</code> recipe <code>install_global_settings</code> uses for <code>PreToolUse[].hooks</code> deduplication, but adapted to the Copilot schema:</p>
+<pre class="bash"><code># Pseudocode
+existing=&quot;$(jq -e . copilot-cli-policy.json 2&gt;/dev/null || echo &#39;{&quot;version&quot;:1,&quot;hooks&quot;:{}}&#39;)&quot;
+merged=&quot;$(echo &quot;$existing&quot; | jq --slurpfile new &lt;(echo &quot;$ours&quot;) &#39;
+  .hooks.preToolUse = (
+    ((.hooks.preToolUse // []) + ($new[0].hooks.preToolUse))
+    | unique_by(.bash)
+  )
+  | .version = 1
+&#39;)&quot;
+echo &quot;$merged&quot; | jq -e . &gt; copilot-cli-policy.json.tmp
+mv copilot-cli-policy.json.tmp copilot-cli-policy.json</code></pre>
+<h3 id="54-test-fixtures">5.4 Test fixtures</h3>
+<p>New helper file: <code>tests/lib/copilot-payload-helpers.bash</code></p>
+<pre class="bash"><code>mk_payload() {
+  local tool_name=&quot;$1&quot;; local command=&quot;$2&quot;; local cwd=&quot;$3&quot;
+  jq -nc \
+    --arg t &quot;$tool_name&quot; --arg c &quot;$command&quot; --arg d &quot;$cwd&quot; \
+    &#39;{toolName:$t, toolArgs:({command:$c} | tojson), cwd:$d, timestamp:1714694400000}&#39;
+}</code></pre>
+<p>Plus a <code>mock_confidence_scorer</code> helper that writes a stub <code>confidence.sh</code> emitting a configured verdict JSON.</p>
+<h2 id="6-risks-from-requirements-12">6. Risks (from requirements §12)</h2>
+<ul>
+<li><strong>R-1 (HIGH)</strong> — fail-closed via stdout JSON. Mitigated by <code>trap ERR</code>.</li>
+<li><strong>R-2 (HIGH)</strong> — no <code>matcher</code> filter. Mitigated by the script's first filter line (AC-16 enforces it).</li>
+<li><strong>R-5 (MEDIUM)</strong> — <code>cwd</code> payload semantics. Mitigated by <code>git rev-parse --show-toplevel</code> fallback (AC-17 enforces it).</li>
+<li><strong>R-6 (LOW)</strong> — <code>toolArgs</code> is double-encoded. Reviewer should verify both <code>jq</code> parses are present.</li>
+<li><strong>R-8 (LOW)</strong> — short-circuit unknown. Single-dispatcher design dodges this (one entry, internal sequencing controlled by us).</li>
+</ul>
+<h2 id="7-out-of-scope">7. Out of scope</h2>
+<ul>
+<li>Global Copilot hooks (no such mechanism).</li>
+<li>PowerShell variants (Mac/Linux only per <code>CLAUDE.md</code>).</li>
+<li>Refactoring Claude-side hooks for shared logic. Port, don't refactor.</li>
+<li>Additional event hooks (<code>sessionStart</code>, <code>userPromptSubmitted</code>, etc.).</li>
+<li>CI check for the policy JSON's existence in downstream repos.</li>
+</ul>
+<h2 id="8-hand-off">8. Hand-off</h2>
+<p>After this spec is approved:</p>
+<blockquote>
+<p>Use tdd-developer on Step 1 of <code>docs/context/specs/COP-2-todo.html</code>.</p>
+</blockquote>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>
