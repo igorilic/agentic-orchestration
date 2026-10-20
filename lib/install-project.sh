@@ -19,6 +19,7 @@ install_project() {
   install_project_agents_md "$project_dir" "$stacks"
   install_project_claude_md "$project_dir"
   install_project_context "$project_dir"
+  install_project_design "$project_dir"
   install_project_gitignore "$project_dir"
   mkdir -p "$project_dir/docs/decisions"
   success "docs/decisions/ (ADR directory)"
@@ -177,52 +178,25 @@ install_project_context() {
   mkdir -p "$docs_context_dir/specs/templates"
 
   # Only create files that don't exist
-  if [ ! -f "$docs_context_dir/ARCHITECTURE.md" ]; then
-    cat > "$docs_context_dir/ARCHITECTURE.md" << 'EOF'
-# Architecture
-
-> Document your system architecture here.
-
-## Overview
+  write_doc "$project_dir" docs/context/ARCHITECTURE.html ../ Architecture '<p>Document your system architecture here.</p>
+<h2 id="overview">Overview</h2>
 <!-- High-level system description -->
-
-## Components
+<h2 id="components">Components</h2>
 <!-- List major components and their responsibilities -->
-
-## Data Flow
+<h2 id="data-flow">Data flow</h2>
 <!-- How data moves through the system -->
+<h2 id="key-decisions">Key decisions</h2>
+<!-- Link to ADRs: docs/decisions/ADR-* -->'
 
-## Key Decisions
-<!-- Link to ADRs: docs/decisions/ADR-*.md -->
-EOF
-    success "docs/context/ARCHITECTURE.md"
-  fi
+  write_doc "$project_dir" docs/context/CONVENTIONS.html ../ Conventions '<p>Stack-specific conventions for this project. See AGENTS.md for cross-tool agent rules.</p>
+<h2 id="project-specific-patterns">Project-specific patterns</h2>
+<!-- Add project-specific conventions here -->'
 
-  if [ ! -f "$docs_context_dir/CONVENTIONS.md" ]; then
-    cat > "$docs_context_dir/CONVENTIONS.md" << 'EOF'
-# Conventions
-
-> Stack-specific conventions for this project.
-> See AGENTS.md for cross-tool agent rules.
-
-## Project-Specific Patterns
-<!-- Add project-specific conventions here -->
-EOF
-    success "docs/context/CONVENTIONS.md"
-  fi
-
-  if [ ! -f "$docs_context_dir/GLOSSARY.md" ]; then
-    cat > "$docs_context_dir/GLOSSARY.md" << 'EOF'
-# Glossary
-
-> Domain terminology for this project.
-
-| Term | Definition |
-|---|---|
-<!-- Add domain terms here -->
-EOF
-    success "docs/context/GLOSSARY.md"
-  fi
+  write_doc "$project_dir" docs/context/GLOSSARY.html ../ Glossary '<p>Domain terminology for this project.</p>
+<table>
+<thead><tr><th>Term</th><th>Definition</th></tr></thead>
+<tbody><!-- <tr><td>Term</td><td>Definition</td></tr> --></tbody>
+</table>'
 
   if [ ! -f "$docs_context_dir/CURRENT_SPRINT.md" ]; then
     cat > "$docs_context_dir/CURRENT_SPRINT.md" << 'EOF'
@@ -243,31 +217,60 @@ EOF
     success "$SPRINT_FILE"
   fi
 
-  if [ ! -f "$docs_context_dir/specs/templates/feature-spec.md" ]; then
-    cat > "$docs_context_dir/specs/templates/feature-spec.md" << 'EOF'
-# [TICKET-ID]: Feature Name
+  write_doc "$project_dir" "$SPEC_DIR/templates/doc.html" ../../../ Title '<p>Start every doc, plan, spec, ADR and report from a copy of this file. Keep the head and the dark class, and fix the <code>../</code> count in the stylesheet link for where the copy lives. Replace the title, the date line and this body.</p>
+<h2 id="a-section">A section</h2>
+<p>Paragraphs, lists, tables, <code>code</code> and <code>&lt;pre&gt;&lt;code&gt;</code> blocks take the Spotlight look from <code>.sp-prose</code>.</p>
+<h3 id="step-1">Step 1</h3>
+<p>Plans: one <code>&lt;h3&gt;Step n&lt;/h3&gt;</code> per step. The pipeline counts them.</p>'
+}
 
-## Context
-<!-- What problem does this solve? -->
-
-## Acceptance Criteria
-- [ ] <!-- Criterion 1 -->
-
-## Technical Approach
-<!-- How will this be implemented? -->
-
-## Test Plan
-### Unit Tests
-- [ ] <!-- Test case -->
-
-### Integration Tests
-- [ ] <!-- Test case -->
-
-## Open Questions
-- <!-- Any ambiguity -->
+# write_doc <project dir> <doc path> <path from the doc to docs/> <title> <body>: a new doc only.
+# Dark HTML in the Spotlight article layout; its stylesheet is docs/.design, the local design system.
+write_doc() {
+  [ -f "$1/$2" ] && return 0
+  cat > "$1/$2" << EOF
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>$4</title>
+<link rel="stylesheet" href="$3.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">$4</h1>
+<time class="sp-article__date" datetime="$(date +%F)"><span class="sp-bar"></span><span style="margin-left:.75rem">$(date '+%B %e, %Y')</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+$5
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>
 EOF
-    success "$SPEC_DIR/templates/feature-spec.md"
-  fi
+  success "$2"
+}
+
+# docs/.design links the design system that install global put in the skills (it is never committed).
+install_project_design() {
+  local link="$1/docs/.design" src
+  if [ -e "$link" ] || [ -L "$link" ]; then dim "docs/.design exists — kept"; return 0; fi
+  for src in "$CLAUDE_DIR/skills/spotlight-design" "$COPILOT_DIR/skills/spotlight-design"; do
+    if [ -d "$src" ]; then ln -s "$src" "$link"; success "docs/.design → ${src/#$HOME/~}"; return 0; fi
+  done
+  dim "No spotlight-design skill installed — docs render as plain dark HTML until one is"
 }
 
 # .anw/ holds runtime state, except the tracked .anw/verify. A bare ".anw/" ignores the
@@ -281,7 +284,7 @@ install_project_gitignore() {
     cat "$tmp" > "$gi"; rm -f "$tmp"
   fi
   if [ -s "$gi" ] && [ -n "$(tail -c1 "$gi")" ]; then echo >> "$gi"; fi
-  for e in '.anw/*' '!.anw/verify' '.claude/settings.local.json'; do
+  for e in '.anw/*' '!.anw/verify' '.claude/settings.local.json' 'docs/.design'; do
     grep -qxF -- "$e" "$gi" || { echo "$e" >> "$gi"; added=$((added + 1)); }
   done
   if [ "$added" -gt 0 ]; then success ".gitignore (added $added entries)"; else dim ".gitignore already up to date"; fi

@@ -12,7 +12,7 @@ don't remove it. So the rules that must hold are enforced outside the agent's re
 gets an honest way out: `BLOCKED: <evidence>`.
 
 The first version of this project used eight custom agents and a hook-enforced TDD gate. An audit
-found that the Claude-side gates had never fired (see the erratum in [PAPER.md](PAPER.md)). This
+found that the Claude-side gates had never fired (see the erratum in [PAPER.html](PAPER.html)). This
 version replaces all of it with the native features of both tools and checks the enforcement
 against their real hook payloads.
 
@@ -26,8 +26,8 @@ against their real hook payloads.
 | Skills | `/plan`, `/check` (fresh context, read-only), `/verify`, `/incident` (read-only), `/pr` |
 | Agents | Native only: the main session, plan mode, built-in subagents. No custom agents. |
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
-decision: [ADR-003](docs/decisions/ADR-003-native-first-harness.md).
+Details: [docs/ARCHITECTURE.html](docs/ARCHITECTURE.html) ·
+decision: [ADR-003](docs/decisions/ADR-003-native-first-harness.html).
 
 ## Quick start
 
@@ -47,7 +47,7 @@ first, set `CLAUDE_HOME` and `COPILOT_HOME` to empty directories.
 
 - **Small change (1–2 files):** just ask. The agent writes a failing test, then the fix. The hooks
   gate the commit and the end of the turn. Then `/check`, then `/pr`.
-- **Feature or unclear work:** `/plan PROJ-123` writes `docs/context/specs/PROJ-123.md`, and you
+- **Feature or unclear work:** `/plan PROJ-123` writes `docs/context/specs/PROJ-123.html`, and you
   approve it. Implement one step per session ("implement step 1 of …"), committing each. Then
   `/check` and `/pr`.
 - **Incident:** `/incident PROJ-456` investigates read-only and writes a report. You decide what to
@@ -78,7 +78,11 @@ ai-native-workflow run status                    # or: run resume
 |---|---|
 | `~/.claude/` | `hooks/guard.sh`, `hooks/verify.sh`, the policy merged into `settings.json`, a managed block in `CLAUDE.md`, `skills/` |
 | `~/.copilot/` | `hooks/guard.sh`, `hooks/verify.sh`, `~/.copilot/hooks/anw.json` wiring them, a managed block in `~/.copilot/copilot-instructions.md`, `~/.copilot/skills/` |
-| your project | `.anw/verify` (tracked; `.gitignore` gets `.anw/*` + `!.anw/verify`), a short `AGENTS.md` that `CLAUDE.md` imports, `docs/context/`, `docs/decisions/` |
+| your project | `.anw/verify` (tracked; `.gitignore` gets `.anw/*` + `!.anw/verify`), a short `AGENTS.md` that `CLAUDE.md` imports, `docs/context/`, `docs/decisions/`, and a gitignored `docs/.design` link to the design system |
+
+Docs, plans, specs, ADRs and reports are HTML in the dark Spotlight look. The design system is
+licensed, so it is never committed: put it in `skills/spotlight-design/` (gitignored) and
+`make install` copies it like any skill. Without it, docs render as plain dark HTML.
 
 `.anw/verify` comes from the detected stack. A Makefile `test:` target wins; otherwise
 `go test ./...`, `cargo test`, `dotnet test`, `uv run pytest` / `poetry run pytest` /
@@ -102,8 +106,8 @@ An existing script is never overwritten.
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, flows, hooks, pipelines
-- [PAPER.md](PAPER.md): design rationale (a whitepaper, not an empirical study), with the erratum
+- [docs/ARCHITECTURE.html](docs/ARCHITECTURE.html): components, flows, hooks, pipelines
+- [PAPER.html](PAPER.html): design rationale (a whitepaper, not an empirical study), with the erratum
 - [docs/decisions/](docs/decisions/): ADRs · [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License

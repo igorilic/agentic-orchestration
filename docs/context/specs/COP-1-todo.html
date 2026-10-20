@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>COP-1 — Todo plan</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">COP-1 — Todo plan</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Spec:</strong> <code>docs/context/specs/COP-1-spec.html</code> <strong>Total steps:</strong> 10 (8 implementation + 1 docs + 1 integration smoke) <strong>Driver:</strong> tdd-developer <strong>Hand-off line for each step:</strong> <code>Use tdd-developer on Step &lt;N&gt; of COP-1-todo.md</code></p>
+<p>Each step is a single atomic TDD cycle (RED → GREEN → REFACTOR), under 30 minutes, results in one or two commits (test commit + impl commit), and ends with a green <code>bats tests/</code> run.</p>
+<p>The bats test file <code>tests/install-copilot.bats</code> (NEW) is grown incrementally across the steps. Step 1 creates it; subsequent steps append to it.</p>
+<blockquote>
+<p>The fake-<code>copilot</code> PATH stub and <code>COPILOT_HOME=$SANDBOX</code> setup are identical for steps 1–7. Add the shared <code>setup()</code> / <code>teardown()</code> to <code>tests/install-copilot.bats</code> in Step 1; later steps just append <code>@test</code> blocks.</p>
+</blockquote>
+<hr />
+<h3 id="step-1-hoist-copilot_-constants-to-top-level">Step 1: Hoist <code>COPILOT_*</code> constants to top-level</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Add <code>tests/install-copilot.bats</code> with a single <code>@test</code> that asserts the new constants are defined and referenced:</p>
+<pre><code>@test &quot;installer: COPILOT_DIR / COPILOT_SKILLS_DIR / COPILOT_INSTRUCTIONS_FILE / COPILOT_SETTINGS_FILE are top-level constants&quot; {
+  grep -qE &#39;^COPILOT_DIR=&quot;\$\{COPILOT_HOME:-\$HOME/\.copilot\}&quot;&#39; &quot;$INSTALLER&quot;
+  grep -qE &#39;^COPILOT_AGENTS_DIR=&#39; &quot;$INSTALLER&quot;
+  grep -qE &#39;^COPILOT_SKILLS_DIR=&#39; &quot;$INSTALLER&quot;
+  grep -qE &#39;^COPILOT_INSTRUCTIONS_FILE=&#39; &quot;$INSTALLER&quot;
+  grep -qE &#39;^COPILOT_SETTINGS_FILE=&#39; &quot;$INSTALLER&quot;
+  # And: no function-local COPILOT_DIR redefinitions remain
+  ! grep -q &#39;local COPILOT_DIR=&#39; &quot;$INSTALLER&quot;
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong></p>
+<ul>
+<li>Add the 5 constants right after the existing <code>CLAUDE_DIR=</code> line at the top of <code>ai-native-workflow</code> (see spec §3.1).</li>
+<li>Remove the three <code>local COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"</code> lines from <code>install_copilot_agents</code> (~L3165), <code>show_status</code> (~L4088), and <code>uninstall_global</code> (~L4233). Replace each downstream reference with the global <code>$COPILOT_DIR</code>. All those references are inside the same functions so this is a mechanical edit.</li>
+<li>Replace <code>$COPILOT_DIR/agents</code> paths with <code>$COPILOT_AGENTS_DIR</code> in those three functions.</li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (top-level constant block + 3 functions)</li>
+<li><code>tests/install-copilot.bats</code> (NEW)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (1/1 green). <code>bats tests/</code> — full suite still green (regression guard).</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(installer): add constants probe for COPILOT_* top-level vars</code></li>
+<li><code>refactor(installer): hoist COPILOT_* paths to top-level constants</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-2-install_global_copilot_skills--copy-every-skill">Step 2: <code>install_global_copilot_skills</code> — copy every skill</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append to <code>tests/install-copilot.bats</code>:</p>
+<ol type="1">
+<li><p>Test that runs <code>install global</code> against sandbox and asserts <strong>every</strong> subdirectory of <code>skills/</code> in the repo source becomes a <code>&lt;name&gt;/SKILL.md</code> under <code>$COPILOT_HOME/skills/</code>. Implementation hint: iterate the source directory in the test, do not hardcode the 14 names — keeps tests robust against new skills.</p>
+<pre><code>@test &quot;install global: copies every skill from source to $COPILOT_HOME/skills/&quot; {
+  run_install_global  # helper that exports CLAUDE_HOME + COPILOT_HOME and runs installer
+  for d in &quot;$REPO_ROOT/skills&quot;/*/; do
+    name=&quot;$(basename &quot;$d&quot;)&quot;
+    [ -f &quot;$SANDBOX/skills/$name/SKILL.md&quot; ] || { echo &quot;missing: $name&quot;; return 1; }
+  done
+}</code></pre></li>
+<li><p>Test that <code>override-confidence/skill.bash</code> is also copied (the skill is multi-file; assert the auxiliary file).</p>
+<pre><code>@test &quot;install global: copies override-confidence/skill.bash to $COPILOT_HOME/skills/&quot; {
+  run_install_global
+  [ -f &quot;$SANDBOX/skills/override-confidence/skill.bash&quot; ]
+}</code></pre></li>
+</ol></li>
+<li><p><strong>Implement (GREEN):</strong></p>
+<ul>
+<li>New function <code>install_global_copilot_skills</code> placed immediately after <code>install_copilot_agents</code> in <code>ai-native-workflow</code>. Body: print a header, <code>mkdir -p "$COPILOT_SKILLS_DIR"</code>, iterate <code>"$_ANW_SCRIPT_DIR"/skills/*/</code>, for each: backup existing <code>SKILL.md</code> if present, <code>cp -R</code> source dir contents, print success.</li>
+<li>Wire one new line into <code>install_global</code> after the <code>install_copilot_agents</code> call: <code>install_global_copilot_skills</code>.</li>
+<li>Guard at top of fn: <code>command -v copilot &amp;&gt;/dev/null || return 0</code> (graceful skip when Copilot CLI absent).</li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (new fn + 1-line wire-in)</li>
+<li><code>tests/install-copilot.bats</code> (2 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (3/3). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install-copilot): assert all skills copied to COPILOT_HOME</code></li>
+<li><code>feat(install-copilot): install all skills to ~/.copilot/skills/</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-3-pipeline-skill-rewrite--claude---agent--copilot---agent">Step 3: Pipeline-skill rewrite — <code>claude --agent=</code> → <code>copilot --agent=</code></h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append three tests to <code>tests/install-copilot.bats</code>:</p>
+<pre><code>@test &quot;install global: pipeline-gitlab-feature SKILL.md uses copilot --agent= (not claude)&quot; {
+  run_install_global
+  grep -q &#39;copilot --agent=&#39; &quot;$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md&quot;
+  ! grep -q &#39;claude --agent=&#39; &quot;$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md&quot;
+}
+
+@test &quot;install global: pipeline-gitlab-incident SKILL.md uses copilot --agent=&quot; {
+  run_install_global
+  grep -q &#39;copilot --agent=&#39; &quot;$SANDBOX/skills/pipeline-gitlab-incident/SKILL.md&quot;
+  ! grep -q &#39;claude --agent=&#39; &quot;$SANDBOX/skills/pipeline-gitlab-incident/SKILL.md&quot;
+}
+
+@test &quot;install global: explore SKILL.md uses copilot --agent= in copilot install path&quot; {
+  run_install_global
+  grep -q &#39;copilot --agent=&#39; &quot;$SANDBOX/skills/explore/SKILL.md&quot;
+  ! grep -q &#39;claude --agent=&#39; &quot;$SANDBOX/skills/explore/SKILL.md&quot;
+}</code></pre>
+<p>Also add a regression guard: the <strong>Claude</strong> side still gets <code>claude --agent=</code> (the rewrite must only affect the Copilot copy):</p>
+<pre><code>@test &quot;install global: Claude side keeps claude --agent= (rewrite is Copilot-only)&quot; {
+  run_install_global
+  grep -q &#39;claude --agent=&#39; &quot;$CLAUDE_HOME/skills/pipeline-gitlab-feature/SKILL.md&quot;
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong> Inside <code>install_global_copilot_skills</code>, after the <code>cp -R</code> loop, add the dynamic rewrite block from spec §5.3. Use <code>sed -i.tmp 's/claude --agent=/copilot --agent=/g'</code> followed by <code>rm -f "${skill_md}.tmp"</code> for cross-platform sed portability.</p></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (rewrite block inside <code>install_global_copilot_skills</code>)</li>
+<li><code>tests/install-copilot.bats</code> (4 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (7/7). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install-copilot): assert claude→copilot rewrite in pipeline skills</code></li>
+<li><code>feat(install-copilot): rewrite agent invocations in copied skills</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-4-install_global_copilot_instructions--global-instructions-file">Step 4: <code>install_global_copilot_instructions</code> — global instructions file</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append:</p>
+<pre><code>@test &quot;install global: writes copilot-instructions.md with required marker substrings&quot; {
+  run_install_global
+  [ -f &quot;$SANDBOX/copilot-instructions.md&quot; ]
+  grep -q &#39;Stack Detection&#39;  &quot;$SANDBOX/copilot-instructions.md&quot;
+  grep -q &#39;Agent Pipeline&#39;   &quot;$SANDBOX/copilot-instructions.md&quot;
+  grep -q &#39;/plan&#39;            &quot;$SANDBOX/copilot-instructions.md&quot;
+  # Negative: no Claude-specific phrasing
+  ! grep -q &#39;~/.claude/&#39;        &quot;$SANDBOX/copilot-instructions.md&quot;
+  ! grep -q &#39;Claude Code session&#39; &quot;$SANDBOX/copilot-instructions.md&quot;
+}
+
+@test &quot;install global: copilot-instructions.md is backed up on re-install&quot; {
+  run_install_global
+  run_install_global
+  # Exactly one backup file should exist after the second run
+  backups=( &quot;$SANDBOX&quot;/copilot-instructions.md.bak.* )
+  [ &quot;${#backups[@]}&quot; -eq 1 ]
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong></p>
+<ul>
+<li>New function <code>install_global_copilot_instructions</code>: <code>mkdir -p "$COPILOT_DIR"</code>, <code>backup_if_exists "$COPILOT_INSTRUCTIONS_FILE"</code>, write a heredoc with content semantically equivalent to the Claude <code>CLAUDE.md</code> heredoc (~L1698) but with neutral phrasing (no <code>~/.claude/</code>, no "Claude Code session"). Keep <code>Stack Detection</code>, <code>Agent Pipeline</code>, and <code>/plan</code> substrings so the marker test passes.</li>
+<li>Wire one new line into <code>install_global</code> after <code>install_global_copilot_skills</code>: <code>install_global_copilot_instructions</code>.</li>
+<li>Guard at top of fn: <code>command -v copilot &amp;&gt;/dev/null || return 0</code>.</li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (new fn + 1-line wire-in)</li>
+<li><code>tests/install-copilot.bats</code> (2 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (9/9). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install-copilot): assert copilot-instructions.md content + backup</code></li>
+<li><code>feat(install-copilot): install ~/.copilot/copilot-instructions.md</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-5-install_global_copilot_settings--fresh-install-path">Step 5: <code>install_global_copilot_settings</code> — fresh install path</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append:</p>
+<pre><code>@test &quot;install global: settings.json fresh install seeds renderMarkdown/theme/beep&quot; {
+  run_install_global
+  [ -f &quot;$SANDBOX/settings.json&quot; ]
+  [ &quot;$(jq -r &#39;.renderMarkdown&#39; &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;true&quot; ]
+  [ &quot;$(jq -r &#39;.theme&#39;          &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;auto&quot; ]
+  [ &quot;$(jq -r &#39;.beep&#39;           &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;true&quot; ]
+}
+
+@test &quot;install global: settings.json fresh install has no hooks key&quot; {
+  run_install_global
+  ! jq -e &#39;.hooks&#39; &quot;$SANDBOX/settings.json&quot; &gt;/dev/null 2&gt;&amp;1
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong></p>
+<ul>
+<li>New function <code>install_global_copilot_settings</code>. Body for the fresh path only (target absent): write the literal JSON <code>{"renderMarkdown": true, "theme": "auto", "beep": true}</code> via a heredoc → <code>jq '.'</code> if jq present, else heredoc literal as fallback (per Risk R-3).</li>
+<li>Wire into <code>install_global</code> after <code>install_global_copilot_instructions</code>.</li>
+<li>Guard: <code>command -v copilot &amp;&gt;/dev/null || return 0</code>.</li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (new fn + 1-line wire-in)</li>
+<li><code>tests/install-copilot.bats</code> (2 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (11/11). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install-copilot): assert settings.json fresh install shape</code></li>
+<li><code>feat(install-copilot): seed ~/.copilot/settings.json on fresh install</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-6-install_global_copilot_settings--merge-path-preserves-user-keys">Step 6: <code>install_global_copilot_settings</code> — merge path preserves user keys</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append (this is the meaty one):</p>
+<pre><code>@test &quot;install global: settings.json merge preserves user-set model/effortLevel/allowedUrls&quot; {
+  mkdir -p &quot;$SANDBOX&quot;
+  cat &gt; &quot;$SANDBOX/settings.json&quot; &lt;&lt;&#39;JSON&#39;
+{&quot;model&quot;: &quot;gpt-5&quot;, &quot;effortLevel&quot;: &quot;high&quot;, &quot;allowedUrls&quot;: [&quot;https://example.com&quot;]}
+JSON
+  run_install_global
+  [ &quot;$(jq -r &#39;.model&#39;           &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;gpt-5&quot; ]
+  [ &quot;$(jq -r &#39;.effortLevel&#39;     &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;high&quot; ]
+  [ &quot;$(jq -r &#39;.allowedUrls[0]&#39;  &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;https://example.com&quot; ]
+  # Defaults filled in for missing keys:
+  [ &quot;$(jq -r &#39;.renderMarkdown&#39;  &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;true&quot; ]
+  [ &quot;$(jq -r &#39;.theme&#39;           &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;auto&quot; ]
+  # And exactly one backup of the pre-merge file:
+  backups=( &quot;$SANDBOX&quot;/settings.json.bak.* )
+  [ &quot;${#backups[@]}&quot; -eq 1 ]
+}
+
+@test &quot;install global: settings.json merge does NOT overwrite existing user value&quot; {
+  mkdir -p &quot;$SANDBOX&quot;
+  echo &#39;{&quot;theme&quot;:&quot;dark&quot;,&quot;beep&quot;:false}&#39; &gt; &quot;$SANDBOX/settings.json&quot;
+  run_install_global
+  [ &quot;$(jq -r &#39;.theme&#39; &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;dark&quot; ]
+  [ &quot;$(jq -r &#39;.beep&#39;  &quot;$SANDBOX/settings.json&quot;)&quot; = &quot;false&quot; ]
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong> Extend <code>install_global_copilot_settings</code> with the merge branch from spec §5.4. Use <code>jq --slurpfile existing "$f" '. * $existing[0]'</code> so existing keys win over defaults. <code>command -v jq</code> guard with warn-and-return on absent.</p></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (extend the new fn)</li>
+<li><code>tests/install-copilot.bats</code> (2 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (13/13). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install-copilot): assert settings.json merge preserves user keys</code></li>
+<li><code>feat(install-copilot): merge user settings.json with defaults additively</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-7-graceful-handling--copilot-cli-absent--closing-banner-caveat">Step 7: Graceful handling — Copilot CLI absent + closing-banner caveat</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append:</p>
+<pre><code>@test &quot;install global: skips Copilot section when copilot is not on PATH&quot; {
+  EMPTY_BIN=&quot;$(mktemp -d /tmp/aw-empty-XXXXXX)&quot;
+  PATH=&quot;$EMPTY_BIN:/usr/bin:/bin&quot; \
+    CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; install global &gt;/dev/null 2&gt;&amp;1
+  rm -rf &quot;$EMPTY_BIN&quot;
+  [ ! -d &quot;$SANDBOX/skills&quot; ]
+  [ ! -f &quot;$SANDBOX/copilot-instructions.md&quot; ]
+  [ ! -f &quot;$SANDBOX/settings.json&quot; ]
+}
+
+@test &quot;install global: closing banner mentions hooks-not-globally-installed caveat&quot; {
+  output=&quot;$(run_install_global 2&gt;&amp;1)&quot;
+  [[ &quot;$output&quot; == *&quot;Copilot hooks are NOT installed globally&quot;* ]]
+}
+
+@test &quot;install global: closing banner caveat prints even when copilot is absent&quot; {
+  EMPTY_BIN=&quot;$(mktemp -d /tmp/aw-empty-XXXXXX)&quot;
+  output=&quot;$(PATH=&quot;$EMPTY_BIN:/usr/bin:/bin&quot; \
+    CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; install global 2&gt;&amp;1)&quot;
+  rm -rf &quot;$EMPTY_BIN&quot;
+  [[ &quot;$output&quot; == *&quot;Copilot hooks are NOT installed globally&quot;* ]]
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong></p>
+<ul>
+<li><p>Confirm the <code>command -v copilot</code> guards added in Steps 2/4/5 are sufficient. If not, fix here.</p></li>
+<li><p>Update the closing banner of <code>install_global</code> (~L1685) to print the caveat unconditionally (outside any <code>command -v copilot</code> guard) per spec §3.3. Format:</p>
+<pre class="bash"><code>echo &quot;&quot;
+dim &quot;▸ Copilot hooks are NOT installed globally — Copilot CLI scopes&quot;
+dim &quot;  hooks per-repo. Run \`ai-native-workflow install project\` in&quot;
+dim &quot;  trusted folders for repo-level hooks (COP-2; not yet shipped).&quot;</code></pre></li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (banner edit; possibly fn-guard tightening)</li>
+<li><code>tests/install-copilot.bats</code> (3 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (16/16). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install-copilot): assert graceful skip + hooks caveat banner</code></li>
+<li><code>feat(install-copilot): print hooks-not-global caveat unconditionally</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-8-status-command-surfaces-copilot-artifacts">Step 8: Status command surfaces Copilot artifacts</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append:</p>
+<pre><code>@test &quot;status: lists every installed Copilot skill with ✓&quot; {
+  run_install_global
+  output=&quot;$(CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; status 2&gt;&amp;1)&quot;
+  for d in &quot;$REPO_ROOT/skills&quot;/*/; do
+    name=&quot;$(basename &quot;$d&quot;)&quot;
+    [[ &quot;$output&quot; == *&quot;skills/$name&quot;* ]]
+  done
+}
+
+@test &quot;status: lists copilot-instructions.md and settings.json&quot; {
+  run_install_global
+  output=&quot;$(CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; status 2&gt;&amp;1)&quot;
+  [[ &quot;$output&quot; == *&quot;copilot-instructions.md&quot;* ]]
+  [[ &quot;$output&quot; == *&quot;settings.json&quot;* ]]
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong> Edit <code>show_status</code> (~L4088) per spec §3.4:</p>
+<ul>
+<li>Add <code>check_file "$COPILOT_INSTRUCTIONS_FILE" "copilot-instructions.md"</code></li>
+<li>Add <code>check_file "$COPILOT_SETTINGS_FILE" "settings.json"</code></li>
+<li>Add the dynamic skills loop: <code>for d in "$COPILOT_SKILLS_DIR"/*/; do ...</code></li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (<code>show_status</code> edit)</li>
+<li><code>tests/install-copilot.bats</code> (2 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (18/18). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(status): assert Copilot skills/instructions/settings shown</code></li>
+<li><code>feat(status): list new Copilot artifacts in status output</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-9-uninstall-removes-copilot-skills-preserves-user-files">Step 9: Uninstall removes Copilot skills, preserves user files</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append:</p>
+<pre><code>@test &quot;uninstall global: removes ~/.copilot/skills/ tree&quot; {
+  run_install_global
+  [ -d &quot;$SANDBOX/skills&quot; ]
+  CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; uninstall global &gt;/dev/null 2&gt;&amp;1
+  [ ! -d &quot;$SANDBOX/skills&quot; ]
+}
+
+@test &quot;uninstall global: preserves copilot-instructions.md (warns instead)&quot; {
+  run_install_global
+  output=&quot;$(CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; uninstall global 2&gt;&amp;1)&quot;
+  [ -f &quot;$SANDBOX/copilot-instructions.md&quot; ]
+  [[ &quot;$output&quot; == *&quot;copilot-instructions.md preserved&quot;* ]] || \
+    [[ &quot;$output&quot; == *&quot;copilot-instructions.md&quot;*preserved* ]]
+}
+
+@test &quot;uninstall global: preserves settings.json (warns instead)&quot; {
+  run_install_global
+  CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; uninstall global &gt;/dev/null 2&gt;&amp;1
+  [ -f &quot;$SANDBOX/settings.json&quot; ]
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong> Edit <code>uninstall_global</code> (~L4232) per spec §3.5:</p>
+<ul>
+<li>Add <code>rm -rf "$COPILOT_SKILLS_DIR"</code> to the explicit removal list (or do it inline; mirror however the Claude side handles its skills directory removal).</li>
+<li>Add a <code>warn "~/.copilot/copilot-instructions.md and ~/.copilot/settings.json preserved"</code> line, mirroring the existing warn for <code>CLAUDE.md</code>/<code>settings.json</code> on the Claude side (~L4229).</li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (<code>uninstall_global</code> edit)</li>
+<li><code>tests/install-copilot.bats</code> (3 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (21/21). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(uninstall): assert Copilot skills removed, user files preserved</code></li>
+<li><code>feat(uninstall): remove ~/.copilot/skills/, preserve user files</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-10-documentation--readme--architecture-updates">Step 10: Documentation — README + ARCHITECTURE updates</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Append:</p>
+<pre><code>@test &quot;docs: README mentions ~/.copilot/skills/&quot; {
+  rg -q &#39;~/\.copilot/skills/&#39; &quot;$BATS_TEST_DIRNAME/../README.md&quot;
+}
+
+@test &quot;docs: README mentions ~/.copilot/copilot-instructions.md&quot; {
+  rg -q &#39;~/\.copilot/copilot-instructions\.md&#39; &quot;$BATS_TEST_DIRNAME/../README.md&quot;
+}
+
+@test &quot;docs: README mentions ~/.copilot/settings.json&quot; {
+  rg -q &#39;~/\.copilot/settings\.json&#39; &quot;$BATS_TEST_DIRNAME/../README.md&quot;
+}
+
+@test &quot;docs: ARCHITECTURE notes hooks asymmetry (Claude global, Copilot repo-scope)&quot; {
+  rg -qi &#39;copilot.*(repo|repository)[- ]scope|repo[- ]scope.*copilot&#39; \
+    &quot;$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md&quot;
+}</code></pre></li>
+<li><p><strong>Implement (GREEN):</strong></p>
+<ul>
+<li>Edit <code>README.md</code>: add a short "What <code>install global</code> writes" block near the existing "Quick Start". List the new Copilot artifacts. Add one sentence on the hooks asymmetry.</li>
+<li>Edit <code>docs/ARCHITECTURE.html</code>: add a "Symmetric harness" subsection (≤ 1 paragraph) under the three-layer diagram noting that skills + agents + global instructions are symmetric across Claude Code and Copilot CLI; hooks are Claude-global today, Copilot repo-scope (COP-2 deferred).</li>
+</ul></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>README.md</code></li>
+<li><code>docs/ARCHITECTURE.html</code></li>
+<li><code>tests/install-copilot.bats</code> (4 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install-copilot.bats</code> (25/25). <code>bats tests/</code> green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(docs): assert README + ARCHITECTURE mention Copilot harness</code></li>
+<li><code>docs(cop-1): document symmetric Copilot CLI harness</code></li>
+</ul></li>
+</ul>
+<hr />
+<h3 id="step-11-integration-smoke--fresh-install-end-to-end--idempotency">Step 11: Integration smoke — fresh install end-to-end + idempotency</h3>
+<ul>
+<li><p><strong>Test:</strong> Append one large <code>@test</code> to <code>tests/install-copilot.bats</code> that exercises every AC in one run:</p>
+<pre><code>@test &quot;integration smoke: install global twice produces full Copilot harness, one backup per file per re-run&quot; {
+  run_install_global
+  # Snapshot first-run state
+  first_skills_count=$(find &quot;$SANDBOX/skills&quot; -name &#39;SKILL.md&#39; | wc -l | tr -d &#39; &#39;)
+  [ &quot;$first_skills_count&quot; -ge 14 ]
+  [ -f &quot;$SANDBOX/copilot-instructions.md&quot; ]
+  [ -f &quot;$SANDBOX/settings.json&quot; ]
+  # Re-run
+  run_install_global
+  # Backups exist for each rewritten file
+  [ &quot;$(find &quot;$SANDBOX&quot; -maxdepth 2 -name &#39;copilot-instructions.md.bak.*&#39; | wc -l | tr -d &#39; &#39;)&quot; -eq 1 ]
+  [ &quot;$(find &quot;$SANDBOX&quot; -maxdepth 2 -name &#39;settings.json.bak.*&#39; | wc -l | tr -d &#39; &#39;)&quot; -eq 1 ]
+  # Pipeline rewrite still in place after re-run
+  grep -q &#39;copilot --agent=&#39; &quot;$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md&quot;
+  ! grep -q &#39;claude --agent=&#39; &quot;$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md&quot;
+  # Status reflects the install
+  output=&quot;$(CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; status 2&gt;&amp;1)&quot;
+  [[ &quot;$output&quot; == *&quot;copilot-instructions.md&quot;* ]]
+  [[ &quot;$output&quot; == *&quot;settings.json&quot;* ]]
+}
+
+@test &quot;integration smoke: COPILOT_HOME=/tmp/cop-test redirects all writes&quot; {
+  ALT=&quot;$(mktemp -d /tmp/aw-cop-alt-XXXXXX)&quot;
+  PATH=&quot;$STUB_BIN:$PATH&quot; CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$ALT&quot; \
+    &quot;$INSTALLER&quot; install global &gt;/dev/null 2&gt;&amp;1
+  [ -d &quot;$ALT/skills&quot; ]
+  [ -f &quot;$ALT/copilot-instructions.md&quot; ]
+  [ -f &quot;$ALT/settings.json&quot; ]
+  rm -rf &quot;$ALT&quot;
+}</code></pre></li>
+<li><p><strong>Implement:</strong> No production code change expected. If a test fails here it surfaces an integration defect — fix forward.</p></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>tests/install-copilot.bats</code> (2 tests appended)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/</code> — full suite green (target: ~133 tests total: 131 pre-existing + 25 new from steps 1–10 + 2 here = approximately, depending on prior counts).</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(integration): smoke COP-1 install global end-to-end</code></li>
+</ul>
+<p>(Single commit; this is a verification step, no production code.)</p></li>
+</ul>
+<hr />
+<h2 id="status-checklist">Status checklist</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1</strong> — Hoist <code>COPILOT_*</code> constants</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Test added (constants probe)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: top-level constants + 3 functions de-localized</label></li>
+<li><label><input type="checkbox" checked="" />AC: covers spec §3.1 prereq for all later steps</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 2</strong> — Skills install</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (every-skill loop, multi-file skill)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: <code>install_global_copilot_skills</code> + wire-in</label></li>
+<li><label><input type="checkbox" checked="" />AC-1 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 3</strong> — Pipeline-skill rewrite</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (3 affected skills + Claude-side regression guard)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: dynamic sed rewrite block</label></li>
+<li><label><input type="checkbox" checked="" />AC-2 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 4</strong> — Global instructions file</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (markers + backup)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: <code>install_global_copilot_instructions</code> + wire-in</label></li>
+<li><label><input type="checkbox" checked="" />AC-3, AC-6 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 5</strong> — Settings.json fresh install</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (renderMarkdown/theme/beep, no hooks)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: fresh-path heredoc/jq write</label></li>
+<li><label><input type="checkbox" checked="" />AC-4 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 6</strong> — Settings.json merge</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (preserve user keys, defaults fill gaps)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: jq additive merge</label></li>
+<li><label><input type="checkbox" checked="" />AC-5 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 7</strong> — Graceful skip + hooks caveat banner</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (3 cases)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: banner edit, guard verification</label></li>
+<li><label><input type="checkbox" checked="" />AC-8, AC-12 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 8</strong> — Status command</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (skills loop + 2 files)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: <code>show_status</code> edits</label></li>
+<li><label><input type="checkbox" checked="" />AC-10 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 9</strong> — Uninstall</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (skills removed, user files preserved)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: <code>uninstall_global</code> edits</label></li>
+<li><label><input type="checkbox" checked="" />AC-11 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 10</strong> — Documentation</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (README + ARCHITECTURE asserts)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation: README + ARCHITECTURE edits</label></li>
+<li><label><input type="checkbox" checked="" />AC-13 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" /><strong>Step 11</strong> — Integration smoke</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Tests added (idempotency + COPILOT_HOME override)</label></li>
+<li><label><input type="checkbox" checked="" />AC-7, AC-9 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" />Spec marked <strong>Done</strong> in <code>docs/context/CURRENT_SPRINT.md</code></label></li>
+</ul>
+<h2 id="bats-helper-to-add-in-step-1s-testsinstall-copilotbats-setup">Bats helper to add in Step 1's <code>tests/install-copilot.bats</code> setup</h2>
+<p>For reference (kept here so the tdd-developer doesn't have to invent it from scratch):</p>
+<pre class="bash"><code>INSTALLER=&quot;$BATS_TEST_DIRNAME/../ai-native-workflow&quot;
+REPO_ROOT=&quot;$BATS_TEST_DIRNAME/..&quot;
+
+setup() {
+  SANDBOX=&quot;$(mktemp -d /tmp/aw-cop-XXXXXX)&quot;
+  CLAUDE_HOME_DIR=&quot;$(mktemp -d /tmp/aw-claude-XXXXXX)&quot;
+  STUB_BIN=&quot;$(mktemp -d /tmp/aw-stub-XXXXXX)&quot;
+  printf &#39;#!/usr/bin/env bash\nexit 0\n&#39; &gt; &quot;$STUB_BIN/copilot&quot;
+  chmod +x &quot;$STUB_BIN/copilot&quot;
+  export PATH=&quot;$STUB_BIN:$PATH&quot;
+  export COPILOT_HOME=&quot;$SANDBOX&quot;
+  export CLAUDE_HOME=&quot;$CLAUDE_HOME_DIR&quot;
+}
+
+teardown() {
+  rm -rf &quot;$SANDBOX&quot; &quot;$CLAUDE_HOME_DIR&quot; &quot;$STUB_BIN&quot;
+}
+
+run_install_global() {
+  CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    PATH=&quot;$STUB_BIN:$PATH&quot; \
+    &quot;$INSTALLER&quot; install global &quot;$@&quot;
+}</code></pre>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

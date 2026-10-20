@@ -45,11 +45,49 @@ teardown() {
   rm -rf "$SANDBOX_PROJECT"
 }
 
-@test "install project: creates docs/context/specs/templates/feature-spec.md" {
+# DOCS-1 Step 3: seeded docs are dark HTML styled by docs/.design, a local link to the design system
+@test "install project: the docs it seeds are dark HTML whose stylesheet resolves through docs/.design" {
   SANDBOX_PROJECT="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
+  mkdir -p "$CLAUDE_HOME/skills/spotlight-design"; : > "$CLAUDE_HOME/skills/spotlight-design/styles.css"
   "$INSTALLER" install project "$SANDBOX_PROJECT" >/dev/null 2>&1
-  [ -f "$SANDBOX_PROJECT/docs/context/specs/templates/feature-spec.md" ]
+  local f href
+  for f in ARCHITECTURE.html CONVENTIONS.html GLOSSARY.html specs/templates/doc.html; do
+    f="$SANDBOX_PROJECT/docs/context/$f"
+    grep -qF '<html lang="en" class="dark">' "$f" || { echo "not dark HTML: $f"; false; }
+    href="$(sed -n 's/.*<link rel="stylesheet" href="\([^"]*\)".*/\1/p' "$f")"
+    [[ "$href" == *.design/styles.css ]] && [ -f "$(dirname "$f")/$href" ] || { echo "$f: href=$href"; false; }
+  done
+  for f in ARCHITECTURE.md CONVENTIONS.md GLOSSARY.md specs/templates/feature-spec.md; do
+    [ ! -e "$SANDBOX_PROJECT/docs/context/$f" ] || { echo "still Markdown: $f"; false; }
+  done
   rm -rf "$SANDBOX_PROJECT"
+}
+
+@test "install project: docs/.design links to Claude's design system copy, else Copilot's, and is gitignored" {
+  local p1 p2
+  p1="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"; p2="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
+  mkdir -p "$COPILOT_HOME/skills/spotlight-design"
+  "$INSTALLER" install project "$p1" >/dev/null 2>&1
+  [ "$(readlink "$p1/docs/.design")" = "$COPILOT_HOME/skills/spotlight-design" ] || { ls -la "$p1/docs"; false; }
+  mkdir -p "$CLAUDE_HOME/skills/spotlight-design"
+  "$INSTALLER" install project "$p2" >/dev/null 2>&1
+  [ "$(readlink "$p2/docs/.design")" = "$CLAUDE_HOME/skills/spotlight-design" ] || { ls -la "$p2/docs"; false; }
+  grep -qxF 'docs/.design' "$p2/.gitignore" || false
+  rm -rf "$p1" "$p2"
+}
+
+@test "install project: an existing docs/.design is kept; without a design system there is no link and no error" {
+  local p1 p2
+  p1="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"; p2="$(mktemp -d "$BATS_TMPDIR/aw-project-XXXXXX")"
+  mkdir -p "$p1/docs/.design" "$CLAUDE_HOME/skills/spotlight-design"; echo mine > "$p1/docs/.design/styles.css"
+  "$INSTALLER" install project "$p1" >/dev/null 2>&1
+  [ ! -L "$p1/docs/.design" ] && grep -qx mine "$p1/docs/.design/styles.css" || false
+  rm -rf "$CLAUDE_HOME/skills/spotlight-design"
+  run "$INSTALLER" install project "$p2"
+  [ "$status" -eq 0 ] || { echo "$output"; false; }
+  [ ! -e "$p2/docs/.design" ] && [ ! -L "$p2/docs/.design" ] || false
+  grep -qxF 'docs/.design' "$p2/.gitignore" || false
+  rm -rf "$p1" "$p2"
 }
 
 @test "install project: project .gitignore ignores the .anw/ runtime dir" {
@@ -125,8 +163,8 @@ teardown() {
   rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../README.md"
 }
 
-@test "docs: ARCHITECTURE.md mentions docs/context/" {
-  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+@test "docs: ARCHITECTURE.html mentions docs/context/" {
+  rg -q 'docs/context/' "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.html"
 }
 
 @test "docs: README.md does not reference old .anw/specs/ tracked artifact paths" {
@@ -136,10 +174,11 @@ teardown() {
     "$BATS_TEST_DIRNAME/../README.md"
 }
 
-@test "docs: ARCHITECTURE.md does not reference old .anw/specs/ tracked artifact paths" {
+@test "docs: ARCHITECTURE.html does not reference old .anw/specs/ tracked artifact paths" {
   # Pipeline diagrams used to show → .anw/specs/<id>-requirements.md; those must now show docs/context/
-  ! rg -q '\.anw/specs/<id>-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
-    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.md"
+  # (HTML writes <id> as &lt;id&gt;)
+  ! rg -q '\.anw/specs/(<|&lt;)id(>|&gt;)-(requirements|spec|todo|bugfix|testplan|brainstorm)' \
+    "$BATS_TEST_DIRNAME/../docs/ARCHITECTURE.html"
 }
 
 # ---------------------------------------------------------------------------
@@ -159,13 +198,13 @@ teardown() {
 
   # AC: tracked sprint and specs go to docs/context/
   [ -f "$sandbox_project/docs/context/CURRENT_SPRINT.md" ]
-  [ -f "$sandbox_project/docs/context/specs/templates/feature-spec.md" ]
+  [ -f "$sandbox_project/docs/context/specs/templates/doc.html" ]
 
   # AC: installer-seeded architecture/conventions/glossary docs now live under
   # docs/context/ alongside the specs (tracked in the consumer project) — #17.2
-  [ -f "$sandbox_project/docs/context/ARCHITECTURE.md" ]
-  [ -f "$sandbox_project/docs/context/CONVENTIONS.md" ]
-  [ -f "$sandbox_project/docs/context/GLOSSARY.md" ]
+  [ -f "$sandbox_project/docs/context/ARCHITECTURE.html" ]
+  [ -f "$sandbox_project/docs/context/CONVENTIONS.html" ]
+  [ -f "$sandbox_project/docs/context/GLOSSARY.html" ]
 
   # AC: .gitignore ignores the runtime .anw/ dir and no longer mentions .context/
   grep -qF '.anw/' "$sandbox_project/.gitignore"

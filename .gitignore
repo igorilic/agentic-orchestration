@@ -8,3 +8,7 @@ node_modules/
 
 # Exploration track — throwaway prototype code per /explore skill
 spikes/
+
+# Local design system (Tailwind Plus Spotlight, licensed): installed as a skill, never committed
+skills/spotlight-design/
+docs/.design

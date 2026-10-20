@@ -10,7 +10,7 @@ pipeline_github_feature() {  # [spec file | description]
   local input="${1:-}" id
   require_claude; require_gh; repo_root || return 1
   if [ -f "$input" ]; then
-    id="$(basename "$input" .md)"; id="${id//[^A-Za-z0-9._-]/-}"; input="the spec in $input"
+    id="$(basename "$input")"; id="${id%.*}"; id="${id//[^A-Za-z0-9._-]/-}"; input="the spec in $input"
   else
     if [ -z "$input" ]; then ask "Describe the feature:"; read -r input || true; fi
     [ -n "$input" ] || { error "Nothing to plan"; return 1; }
@@ -37,12 +37,12 @@ pipeline_gitlab_incident() {  # <JIRA-ID>
   local id="${1:-}" report
   valid_id "$id" || return 1
   require_copilot; require_glab; repo_root || return 1
-  report="$SPEC_DIR/$id-incident.md"
+  report="$SPEC_DIR/$id-incident.html"
   if [ "$(state_get PIPELINE)" != gitlab-incident ] || [ "$(state_get ID)" != "$id" ]; then
     RUN_DIR=".anw/runs/$id"; mkdir -p "$RUN_DIR" "$(dirname "$report")"
     if [ -f "$report" ]; then info "Using the existing report: $report"
     else run_stage copilot incident incident "/incident $id — write the report to $report" || return 1; fi
-    echo ""; sed 's/^/    /' "$report"; echo ""
+    echo ""; show_doc "$report"; echo ""
     if ! confirm "Fix it now (plan, implement, check, then an MR)?"; then
       jira_comment "$id" "Incident report: $report"
       return 0

@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>CTX-1 — Atomic todo plan</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">CTX-1 — Atomic todo plan</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Branch:</strong> <code>feat/context-split</code> (cut from <code>main</code> before Step 1)</p>
+<p>Each step is independently testable, results in one commit (or two — test+impl per TDD), and completes in one ~30 minute TDD cycle. Step 7 is doc-only and uses <code>/skip-tdd</code> per the request's constraint.</p>
+<p>Order matters: tests first that codify the new convention, then the source-of-truth updates (agents → CLI → installer → templates), then the actual file migration, then docs and a smoke pass.</p>
+<hr />
+<h3 id="step-1-add-bats-tests-for-new-install-layout-red">Step 1: Add bats tests for new install layout (RED)</h3>
+<ul>
+<li><strong>Test:</strong>
+<ul>
+<li>In <code>tests/install.bats</code>, add 4 new <code>@test</code>s:
+<ul>
+<li><code>install project: creates docs/context/CURRENT_SPRINT.md</code> — runs <code>ai-native-workflow install project "$SANDBOX_PROJECT"</code> into a fresh tempdir, asserts file exists.</li>
+<li><code>install project: creates docs/context/specs/templates/feature-spec.md</code> — same setup, asserts the templated spec file exists at the new path.</li>
+<li><code>install project: project .gitignore contains runtime ignore entries</code> — asserts <code>grep -F '.context/.pipeline-state' "$SANDBOX_PROJECT/.gitignore"</code> and the same for <code>.context/.pipeline-audit.log</code> and <code>.context/specs/*.jsonl</code>.</li>
+<li><code>install project: project .gitignore does NOT contain bare .context/</code> — asserts <code>! grep -E '^\.context/$' "$SANDBOX_PROJECT/.gitignore"</code>.</li>
+</ul></li>
+<li>These tests will FAIL initially because the installer still writes <code>.context/CURRENT_SPRINT.md</code> etc.</li>
+</ul></li>
+<li><strong>Implement:</strong> Nothing yet — RED phase. Just the test file additions.</li>
+<li><strong>Files:</strong> <code>tests/install.bats</code></li>
+<li><strong>Commit:</strong> <code>test(install): assert new docs/context layout and runtime-only .gitignore</code></li>
+</ul>
+<hr />
+<h3 id="step-2-update-installer-to-write-new-layout-green-for-step-1">Step 2: Update installer to write new layout (GREEN for Step 1)</h3>
+<ul>
+<li><strong>Test:</strong> Step 1's 4 new bats tests pass. All previous bats tests still pass (<code>bats tests/</code>).</li>
+<li><strong>Implement:</strong>
+<ul>
+<li>In <code>ai-native-workflow</code>:
+<ul>
+<li>Top-level constants (around line 30):
+<pre><code>SPEC_DIR=&quot;docs/context/specs&quot;
+SPRINT_FILE=&quot;docs/context/CURRENT_SPRINT.md&quot;
+RUNTIME_DIR=&quot;.context&quot;
+STATE_FILE=&quot;${RUNTIME_DIR}/.pipeline-state&quot;</code></pre>
+Remove the old <code>CONTEXT_DIR=".context/specs"</code> line.</li>
+<li>Around line 246: rewrite <code>AUDIT_LOG=".context/.pipeline-audit.log"</code> to use <code>${RUNTIME_DIR}/.pipeline-audit.log</code> (or keep literal if simpler — flag is purely cosmetic; what matters is no agent-prompt or sprint path leaks here).</li>
+<li>In <code>install_project_context</code> (line 3770): change the four <code>[ ! -f "$context_dir/CURRENT_SPRINT.md" ]</code> and <code>[ ! -f "$context_dir/specs/templates/feature-spec.md" ]</code> blocks to write to <code>$project_dir/docs/context/CURRENT_SPRINT.md</code> and <code>$project_dir/docs/context/specs/templates/feature-spec.md</code> respectively. Also <code>mkdir -p "$project_dir/docs/context/specs/templates"</code>. ARCHITECTURE/CONVENTIONS/GLOSSARY blocks STAY in <code>.context/</code>.</li>
+<li>In <code>install_project_gitignore</code> (line 4012): change <code>entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state")</code> to <code>entries=(".tdd-skip" ".claude/settings.local.json" ".context/.pipeline-state" ".context/.pipeline-audit.log" ".context/specs/*.jsonl")</code>.</li>
+</ul></li>
+</ul></li>
+<li><strong>Files:</strong> <code>ai-native-workflow</code></li>
+<li><strong>Commit:</strong> <code>feat(install): write specs and sprint to docs/context/, runtime stays in .context/</code></li>
+</ul>
+<hr />
+<h3 id="step-3-add-a-bats-guard-for-repo-level-gitignore-red">Step 3: Add a bats guard for repo-level .gitignore (RED)</h3>
+<ul>
+<li><strong>Test:</strong> In <code>tests/install.bats</code> (or a new short <code>tests/gitignore-shape.bats</code>), add 2 <code>@test</code>s checked against the repo's own <code>.gitignore</code>:
+<ul>
+<li><code>repo .gitignore: does NOT contain bare .context/</code> — <code>! grep -E '^\.context/$' "$BATS_TEST_DIRNAME/../.gitignore"</code>.</li>
+<li><code>repo .gitignore: contains the three runtime entries</code> — <code>grep -F '.context/.pipeline-state'</code> etc.</li>
+<li>These tests FAIL today (the bare line <code>.context/</code> is in <code>.gitignore</code>).</li>
+</ul></li>
+<li><strong>Implement:</strong> Nothing yet — RED.</li>
+<li><strong>Files:</strong> <code>tests/install.bats</code> (or new <code>tests/gitignore-shape.bats</code>)</li>
+<li><strong>Commit:</strong> <code>test(gitignore): assert repo .gitignore splits tracked specs from runtime</code></li>
+</ul>
+<hr />
+<h3 id="step-4-update-repo-gitignore-green-for-step-3">Step 4: Update repo .gitignore (GREEN for Step 3)</h3>
+<ul>
+<li><strong>Test:</strong> Step 3's 2 tests pass. All previous bats tests still pass.</li>
+<li><strong>Implement:</strong>
+<ul>
+<li>Replace the line <code>.context/</code> in <code>.gitignore</code> with:
+<pre><code>.context/.pipeline-state
+.context/.pipeline-audit.log
+.context/specs/*.jsonl</code></pre></li>
+</ul></li>
+<li><strong>Files:</strong> <code>.gitignore</code></li>
+<li><strong>Commit:</strong> <code>chore(gitignore): split tracked vs runtime artifacts under .context/</code></li>
+</ul>
+<p>Note: at this point the local <code>.context/CURRENT_SPRINT.md</code> and <code>.context/specs/BREW-1-*.md</code> will start showing in <code>git status</code> as untracked. That's correct — Step 7 migrates them to the tracked <code>docs/context/</code> location.</p>
+<hr />
+<h3 id="step-5-update-claude-code-agent-prompts">Step 5: Update Claude Code agent prompts</h3>
+<ul>
+<li><strong>Test:</strong> No new bats tests; the agents themselves don't have automated tests. Add a manual <code>rg</code> smoke check, codified as a bats test:
+<ul>
+<li><code>agents/claude-code: no spec/todo/requirements paths under .context/specs/</code> — <code>! rg -q '\.context/specs/&lt;id&gt;-(spec|todo|requirements|bugfix|brainstorm|testplan)' agents/claude-code/</code>.</li>
+<li><code>agents/claude-code: confidence jsonl path under .context/specs/ remains</code> — <code>rg -q '\.context/specs/.*-confidence\.jsonl' agents/claude-code/qa.md agents/claude-code/reviewer.md agents/claude-code/architect.md</code>.</li>
+<li><code>agents/claude-code: ARCHITECTURE/CONVENTIONS reads stay under .context/</code> — <code>rg -q '\.context/ARCHITECTURE\.md' agents/claude-code/architect.md</code>.</li>
+<li>These RED first.</li>
+</ul></li>
+<li><strong>Implement:</strong> Edit each file:
+<ul>
+<li><code>agents/claude-code/architect.md</code>: <code>.context/specs/&lt;id&gt;-&lt;n&gt;.md</code> → <code>docs/context/specs/&lt;id&gt;-&lt;n&gt;.md</code>; <code>.context/specs/&lt;id&gt;-todo.md</code> → <code>docs/context/specs/&lt;id&gt;-todo.md</code>; <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>. KEEP <code>.context/specs/&lt;id&gt;-confidence.jsonl</code>, <code>.context/specs/&lt;id&gt;-spec.md</code> reference inside the confidence-event jq snippet → CHANGE to <code>docs/context/specs/&lt;id&gt;-spec.md</code>. KEEP <code>.context/ARCHITECTURE.md</code> and <code>.context/CONVENTIONS.md</code>.</li>
+<li><code>agents/claude-code/qa.md</code>: <code>.context/specs/&lt;id&gt;-spec.md</code> (the AC list source) → <code>docs/context/specs/&lt;id&gt;-spec.md</code>. KEEP <code>.context/specs/${SPEC_ID}-confidence.jsonl</code>.</li>
+<li><code>agents/claude-code/reviewer.md</code>: <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>. KEEP <code>.context/specs/${SPEC_ID}-confidence.jsonl</code>.</li>
+<li><code>agents/claude-code/requirements-engineer.md</code>: <code>.context/specs/&lt;id&gt;-requirements.md</code> → <code>docs/context/specs/&lt;id&gt;-requirements.md</code>. KEEP <code>.context/ARCHITECTURE.md</code> / <code>.context/CONVENTIONS.md</code>.</li>
+<li><code>agents/claude-code/troubleshooter.md</code>: <code>.context/specs/&lt;ticket&gt;-bugfix.md</code> → <code>docs/context/specs/&lt;ticket&gt;-bugfix.md</code>; same for <code>&lt;ticket&gt;-todo.md</code>.</li>
+</ul></li>
+<li><strong>Files:</strong> <code>agents/claude-code/{architect,qa,reviewer,requirements-engineer,troubleshooter}.md</code>, <code>tests/install.bats</code> (the new bats checks).</li>
+<li><strong>Commit:</strong> Two commits per TDD: <code>test(agents): assert claude-code agent prompts use docs/context/specs/</code>, then <code>docs(agents): point claude-code agents to docs/context/</code>.</li>
+</ul>
+<hr />
+<h3 id="step-6-update-copilot-cli-agent-prompts">Step 6: Update Copilot CLI agent prompts</h3>
+<ul>
+<li><strong>Test:</strong> Mirror Step 5's bats checks for <code>agents/copilot-cli/</code>:
+<ul>
+<li><code>agents/copilot-cli: no spec/todo/requirements paths under .context/specs/</code></li>
+<li><code>agents/copilot-cli: confidence jsonl path under .context/specs/ remains</code></li>
+<li>These RED first.</li>
+</ul></li>
+<li><strong>Implement:</strong> Same edits for the Copilot variants:
+<ul>
+<li><code>agents/copilot-cli/architect.agent.md</code> (lines 6, 21, 22, 24, 37): <code>.context/specs/&lt;id&gt;-&lt;n&gt;.md</code>, <code>&lt;id&gt;-todo.md</code>, <code>&lt;id&gt;-spec.md</code> → <code>docs/context/specs/...</code>; <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>. KEEP <code>.context/specs/&lt;id&gt;-confidence.jsonl</code> (line 29). KEEP <code>.context/ARCHITECTURE.md</code> and <code>.context/CONVENTIONS.md</code> (line 18).</li>
+<li><code>agents/copilot-cli/qa.agent.md</code>: <code>.context/specs/&lt;id&gt;-spec.md</code> → <code>docs/context/specs/&lt;id&gt;-spec.md</code> (line 24). KEEP confidence path (line 35).</li>
+<li><code>agents/copilot-cli/reviewer.agent.md</code>: <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code> (lines 54, 68). KEEP confidence path (line 80).</li>
+<li><code>agents/copilot-cli/requirements-engineer.agent.md</code>: <code>.context/specs/&lt;id&gt;-requirements.md</code> → <code>docs/context/specs/&lt;id&gt;-requirements.md</code> (line 31). KEEP <code>.context/ARCHITECTURE.md</code> / <code>.context/CONVENTIONS.md</code> (line 29).</li>
+</ul></li>
+<li><strong>Files:</strong> <code>agents/copilot-cli/{architect,qa,reviewer,requirements-engineer}.agent.md</code>, <code>tests/install.bats</code>.</li>
+<li><strong>Commit:</strong> <code>test(agents): assert copilot-cli agent prompts use docs/context/specs/</code>, then <code>docs(agents): point copilot-cli agents to docs/context/</code>.</li>
+</ul>
+<p>(Note: there is no <code>agents/copilot-cli/troubleshooter.agent.md</code> with <code>.context/specs/</code> references — verified via the earlier <code>rg</code> scan. If one is added later, the same pattern applies.)</p>
+<hr />
+<h3 id="step-7-migrate-in-flight-brew-1-files-doc-only-skip-tdd">Step 7: Migrate in-flight BREW-1 files (doc-only, /skip-tdd)</h3>
+<ul>
+<li><strong>Test:</strong> None — this is a <code>git mv</code> of existing files. Existing tests must still pass.</li>
+<li><strong>Implement:</strong>
+<ul>
+<li>Run <code>/skip-tdd "doc-only migration of BREW-1 spec/todo and CURRENT_SPRINT.md to docs/context/"</code> to permit a commit without test changes.</li>
+<li>Execute:
+<pre><code>mkdir -p docs/context/specs
+git mv .context/CURRENT_SPRINT.md docs/context/CURRENT_SPRINT.md
+git mv .context/specs/BREW-1-anw-script-dir-symlink.md docs/context/specs/BREW-1-anw-script-dir-symlink.html
+git mv .context/specs/BREW-1-todo.md docs/context/specs/BREW-1-todo.html</code></pre></li>
+<li>Verify with <code>git status</code> that the moves are recorded, and the <code>.context/</code> directory now contains only ARCHITECTURE/CONVENTIONS/GLOSSARY.md (and <code>specs/</code> empty).</li>
+<li>Inside the moved <code>docs/context/specs/BREW-1-anw-script-dir-symlink.html</code> and <code>docs/context/specs/BREW-1-todo.html</code>, find/replace any internal references:
+<ul>
+<li><code>Spec: .context/specs/BREW-1-...</code> → <code>Spec: docs/context/specs/BREW-1-...</code></li>
+<li><code>Todo: .context/specs/BREW-1-todo.md</code> → <code>Todo: docs/context/specs/BREW-1-todo.html</code></li>
+</ul></li>
+<li>Same in the moved <code>docs/context/CURRENT_SPRINT.md</code> (the In Progress block lists those paths — confirmed in CURRENT_SPRINT.md lines 6-7 today).</li>
+</ul></li>
+<li><strong>Files:</strong> <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>; <code>.context/specs/BREW-1-anw-script-dir-symlink.md</code> → <code>docs/context/specs/BREW-1-anw-script-dir-symlink.html</code>; <code>.context/specs/BREW-1-todo.md</code> → <code>docs/context/specs/BREW-1-todo.html</code>.</li>
+<li><strong>Commit:</strong> <code>docs(context): migrate sprint board and BREW-1 spec to docs/context/</code> (with <code>/skip-tdd</code> marker file in the commit).</li>
+</ul>
+<hr />
+<h3 id="step-8-update-embedded-heredocs-in-ai-native-workflow">Step 8: Update embedded heredocs in ai-native-workflow</h3>
+<ul>
+<li><strong>Test:</strong> Add a bats check <code>cli: ai-native-workflow heredocs use docs/context/ for spec/sprint paths</code>:
+<ul>
+<li><code>! rg -q '\.context/specs/(&lt;id&gt;|\\$\\{?SPEC_ID\\}?)-(spec|todo|requirements|bugfix|brainstorm|testplan)\.md' ai-native-workflow</code></li>
+<li><code>! rg -q '\.context/CURRENT_SPRINT\.md' ai-native-workflow</code> — <em>but</em> allow it inside the embedded <code>session-start.sh</code> heredoc only if the source <code>hooks/session-start.sh</code> was already updated. To keep things simple: assert ZERO occurrences of <code>.context/CURRENT_SPRINT</code> after this step.</li>
+<li>These RED first because lines 1979, 2191, 2204, 2293, 2463, 2473, 2707, 2713, 2769, 2774, 2779, 2798, 3075-3076, 3197, 3199, 3226, 3238, 3241-3244, 3635, 3670, 3675-3677, 3713, 3740, 3743, 3746, 3762, 3890-3892 still reference old paths.</li>
+</ul></li>
+<li><strong>Implement:</strong> Update every embedded heredoc in <code>ai-native-workflow</code> that mirrors an agent prompt, skill, or installed file. Concretely:
+<ul>
+<li>The session-start hook heredoc (~line 1979) — change to <code>docs/context/CURRENT_SPRINT.md</code>.</li>
+<li>The <code>architect</code>, <code>qa</code>, <code>reviewer</code>, <code>requirements-engineer</code>, <code>troubleshooter</code>, <code>brainstorm</code> heredoc bodies (lines ~2191-2204, 2293, 2463-2473, 2707-2713, 2769-2798, 3075-3076, 3197-3244) — same find/replace as Steps 5/6.</li>
+<li>The <code>install_project_agents_md</code> AGENTS.md heredoc (lines ~3635, 3670, 3675-3677, 3713) — change <code>.context/CURRENT_SPRINT.md</code> and <code>.context/specs/</code> (when followed by spec/todo/requirements text) to <code>docs/context/...</code>. KEEP <code>.context/ARCHITECTURE.md</code> and <code>.context/CONVENTIONS.md</code> reads on lines 3676-3677.</li>
+<li>The <code>install_project_claude_md</code> CLAUDE.md heredoc (lines ~3740-3762): "Read <code>.context/CURRENT_SPRINT.md</code> for active tasks" → <code>docs/context/CURRENT_SPRINT.md</code>; "Feature specifications are in <code>.context/specs/</code>" → <code>docs/context/specs/</code>; the <code>.context/</code> row in the Key Paths table updates to clarify "Architecture, conventions, glossary, runtime state" while a new <code>docs/context/</code> row says "Sprint board + tracked specs". KEEP the <code>.context/ARCHITECTURE.md</code> line.</li>
+<li>The <code>install_project_copilot</code> copilot-instructions.md heredoc (lines ~3890-3892): "Check <code>.context/specs/</code> for feature specifications" → "Check <code>docs/context/specs/</code> for feature specifications". KEEP <code>.context/ARCHITECTURE.md</code> and <code>.context/CONVENTIONS.md</code> lines.</li>
+<li>The help text and "what gets installed" tables (around lines 4280, 4370): the per-project section gets a new <code>docs/context/</code> entry.</li>
+</ul></li>
+<li><strong>Files:</strong> <code>ai-native-workflow</code>, <code>tests/install.bats</code>.</li>
+<li><strong>Commit:</strong> Two: <code>test(cli): assert ai-native-workflow heredocs use docs/context/</code>, then <code>docs(cli): align embedded heredocs with docs/context/ split</code>.</li>
+</ul>
+<hr />
+<h3 id="step-9-update-hookssession-startsh">Step 9: Update hooks/session-start.sh</h3>
+<ul>
+<li><strong>Test:</strong> Add a bats <code>@test</code> <code>hooks: session-start reads sprint from docs/context/CURRENT_SPRINT.md</code>:
+<ul>
+<li>Create a tempdir <code>PROJECT_DIR</code> with <code>docs/context/CURRENT_SPRINT.md</code> containing a known string. Run <code>bash hooks/session-start.sh</code> with <code>CLAUDE_PROJECT_DIR="$PROJECT_DIR"</code>. Assert the known string appears in stdout.</li>
+<li>And the negative: with only <code>.context/CURRENT_SPRINT.md</code> present, the known string should NOT appear (we've intentionally hard-cut).</li>
+<li>RED first.</li>
+</ul></li>
+<li><strong>Implement:</strong> In <code>hooks/session-start.sh</code> (lines 40-41), change <code>$PROJECT_DIR/.context/CURRENT_SPRINT.md</code> to <code>$PROJECT_DIR/docs/context/CURRENT_SPRINT.md</code>.
+<ul>
+<li>Note: the embedded copy in <code>ai-native-workflow</code> (~line 1979) is updated in Step 8; this step only touches the source file. Confirm both already match after Step 8 — if not, fix here.</li>
+</ul></li>
+<li><strong>Files:</strong> <code>hooks/session-start.sh</code>, <code>tests/install.bats</code> (or a new <code>tests/session-start-hook.bats</code>).</li>
+<li><strong>Commit:</strong> <code>test(hooks): assert session-start.sh reads sprint from docs/context/</code>, then <code>feat(hooks): point session-start.sh sprint read to docs/context/CURRENT_SPRINT.md</code>.</li>
+</ul>
+<hr />
+<h3 id="step-10-update-templatesagentsmd-and-skills">Step 10: Update templates/AGENTS.md and skills</h3>
+<ul>
+<li><strong>Test:</strong> Add a bats <code>@test</code> <code>docs: templates/AGENTS.md and skills/ reference docs/context/ for sprint and specs</code>:
+<ul>
+<li><code>! rg -q '\.context/CURRENT_SPRINT\.md|\.context/specs/[^c]' templates/AGENTS.md skills/</code> — except the line <code>Read .context/ARCHITECTURE.md</code> and <code>.context/CONVENTIONS.md</code> are allowed (those don't move). Use a pattern that excludes those (<code>rg -v</code> or two narrower patterns).</li>
+<li>Practical assertion: <code>! rg -q '\.context/CURRENT_SPRINT\.md' templates/AGENTS.md skills/</code> AND <code>! rg -q '\.context/specs/&lt;.*&gt;(-spec|-todo|-requirements|-bugfix|-brainstorm|-testplan)?\.md' templates/AGENTS.md skills/</code>.</li>
+<li>RED first.</li>
+</ul></li>
+<li><strong>Implement:</strong>
+<ul>
+<li><code>templates/AGENTS.md</code>: lines 29, 64, 69, 71 (KEEP), 72 (KEEP), 108 — replace <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code> and <code>.context/specs/</code> (when about specs) → <code>docs/context/specs/</code>. Lines 70-71 (<code>.context/ARCHITECTURE.md</code>, <code>.context/CONVENTIONS.md</code>) STAY.</li>
+<li><code>skills/ticket/SKILL.md</code>: line 37 <code>.context/specs/&lt;ticket-id&gt;-...md</code> → <code>docs/context/specs/...</code>; line 50 <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>.</li>
+<li><code>skills/session-report/SKILL.md</code>: line 33 <code>.context/CURRENT_SPRINT.md</code> → <code>docs/context/CURRENT_SPRINT.md</code>.</li>
+<li><code>skills/brainstorm/SKILL.md</code>: lines 24, 34 <code>.context/specs/&lt;id&gt;-brainstorm.md</code> → <code>docs/context/specs/&lt;id&gt;-brainstorm.md</code>.</li>
+<li><code>skills/pipeline-gitlab-feature/SKILL.md</code>, <code>skills/pipeline-github-feature/SKILL.md</code>, <code>skills/pipeline-gitlab-incident/SKILL.md</code>: every <code>.context/specs/&lt;id&gt;-...md</code> referenced as spec/todo/requirements/testplan/bugfix → <code>docs/context/specs/...</code>.</li>
+<li><code>skills/adr/SKILL.md</code>: line 27 <code>.context/ARCHITECTURE.md</code> STAYS unchanged (per-project doc).</li>
+</ul></li>
+<li><strong>Files:</strong> <code>templates/AGENTS.md</code>, <code>skills/ticket/SKILL.md</code>, <code>skills/session-report/SKILL.md</code>, <code>skills/brainstorm/SKILL.md</code>, <code>skills/pipeline-gitlab-feature/SKILL.md</code>, <code>skills/pipeline-github-feature/SKILL.md</code>, <code>skills/pipeline-gitlab-incident/SKILL.md</code>, <code>tests/install.bats</code>.</li>
+<li><strong>Commit:</strong> <code>test(docs): assert AGENTS template and skills reference docs/context/</code>, then <code>docs(skills): align AGENTS template and skills with docs/context/ split</code>.</li>
+</ul>
+<hr />
+<h3 id="step-11-update-readmemd-and-docsarchitecturemd">Step 11: Update README.md and docs/ARCHITECTURE.html</h3>
+<ul>
+<li><strong>Test:</strong> Add a bats <code>@test</code> <code>docs: README and ARCHITECTURE list docs/context/ for tracked specs</code>:
+<ul>
+<li><code>rg -q 'docs/context/' README.md docs/ARCHITECTURE.html</code> (positive — must mention).</li>
+<li><code>! rg -q '\.context/specs/&lt;id&gt;-(requirements|spec|todo|bugfix|testplan|brainstorm)\.md' README.md docs/ARCHITECTURE.html</code> (negative — old paths gone).</li>
+<li>The <code>.context/specs/&lt;id&gt;-confidence.jsonl</code> references in README.md (lines 220, 255) STAY — they're describing a runtime path.</li>
+<li>RED first.</li>
+</ul></li>
+<li><strong>Implement:</strong>
+<ul>
+<li><code>docs/ARCHITECTURE.html</code>: lines 45, 114 — <code>.context/specs/&lt;id&gt;-requirements.md</code> → <code>docs/context/specs/&lt;id&gt;-requirements.md</code>. Add a one-paragraph "Path conventions" section near "Key Design Decisions" (line 185) explaining the split: tracked specs in <code>docs/context/</code>, runtime in <code>.context/</code>.</li>
+<li><code>README.md</code>: line 143 — split the <code>.context/</code> row in the per-project install table into two: <code>docs/context/</code> (Sprint, specs, todos, requirements) and <code>.context/</code> (Architecture/conventions/glossary + runtime state). Lines 220 and 255 stay (confidence jsonl path).</li>
+</ul></li>
+<li><strong>Files:</strong> <code>README.md</code>, <code>docs/ARCHITECTURE.html</code>, <code>tests/install.bats</code>.</li>
+<li><strong>Commit:</strong> <code>test(docs): assert README and ARCHITECTURE describe docs/context/ split</code>, then <code>docs: document context split in README and ARCHITECTURE</code>.</li>
+</ul>
+<hr />
+<h3 id="step-12-integration-smoke-test">Step 12: Integration smoke test</h3>
+<ul>
+<li><strong>Test:</strong> Add an integration-style bats test (or a single shell script invoked from a bats <code>@test</code>) that:
+<ul>
+<li>Spins a tempdir as a fake project (no git init needed for this — just file presence checks).</li>
+<li>Runs <code>CLAUDE_HOME="$SANDBOX_CLAUDE" "$AW" install global</code> AND <code>"$AW" install project "$SANDBOX_PROJECT"</code>.</li>
+<li>Asserts:
+<ul>
+<li><code>[ -f "$SANDBOX_PROJECT/docs/context/CURRENT_SPRINT.md" ]</code></li>
+<li><code>[ -f "$SANDBOX_PROJECT/docs/context/specs/templates/feature-spec.md" ]</code></li>
+<li><code>[ -f "$SANDBOX_PROJECT/.context/ARCHITECTURE.md" ]</code> (still installed there)</li>
+<li><code>grep -F '.context/.pipeline-state' "$SANDBOX_PROJECT/.gitignore"</code></li>
+<li><code>! grep -E '^\.context/$' "$SANDBOX_PROJECT/.gitignore"</code></li>
+<li><code>[ -f "$SANDBOX_CLAUDE/agents/architect.md" ]</code> AND <code>! grep -E '\.context/specs/&lt;id&gt;-(spec|todo|requirements)' "$SANDBOX_CLAUDE/agents/architect.md"</code>.</li>
+</ul></li>
+<li>This is the AC-15 promise — one fresh install proves the new layout is wired end-to-end.</li>
+</ul></li>
+<li><strong>Implement:</strong> No new code — just the test. By this step, all previous changes should make this test green.</li>
+<li><strong>Files:</strong> <code>tests/install.bats</code> (new section at the bottom).</li>
+<li><strong>Commit:</strong> <code>test(install): integration smoke — install project lands tracked specs at docs/context/</code>.</li>
+</ul>
+<hr />
+<h3 id="step-13-final-smoke-pass--run-all-tests">Step 13: Final smoke pass + run all tests</h3>
+<ul>
+<li><strong>Test:</strong> Run the full bats suite: <code>bats tests/</code>. All tests pass (105 existing + ~12 new from Steps 1, 3, 5, 6, 8, 9, 10, 11, 12).</li>
+<li><strong>Implement:</strong> Audit <code>rg</code> pass to catch any stragglers:
+<pre><code>rg -n &#39;\.context/specs/[^/]*-(spec|todo|requirements|bugfix|testplan|brainstorm)\.md&#39; \
+  --glob &#39;!spikes/**&#39; --glob &#39;!.git/**&#39; --glob &#39;!.context/**&#39; --glob &#39;!docs/context/**&#39;
+rg -n &#39;\.context/CURRENT_SPRINT\.md&#39; \
+  --glob &#39;!spikes/**&#39; --glob &#39;!.git/**&#39; --glob &#39;!.context/**&#39; --glob &#39;!docs/context/**&#39;</code></pre>
+Both should return zero matches. Fix any stragglers in this same step.
+<ul>
+<li>Update <code>.context/CURRENT_SPRINT.md</code> (now at <code>docs/context/CURRENT_SPRINT.md</code>) to mark CTX-1 as Done.</li>
+</ul></li>
+<li><strong>Files:</strong> Whatever the final audit catches (likely nothing if Steps 1–12 were thorough); <code>docs/context/CURRENT_SPRINT.md</code>.</li>
+<li><strong>Commit:</strong> <code>chore(context): mark CTX-1 done</code> (or fold into an earlier commit if no source files changed).</li>
+</ul>
+<hr />
+<h2 id="status-checklist">Status checklist</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Step 1 — RED: bats tests for new install layout</label></li>
+<li><label><input type="checkbox" checked="" />Step 2 — GREEN: installer writes new layout</label></li>
+<li><label><input type="checkbox" checked="" />Step 3 — RED: bats guard for repo .gitignore</label></li>
+<li><label><input type="checkbox" checked="" />Step 4 — GREEN: repo .gitignore updated</label></li>
+<li><label><input type="checkbox" checked="" />Step 5 — Claude Code agent prompts updated (test + impl)</label></li>
+<li><label><input type="checkbox" checked="" />Step 6 — Copilot CLI agent prompts updated (test + impl)</label></li>
+<li><label><input type="checkbox" checked="" />Step 7 — In-flight BREW-1 files migrated (<code>/skip-tdd</code>)</label></li>
+<li><label><input type="checkbox" checked="" />Step 8 — <code>ai-native-workflow</code> heredocs updated (test + impl)</label></li>
+<li><label><input type="checkbox" checked="" />Step 9 — <code>hooks/session-start.sh</code> updated (test + impl)</label></li>
+<li><label><input type="checkbox" checked="" />Step 10 — <code>templates/AGENTS.md</code> + skills updated (test + impl)</label></li>
+<li><label><input type="checkbox" checked="" />Step 11 — README + ARCHITECTURE updated (test + impl)</label></li>
+<li><label><input type="checkbox" checked="" />Step 12 — Integration smoke test</label></li>
+<li><label><input type="checkbox" checked="" />Step 13 — Final audit pass + sprint board mark Done</label></li>
+</ul>
+<h2 id="done-definition">Done definition</h2>
+<p>All 17 ACs from <code>CTX-1-spec.md</code> verified, all bats tests pass, the BREW-1 spec is now reviewable in <code>docs/context/specs/</code>, and a fresh <code>ai-native-workflow install project</code> into a sandbox produces the new layout. Branch <code>feat/context-split</code> ready to PR.</p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

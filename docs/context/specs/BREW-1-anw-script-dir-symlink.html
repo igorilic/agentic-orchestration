@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>BREW-1 — Resolve _ANW_SCRIPT_DIR through symlinks</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">BREW-1 — Resolve <code>_ANW_SCRIPT_DIR</code> through symlinks</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Status:</strong> Proposed <strong>Date:</strong> 2026-05-02 <strong>Owner:</strong> architect → tdd-developer <strong>Source:</strong> <code>spikes/brew-packaging/FINDINGS.md</code> (TL;DR + "Critical bug discovered")</p>
+<hr />
+<h2 id="problem-statement">Problem Statement</h2>
+<p><code>ai-native-workflow</code> line 82 sets:</p>
+<pre class="bash"><code>_ANW_SCRIPT_DIR=&quot;$(cd &quot;$(dirname &quot;${BASH_SOURCE[0]}&quot;)&quot; &amp;&amp; pwd)&quot;</code></pre>
+<p><code>${BASH_SOURCE[0]}</code> is the path bash was invoked with — bash does <strong>not</strong> dereference symlinks before <code>dirname</code>. Consequence: when the CLI is invoked through any symlink, <code>_ANW_SCRIPT_DIR</code> resolves to the directory containing the <strong>symlink</strong>, not the directory containing the real script.</p>
+<p>This breaks every downstream <code>cp "$_ANW_SCRIPT_DIR/..."</code> and <code>source "$_ANW_SCRIPT_DIR/..."</code>, of which there are 6 occurrences (lines 83, 85, 2037, 2047, 2051, 2218, 2220) — all of them load the supporting tree (<code>hooks/</code>, <code>scripts/</code>, <code>skills/</code>) that lives next to the real script.</p>
+<p>Confirmed live in spike (<code>spikes/brew-packaging/FINDINGS.md</code>):</p>
+<pre><code>BASH_SOURCE[0]: /tmp/brewtest/bin/myscript       &lt;- symlink, NOT resolved
+dirname:        /tmp/brewtest/bin                 &lt;- WRONG</code></pre>
+<h3 id="why-now">Why now</h3>
+<ol type="1">
+<li><strong>Brew install layout is exactly this scenario.</strong> <code>/opt/homebrew/bin/ai-native-workflow</code> is a symlink into <code>/opt/homebrew/Cellar/.../libexec/</code>. Without the fix, brew installs silently fail in <code>install global</code>.</li>
+<li><strong>Developers who alias the CLI hit the same bug.</strong> Today the user has <code>~/.local/bin/ai-native-workflow → ~/open-source/agentic-orchestration/ai-native-workflow</code>; that works only because the symlink target sits inside the real source tree. The moment that assumption stops holding, the same failure mode applies.</li>
+<li><strong>Spike-recommended fix #2:</strong> patching the production CLI is more robust than the alternative (<code>inreplace</code> at brew-formula install time), and removes a fragility from the future tap rollout.</li>
+</ol>
+<hr />
+<h2 id="context">Context</h2>
+<ul>
+<li>Single bash script (<code>ai-native-workflow</code>, ~2200 lines).</li>
+<li>Test harness is <code>bats-core</code>. 99 existing tests live in <code>tests/*.bats</code>.</li>
+<li>The <code>_ANW_SCRIPT_DIR</code> line runs at script-load time (line 82), <strong>before</strong> any other helpers, before the bash version check, and before dependency setup. Whatever fix is chosen must run on macOS system bash 3.2 because some users may invoke the CLI before they've installed brew bash 5 (chicken-and-egg).</li>
+<li>The CLI's full feature set uses bash 4 features (<code>declare -A</code>, namerefs), but the <code>_ANW_SCRIPT_DIR</code> line itself sits above those uses and must remain bash 3.2-safe.</li>
+<li>No GNU coreutils on stock macOS — <code>realpath</code> is <strong>not</strong> present unless the user installed <code>coreutils</code> via brew (which provides <code>greadlink</code> and <code>grealpath</code>). System <code>readlink</code> exists but lacks <code>-f</code>.</li>
+</ul>
+<hr />
+<h2 id="proposed-solution">Proposed Solution</h2>
+<p>Replace line 82 with a portable symlink-resolving block that:</p>
+<ol type="1">
+<li>Prefers <code>realpath</code> if available (Linux, or macOS with <code>coreutils</code> installed).</li>
+<li>Falls back to <code>greadlink -f</code> if available (macOS with <code>coreutils</code>).</li>
+<li>Falls back to a pure-bash symlink-walk loop using only <code>readlink</code>, <code>dirname</code>, <code>cd</code>, <code>pwd</code>.</li>
+</ol>
+<p>The fallback handles every macOS install where neither GNU tool is present. After resolving the symlink chain, run the existing <code>cd ... &amp;&amp; pwd</code> to canonicalize.</p>
+<pre class="bash"><code># Resolve BASH_SOURCE[0] through any symlink chain so $_ANW_SCRIPT_DIR
+# is always the directory containing the real script file.
+_anw_resolve_source() {
+  local src=&quot;${BASH_SOURCE[0]}&quot;
+  if command -v realpath &gt;/dev/null 2&gt;&amp;1; then
+    realpath &quot;$src&quot;
+    return
+  fi
+  if command -v greadlink &gt;/dev/null 2&gt;&amp;1; then
+    greadlink -f &quot;$src&quot;
+    return
+  fi
+  # Pure-bash fallback (bash 3.2-safe). Walk the symlink chain manually.
+  while [ -L &quot;$src&quot; ]; do
+    local target
+    target=&quot;$(readlink &quot;$src&quot;)&quot;
+    case &quot;$target&quot; in
+      /*) src=&quot;$target&quot; ;;
+      *)  src=&quot;$(cd &quot;$(dirname &quot;$src&quot;)&quot; &amp;&amp; pwd)/$target&quot; ;;
+    esac
+  done
+  echo &quot;$src&quot;
+}
+_ANW_SCRIPT_DIR=&quot;$(cd &quot;$(dirname &quot;$(_anw_resolve_source)&quot;)&quot; &amp;&amp; pwd)&quot;
+unset -f _anw_resolve_source</code></pre>
+<h3 id="why-a-helper-function-vs-the-inlined-nested--from-the-prompt">Why a helper function vs the inlined nested-<code>$(...)</code> from the prompt</h3>
+<ul>
+<li>The prompt suggested an inlined block. That works but is ~10 lines wrapped in <code>$(cd "$(dirname "$(...)")" &amp;&amp; pwd)</code> and is hard to read / hard to test.</li>
+<li>Extracting <code>_anw_resolve_source</code> makes the resolution unit independently inspectable and lets the bats test source the script (or invoke it) and assert on <code>$_ANW_SCRIPT_DIR</code> directly without recreating the logic in test-land.</li>
+<li>Function is <code>unset</code> immediately after use to keep the global namespace clean — symmetric with the existing helper convention in the file.</li>
+<li>Total addition: ~17 lines including comments. Well under the "ballooned" threshold.</li>
+</ul>
+<h3 id="why-not-realpath-only">Why not <code>realpath</code> only</h3>
+<p>Single-line <code>realpath "$src"</code> is cleaner but <strong>fails on stock macOS</strong> where coreutils is not installed. Brew formulas can declare <code>depends_on "coreutils"</code>, but the production CLI also runs in non-brew contexts (developer aliases, curl-piped installs, CI). The fallback chain costs ~6 lines and removes a class of "works on my machine" failures.</p>
+<h3 id="trade-off-summary">Trade-off summary</h3>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>realpath</code> only</td>
+<td>1 line</td>
+<td>Breaks on stock macOS without coreutils</td>
+</tr>
+<tr>
+<td><code>realpath</code> → <code>greadlink -f</code> → bash loop (chosen)</td>
+<td>Works everywhere, no new deps</td>
+<td>~10 extra lines</td>
+</tr>
+<tr>
+<td>Patch via <code>inreplace</code> in brew formula</td>
+<td>Zero CLI change</td>
+<td>Fragile to script edits, doesn't help non-brew users</td>
+</tr>
+</tbody>
+</table>
+<p>Chosen option matches spike recommendation (fix #2).</p>
+<hr />
+<h2 id="acceptance-criteria">Acceptance Criteria</h2>
+<ul>
+<li><strong>AC-1:</strong> When <code>ai-native-workflow</code> is invoked at its canonical path (no symlinks), <code>$_ANW_SCRIPT_DIR</code> equals the directory containing the script file. (Unchanged behavior — regression guard.)</li>
+<li><strong>AC-2:</strong> When invoked via a single-level symlink (<code>ln -s /real/path/cli /tmp/x/cli</code> and run <code>/tmp/x/cli</code>), <code>$_ANW_SCRIPT_DIR</code> resolves to <code>/real/path</code> (the real parent), not <code>/tmp/x</code>.</li>
+<li><strong>AC-3:</strong> When invoked via a symlink chain (<code>a → b → real</code>), <code>$_ANW_SCRIPT_DIR</code> resolves to the directory of <code>real</code>, regardless of chain depth.</li>
+<li><strong>AC-4:</strong> Resolution works on macOS (where stock <code>readlink</code> lacks <code>-f</code> and stock bash is 3.2) and on Linux (where both <code>realpath</code> and <code>readlink -f</code> are available). The macOS path is exercised by forcing the pure-bash fallback in the test fixture.</li>
+<li><strong>AC-5:</strong> All 99 existing bats tests still pass — no regressions in <code>tests/install.bats</code>, <code>tests/sanity.bats</code>, <code>tests/confidence*.bats</code>, or <code>tests/cli-confidence.bats</code>.</li>
+<li><strong>AC-6:</strong> A new bats file <code>tests/script-dir.bats</code> covers AC-1 through AC-3 against the real CLI script using a temp-dir symlink fixture.</li>
+</ul>
+<hr />
+<h2 id="technical-design">Technical Design</h2>
+<h3 id="files-affected">Files affected</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ai-native-workflow</code></td>
+<td>Replace line 82 with the helper-function block above.</td>
+</tr>
+<tr>
+<td><code>tests/script-dir.bats</code></td>
+<td><strong>New.</strong> Symlink-fixture tests for AC-1, AC-2, AC-3.</td>
+</tr>
+</tbody>
+</table>
+<p>No other files change. No new dependencies.</p>
+<h3 id="test-strategy">Test strategy</h3>
+<p>The CLI is invoked with <code>AW_DRY_RUN=1</code> to avoid running the agent pipeline. We do <strong>not</strong> want to run <code>install global</code> — that's already covered by <code>tests/install.bats</code> and would be slow / require sandboxing. Instead we add a lightweight introspection path: invoke the script in a mode that prints <code>$_ANW_SCRIPT_DIR</code> and exits.</p>
+<p>Two options for the introspection probe:</p>
+<ol type="1">
+<li><strong>Source the script in the test</strong> with a guard that skips main execution and inspect <code>$_ANW_SCRIPT_DIR</code> directly. Requires adding a guard like <code>[ "${_ANW_SOURCE_ONLY:-0}" = "1" ] &amp;&amp; return 0</code> near the top.</li>
+<li><strong>Add a hidden subcommand</strong> <code>ai-native-workflow __print-script-dir</code> that echoes <code>$_ANW_SCRIPT_DIR</code> and exits.</li>
+</ol>
+<p><strong>Chosen: option 2 (hidden subcommand).</strong> Pros: doesn't pollute the script with a sourcing-mode guard, doesn't risk leaking partially-loaded state into the test process, naturally exercises the real invocation path (which is what we're testing). Documented as internal/test-only — prefix with <code>__</code> per convention. Cost: ~3 lines added near the dispatch table.</p>
+<p>The fallback path (AC-4 macOS bash 3.2) is exercised by setting <code>PATH=/usr/bin:/bin</code> in one test variant so neither <code>realpath</code> nor <code>greadlink</code> is on PATH, forcing the bash loop.</p>
+<h3 id="test-cases">Test cases</h3>
+<ul>
+<li><code>script-dir: canonical invocation matches script directory</code> (AC-1)</li>
+<li><code>script-dir: single-level symlink resolves to real parent dir</code> (AC-2)</li>
+<li><code>script-dir: symlink chain (a -&gt; b -&gt; real) resolves to real parent dir</code> (AC-3)</li>
+<li><code>script-dir: pure-bash fallback works without realpath/greadlink on PATH</code> (AC-4)</li>
+</ul>
+<h3 id="performance">Performance</h3>
+<p>The helper runs once per CLI invocation. Worst case: a chain of N symlinks runs N <code>readlink</code> calls. This is identical to what <code>realpath</code> does internally. Negligible.</p>
+<hr />
+<h2 id="risks">Risks</h2>
+<ul>
+<li><strong>Risk 1: bash 3.2 syntax slip.</strong> The fallback loop must avoid bash 4 features. Specifically: no namerefs, no <code>${var,,}</code>, no <code>mapfile</code>. The proposed block uses only <code>local</code>, <code>case</code>, <code>while</code>, <code>[ -L ]</code>, <code>readlink</code>, <code>dirname</code>, <code>cd</code>, <code>pwd</code>, <code>echo</code>, all bash 3.2-safe. <em>Mitigation:</em> QA agent runs the bats suite under <code>bash --version</code> 3.2 if available; CI on macOS hits stock bash anyway when bats invokes <code>/usr/bin/env bash</code>.</li>
+<li><strong>Risk 2: <code>cd</code> in the fallback could fail silently</strong> if a symlink points to a non-existent dir. The original code had the same property (<code>cd ... &amp;&amp; pwd</code> short-circuits). Acceptable — same failure surface.</li>
+<li><strong>Risk 3: hidden subcommand leaks into help/usage output.</strong> Mitigation: use a <code>__</code>-prefixed name and exclude from the help dispatch table.</li>
+<li><strong>Risk 4: the <code>unset -f</code> is a bash 4 feature on some old systems.</strong> Actually <code>unset -f</code> is POSIX and works in bash 3.2 — verified. No risk.</li>
+</ul>
+<hr />
+<h2 id="out-of-scope">Out of Scope</h2>
+<ul>
+<li>Brew formula authoring — that's the next ticket after BREW-1 ships.</li>
+<li>Replacing the <code>inreplace</code> step in <code>Formula/ai-native-workflow.rb</code>. The formula draft in the spike still calls <code>inreplace</code>; once BREW-1 lands, the formula can drop that step in a follow-up.</li>
+<li>Refactoring the 6 callers of <code>_ANW_SCRIPT_DIR</code> — they're already correct given a correct <code>_ANW_SCRIPT_DIR</code>.</li>
+<li>Changes to <code>tests/install.bats</code> — its existing assertions are valid as-is and will exercise the fixed code path through the normal bats invocation.</li>
+</ul>
+<hr />
+<h2 id="open-questions">Open Questions</h2>
+<p>None. The spike already verified the bug behavior live and the recommended fix direction. Architect chose helper-function form over inlined form for readability; that is a style call, not a behavioral one.</p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>
