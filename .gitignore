@@ -12,3 +12,4 @@ spikes/
 # Local design system (Tailwind Plus Spotlight, licensed): installed as a skill, never committed
 skills/spotlight-design/
 docs/.design
+dist/
