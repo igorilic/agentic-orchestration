@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>COP-1 — Symmetric Copilot CLI harness for install global</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">COP-1 — Symmetric Copilot CLI harness for <code>install global</code></h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Status:</strong> Accepted (architect) <strong>Date:</strong> 2026-05-02 <strong>Owner:</strong> architect → tdd-developer <strong>Source:</strong></p>
+<ul>
+<li>Requirements: <code>docs/context/specs/COP-1-requirements.html</code></li>
+<li>User instruction: this thread (<code>go</code> accept-all-defaults on OQ-1..OQ-6)</li>
+<li>Related code:
+<ul>
+<li><code>ai-native-workflow:1659</code> (<code>install_global</code>)</li>
+<li><code>ai-native-workflow:3157</code> (<code>install_copilot_agents</code>)</li>
+<li><code>ai-native-workflow:4054</code> (<code>show_status</code>)</li>
+<li><code>ai-native-workflow:4191</code> (<code>uninstall_global</code>)</li>
+<li><code>Formula/ai-native-workflow.rb</code> (brew formula, packages <code>libexec/skills/</code>)</li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="1-problem-statement">1. Problem statement</h2>
+<p><code>install global</code> already gives Claude Code a full harness — global instructions (<code>CLAUDE.md</code>), <code>settings.json</code> with hooks, helper scripts, all 14 skills as <code>&lt;name&gt;/SKILL.md</code> directories, and 7 agents. The Copilot CLI side gets only <strong>agents</strong>. After running <code>install global</code>, a fresh <code>copilot</code> session has no skills, no global instructions, and no seeded settings — every prior user has had to populate those by hand.</p>
+<p>COP-1 closes the symmetry gap for everything that has a global Copilot equivalent. Hooks are explicitly out of scope (Copilot CLI scopes hooks per-repo only, deferred to COP-2).</p>
+<h2 id="2-context">2. Context</h2>
+<h3 id="what-the-claude-side-does-today">What the Claude side does today</h3>
+<p><code>install_global</code> orchestrates six sub-functions (<code>install_global_claude_md</code>, <code>install_global_settings</code>, <code>install_global_hooks</code>, <code>install_global_scripts</code>, <code>install_global_skills</code>, <code>install_global_agents</code>) that all write under <code>CLAUDE_DIR="${CLAUDE_HOME:-$HOME/.claude}"</code>. Each uses <code>backup_if_exists</code> (<code>ai-native-workflow:64</code>) before overwriting and honors <code>CLAUDE_HOME</code> for hermetic sandbox testing (this is how the bats suite at <code>tests/install.bats</code> runs the installer into <code>mktemp -d</code>).</p>
+<h3 id="what-the-copilot-side-does-today">What the Copilot side does today</h3>
+<p>Only <code>install_copilot_agents</code> (<code>ai-native-workflow:3157</code>) runs. It:</p>
+<ul>
+<li>guards on <code>command -v copilot</code> (skips if absent, exit 0)</li>
+<li>writes 7 <code>*.agent.md</code> files into <code>${COPILOT_HOME:-$HOME/.copilot}/agents/</code></li>
+<li>does <strong>not</strong> call <code>backup_if_exists</code> (silent overwrite — see fix below)</li>
+<li>defines <code>COPILOT_DIR</code> as a function-local variable</li>
+</ul>
+<p>The skills source dir (<code>skills/&lt;name&gt;/SKILL.md</code>, plus the <code>override-confidence/skill.bash</code> helper) is already shipped by the brew formula via <code>libexec.install Dir["skills", ...]</code> (formula L36) and the CLI's <code>_ANW_SCRIPT_DIR</code> (post-BREW-1) resolves through symlinks to find it. So we can <code>cp -R</code> from <code>$_ANW_SCRIPT_DIR/skills/</code> for the Copilot install (OQ-1 default — option <strong>b</strong>).</p>
+<h3 id="what-the-user-actually-has-on-disk">What the user actually has on disk</h3>
+<p>The repo's <code>skills/</code> directory contains exactly <strong>14</strong> subdirectories:</p>
+<pre><code>adr  brainstorm  clusters  explore  override-confidence
+pipeline-github-feature  pipeline-gitlab-feature  pipeline-gitlab-incident
+plan  pr  session-report  skip-tdd  tdd  ticket</code></pre>
+<p>The requirements doc speculatively listed 17 skills (<code>security-review</code>, <code>k8s</code>, <code>kibana</code>, <code>app-insights</code> are aspirational and not present in the repo today). <strong>This spec ships the 14 that exist.</strong> If new skills are added later, the install logic — which iterates the source directory — picks them up automatically with no code change.</p>
+<h3 id="constraint-inherited-from-ctx-1">Constraint inherited from CTX-1</h3>
+<p>CTX-1 introduced top-level constants (<code>SPEC_DIR</code>, <code>SPRINT_FILE</code>) at the top of the script. We extend the same pattern: introduce <code>COPILOT_DIR</code> (promoted from a function-local), <code>COPILOT_SKILLS_DIR</code>, <code>COPILOT_INSTRUCTIONS_FILE</code>, <code>COPILOT_SETTINGS_FILE</code>, <code>COPILOT_AGENTS_DIR</code> as top-level constants alongside the existing <code>CLAUDE_DIR</code>. This keeps the install/status/uninstall paths consistent and grep-able.</p>
+<h3 id="constraint-inherited-from-brew-1">Constraint inherited from BREW-1</h3>
+<p><code>_ANW_SCRIPT_DIR</code> (<code>ai-native-workflow:118</code>) resolves through symlink chains, so <code>$_ANW_SCRIPT_DIR/skills/&lt;name&gt;/SKILL.md</code> works whether the CLI is invoked from the repo, from <code>brew --prefix</code>, or from a symlink. The new install functions rely on this without further work.</p>
+<h2 id="3-proposed-solution">3. Proposed solution</h2>
+<h3 id="31-new-top-level-constants">3.1 New top-level constants</h3>
+<p>Add immediately below the existing <code>CLAUDE_DIR</code> line at the top of the script:</p>
+<pre class="bash"><code>COPILOT_DIR=&quot;${COPILOT_HOME:-$HOME/.copilot}&quot;
+COPILOT_AGENTS_DIR=&quot;$COPILOT_DIR/agents&quot;
+COPILOT_SKILLS_DIR=&quot;$COPILOT_DIR/skills&quot;
+COPILOT_INSTRUCTIONS_FILE=&quot;$COPILOT_DIR/copilot-instructions.md&quot;
+COPILOT_SETTINGS_FILE=&quot;$COPILOT_DIR/settings.json&quot;</code></pre>
+<p>The existing function-local <code>local COPILOT_DIR=...</code> declarations in <code>install_copilot_agents</code> (<code>ai-native-workflow:3165</code>), <code>show_status</code> (<code>ai-native-workflow:4088</code>), and <code>uninstall_global</code> (<code>ai-native-workflow:4233</code>) are removed in favor of the global constant.</p>
+<h3 id="32-new-install-functions">3.2 New install functions</h3>
+<p>Three new functions, all gated by the same <code>command -v copilot</code> check that <code>install_copilot_agents</code> already uses (FR-5 — graceful when Copilot CLI absent). All three honor <code>COPILOT_HOME</code> via the constants above.</p>
+<h4 id="install_global_copilot_skills"><code>install_global_copilot_skills</code></h4>
+<ul>
+<li>Iterate every immediate subdirectory of <code>$_ANW_SCRIPT_DIR/skills/</code>.</li>
+<li>For each <code>&lt;name&gt;</code>, ensure <code>$COPILOT_SKILLS_DIR/&lt;name&gt;/</code> exists, run <code>backup_if_exists</code> on the target SKILL.md, then <code>cp -R</code> source files.</li>
+<li>The only post-copy transform is for skills that contain <code>claude --agent=</code> — those get sed-rewritten to <code>copilot --agent=</code> so hand-off lines work in a Copilot session (FR-2 last paragraph). Currently affects 3 skills: <code>pipeline-gitlab-feature</code>, <code>pipeline-gitlab-incident</code>, <code>explore</code>.</li>
+<li>Print a <code>success "/&lt;name&gt; skill"</code> line per skill.</li>
+</ul>
+<h4 id="install_global_copilot_instructions"><code>install_global_copilot_instructions</code></h4>
+<ul>
+<li>Target <code>$COPILOT_INSTRUCTIONS_FILE</code>.</li>
+<li><code>backup_if_exists</code> then write a heredoc with content semantically equivalent to <code>~/.claude/CLAUDE.md</code> but with Copilot-neutral phrasing (no <code>Claude Code session</code>, no <code>~/.claude/</code>, slash-skill examples written generically).</li>
+<li>Single source of truth principle: the spec acknowledges these two files have parallel content. To prevent drift over time, the <code>install_global_claude_md</code> and <code>install_global_copilot_instructions</code> functions are placed adjacent in the script and the heredocs are kept side-by-side so any future edit surfaces both.</li>
+</ul>
+<h4 id="install_global_copilot_settings"><code>install_global_copilot_settings</code></h4>
+<p>Mirrors <code>install_global_settings</code> but without the <code>hooks</code> key (Copilot CLI scopes hooks per-repo, FR-4 last paragraph).</p>
+<ul>
+<li>Fresh install (target absent): write <code>{"renderMarkdown": true, "theme": "auto", "beep": true}</code> (OQ-5 default — seed <code>beep: true</code>).</li>
+<li>Re-install with existing target: <code>backup_if_exists</code>, then if <code>jq</code> available, additive merge (preserve existing keys, only add missing ones; mirrors the Claude <code>*</code> deep-merge but no array union since there are no arrays in scope).</li>
+<li><code>jq</code> absent: warn, leave file alone (mirrors Claude fallback).</li>
+</ul>
+<h3 id="33-wiring">3.3 Wiring</h3>
+<p><code>install_global</code> (<code>ai-native-workflow:1659</code>) gains three new lines after the existing <code>install_copilot_agents</code> call:</p>
+<pre class="bash"><code>install_copilot_agents              # existing
+install_global_copilot_skills       # NEW
+install_global_copilot_instructions # NEW
+install_global_copilot_settings     # NEW</code></pre>
+<p>The closing banner is restructured per OQ-6 (one banner, two sub-sections):</p>
+<pre><code>Global installation complete
+
+  Claude Code → ~/.claude/
+    [list of installed Claude artifacts]
+
+  Copilot CLI → ~/.copilot/
+    [list of installed Copilot artifacts, or &quot;Copilot CLI not found — skipped&quot;]
+
+  ▸ Copilot hooks are NOT installed globally — Copilot CLI scopes hooks
+    per-repo. Run `ai-native-workflow install project` in each trusted
+    folder to set up repo-level hooks (COP-2; not yet shipped).</code></pre>
+<p>The hooks caveat (OQ-4 default — yes, nudge user) is printed unconditionally even when Copilot CLI is absent so users learn of the boundary.</p>
+<h3 id="34-status-command-additions">3.4 Status command additions</h3>
+<p><code>show_status</code> (<code>ai-native-workflow:4054</code>) gains, immediately after the existing <code>agents/troubleshooter.agent.md</code> and <code>agents/explorer.agent.md</code> checks (around L4098):</p>
+<pre class="bash"><code>check_file &quot;$COPILOT_INSTRUCTIONS_FILE&quot; &quot;copilot-instructions.md&quot;
+check_file &quot;$COPILOT_SETTINGS_FILE&quot; &quot;settings.json&quot;
+for d in &quot;$COPILOT_SKILLS_DIR&quot;/*/; do
+  [ -d &quot;$d&quot; ] || continue
+  name=&quot;$(basename &quot;$d&quot;)&quot;
+  check_file &quot;$d/SKILL.md&quot; &quot;skills/$name&quot;
+done</code></pre>
+<p>(The dynamic skills loop avoids hardcoding 14 names that drift from <code>skills/</code> source.)</p>
+<h3 id="35-uninstall-additions">3.5 Uninstall additions</h3>
+<p><code>uninstall_global</code> (<code>ai-native-workflow:4191</code>) gains <code>COPILOT_INSTRUCTIONS_FILE</code> and <code>COPILOT_SETTINGS_FILE</code> in the explicit removal list (skills go via <code>rm -rf "$COPILOT_SKILLS_DIR"</code>, mirroring how the Claude side removes <code>$CLAUDE_DIR/skills/&lt;name&gt;</code> per-name today). Settings.json is removed to match the Claude side's "we warn, we don't delete settings" policy — EXCEPT: the Claude side keeps <code>settings.json</code> and <code>CLAUDE.md</code> and just warns (<code>ai-native-workflow:4229</code>). For symmetry, the Copilot side also keeps <code>copilot-instructions.md</code> and <code>settings.json</code> and warns. Only skills and (existing) agents are removed.</p>
+<h3 id="36-documentation-updates">3.6 Documentation updates</h3>
+<ul>
+<li><strong>README.md</strong>: extend the "Quick Start" / "What gets installed" section to list the new Copilot artifacts. One short paragraph noting the hooks asymmetry (repo-scope only on Copilot side).</li>
+<li><strong>docs/ARCHITECTURE.html</strong>: extend the three-layer diagram caption to call out which layers exist for which CLI. Add a one-paragraph "Symmetric harness" subsection under "Workflow Architecture" that states: skills + agents + global instructions are symmetric; hooks are asymmetric (Claude global, Copilot repo-scope per COP-2).</li>
+</ul>
+<h2 id="4-acceptance-criteria">4. Acceptance criteria</h2>
+<p>These extend the requirement-level ACs in <code>COP-1-requirements.md</code> with specific test fixtures. Every AC maps to one or more bats <code>@test</code> cases.</p>
+<h3 id="ac-1--skills-install-every-skill-in-source">AC-1 — Skills install (every skill in source)</h3>
+<p><strong>Given</strong> a clean <code>COPILOT_HOME=$SANDBOX</code> and <code>command -v copilot</code> returns 0 (the test stubs a fake <code>copilot</code> shim in PATH), <strong>When</strong> <code>ai-native-workflow install global</code> runs, <strong>Then</strong> for every immediate subdirectory <code>&lt;name&gt;</code> in <code>$_ANW_SCRIPT_DIR/skills/</code> (currently 14: adr, brainstorm, clusters, explore, override-confidence, pipeline-github-feature, pipeline-gitlab-feature, pipeline-gitlab-incident, plan, pr, session-report, skip-tdd, tdd, ticket), the file <code>$SANDBOX/skills/&lt;name&gt;/SKILL.md</code> exists and is non-empty.</p>
+<h3 id="ac-2--pipeline-skills-are-copilot-rewritten">AC-2 — Pipeline skills are Copilot-rewritten</h3>
+<p><strong>Given</strong> the source <code>skills/pipeline-gitlab-feature/SKILL.md</code> contains the literal <code>claude --agent=</code>, <strong>When</strong> <code>install global</code> runs into a sandbox, <strong>Then</strong> the installed copy at <code>$SANDBOX/skills/pipeline-gitlab-feature/SKILL.md</code> contains <code>copilot --agent=</code> and contains zero occurrences of <code>claude --agent=</code>. Same assertion for <code>pipeline-gitlab-incident</code> and <code>explore</code>.</p>
+<h3 id="ac-3--global-instructions-installed">AC-3 — Global instructions installed</h3>
+<p><strong>Given</strong> a clean sandbox, <strong>When</strong> <code>install global</code> runs, <strong>Then</strong> <code>$SANDBOX/copilot-instructions.md</code> exists and contains the marker substrings <code>Stack Detection</code>, <code>Agent Pipeline</code>, and <code>/plan</code> (presence-only check — verifies semantic equivalence to CLAUDE.md without locking byte-for-byte).</p>
+<h3 id="ac-4--settingsjson-fresh-install">AC-4 — Settings.json fresh install</h3>
+<p><strong>Given</strong> no <code>$SANDBOX/settings.json</code> (Copilot side), <strong>When</strong> <code>install global</code> runs, <strong>Then</strong> <code>$SANDBOX/settings.json</code> exists, parses as JSON, <code>jq -r '.renderMarkdown'</code> returns <code>true</code>, <code>jq -r '.beep'</code> returns <code>true</code>, and <code>jq -e '.hooks'</code> returns non-zero (no hooks key).</p>
+<h3 id="ac-5--settingsjson-merge-preserves-user-keys">AC-5 — Settings.json merge preserves user keys</h3>
+<p><strong>Given</strong> an existing <code>$SANDBOX/settings.json = {"model":"gpt-5","effortLevel":"high","allowedUrls":["https://example.com"]}</code>, <strong>When</strong> <code>install global</code> runs, <strong>Then</strong> all three user keys are preserved with original values, AND a <code>settings.json.bak.&lt;timestamp&gt;</code> exists alongside, AND <code>renderMarkdown</code>, <code>theme</code>, and <code>beep</code> are now also present (additive merge).</p>
+<h3 id="ac-6--re-install-backs-up-copilot-instructionsmd">AC-6 — Re-install backs up copilot-instructions.md</h3>
+<p><strong>Given</strong> <code>install global</code> has run once and produced <code>$SANDBOX/copilot-instructions.md</code>, <strong>When</strong> <code>install global</code> runs a second time, <strong>Then</strong> exactly one file matching <code>copilot-instructions.md.bak.*</code> exists alongside the live file.</p>
+<h3 id="ac-7--copilot_home-honored-end-to-end">AC-7 — <code>COPILOT_HOME</code> honored end-to-end</h3>
+<p><strong>Given</strong> <code>COPILOT_HOME=/tmp/cop-test-XXX</code>, <strong>When</strong> <code>install global</code> runs, <strong>Then</strong> all new artifacts (<code>skills/</code>, <code>copilot-instructions.md</code>, <code>settings.json</code>) are written under <code>/tmp/cop-test-XXX/</code>, AND <code>~/.copilot/</code> (resolved at the time the test runs, BUT see test note below) is untouched.</p>
+<blockquote>
+<p>Test note: the bats suite already isolates <code>HOME</code> checks by writing only into <code>$SANDBOX</code>. We assert "no writes outside sandbox" by snapshotting the sandbox parent before and after.</p>
+</blockquote>
+<h3 id="ac-8--copilot-cli-absent-graceful-skip">AC-8 — Copilot CLI absent: graceful skip</h3>
+<p><strong>Given</strong> <code>command -v copilot</code> returns non-zero (the test prepends an empty PATH dir that shadows any real <code>copilot</code>), <strong>When</strong> <code>install global</code> runs, <strong>Then</strong> exit code is 0, the Claude side completes normally, and <code>$SANDBOX</code> (set as <code>COPILOT_HOME</code>) remains empty (no <code>skills/</code>, no <code>copilot-instructions.md</code>, no <code>settings.json</code>).</p>
+<h3 id="ac-9--idempotent-re-run">AC-9 — Idempotent re-run</h3>
+<p><strong>Given</strong> <code>install global</code> has run once, <strong>When</strong> it runs a second time, <strong>Then</strong> every Copilot artifact's content equals the first-run content byte-for-byte (or, for settings.json, has the same JSON shape with original user keys preserved), AND each writable target has gained exactly one new <code>.bak.&lt;timestamp&gt;</code> from the second run.</p>
+<h3 id="ac-10--status-command-lists-copilot-artifacts">AC-10 — Status command lists Copilot artifacts</h3>
+<p><strong>Given</strong> <code>install global</code> has run successfully, <strong>When</strong> the user runs <code>ai-native-workflow status</code> (with the same <code>COPILOT_HOME=$SANDBOX</code>), <strong>Then</strong> stdout contains one ✓ line per installed Copilot skill name, plus a ✓ line for <code>copilot-instructions.md</code> and <code>settings.json</code>.</p>
+<h3 id="ac-11--uninstall-removes-the-new-artifacts">AC-11 — Uninstall removes the new artifacts</h3>
+<p><strong>Given</strong> <code>install global</code> has run successfully, <strong>When</strong> the user runs <code>ai-native-workflow uninstall global</code>, <strong>Then</strong> <code>$SANDBOX/skills/</code> is empty or absent, AND <code>copilot-instructions.md</code> and <code>settings.json</code> are <strong>preserved</strong> (with a warning printed) — symmetric to the Claude side's "preserve settings.json and CLAUDE.md" rule.</p>
+<h3 id="ac-12--caveat-about-hooks-is-printed">AC-12 — Caveat about hooks is printed</h3>
+<p><strong>Given</strong> any <code>install global</code> run that reaches completion (Copilot present or absent), <strong>When</strong> the closing banner prints, <strong>Then</strong> stdout contains the literal substring <code>Copilot hooks are NOT installed globally</code>.</p>
+<h3 id="ac-13--readme--architecture-updated">AC-13 — README + ARCHITECTURE updated</h3>
+<p><strong>Given</strong> the repo at the merge of COP-1, <strong>When</strong> the README and <code>docs/ARCHITECTURE.html</code> are read, <strong>Then</strong> README mentions <code>~/.copilot/skills/</code>, <code>~/.copilot/copilot-instructions.md</code>, and <code>~/.copilot/settings.json</code>; AND <code>docs/ARCHITECTURE.html</code> notes that hooks are Claude-global, Copilot-repo-scope.</p>
+<h2 id="5-technical-design">5. Technical design</h2>
+<h3 id="51-components">5.1 Components</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>File</th>
+<th>Lines (approx)</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Top-level <code>COPILOT_*</code> constants</td>
+<td><code>ai-native-workflow</code></td>
+<td>after L28</td>
+<td>NEW</td>
+</tr>
+<tr>
+<td><code>install_global_copilot_skills</code></td>
+<td><code>ai-native-workflow</code></td>
+<td>new fn after <code>install_copilot_agents</code></td>
+<td>NEW</td>
+</tr>
+<tr>
+<td><code>install_global_copilot_instructions</code></td>
+<td><code>ai-native-workflow</code></td>
+<td>new fn, sibling of above</td>
+<td>NEW</td>
+</tr>
+<tr>
+<td><code>install_global_copilot_settings</code></td>
+<td><code>ai-native-workflow</code></td>
+<td>new fn, sibling of above</td>
+<td>NEW</td>
+</tr>
+<tr>
+<td><code>install_global</code> orchestrator</td>
+<td><code>ai-native-workflow:1659</code></td>
+<td>edit (3 new calls + banner change)</td>
+<td>EDIT</td>
+</tr>
+<tr>
+<td><code>install_copilot_agents</code></td>
+<td><code>ai-native-workflow:3157</code></td>
+<td>drop <code>local COPILOT_DIR=...</code></td>
+<td>EDIT</td>
+</tr>
+<tr>
+<td><code>show_status</code></td>
+<td><code>ai-native-workflow:4054</code></td>
+<td>drop <code>local COPILOT_DIR=...</code>, add 2 file checks + skills loop</td>
+<td>EDIT</td>
+</tr>
+<tr>
+<td><code>uninstall_global</code></td>
+<td><code>ai-native-workflow:4191</code></td>
+<td>drop <code>local COPILOT_DIR=...</code>, add skills rm-rf, warn-preserve for instructions/settings</td>
+<td>EDIT</td>
+</tr>
+<tr>
+<td>Tests</td>
+<td><code>tests/install-copilot.bats</code> (new)</td>
+<td>new file</td>
+<td>NEW</td>
+</tr>
+<tr>
+<td>Docs</td>
+<td><code>README.md</code>, <code>docs/ARCHITECTURE.html</code></td>
+<td>edits</td>
+<td>EDIT</td>
+</tr>
+</tbody>
+</table>
+<h3 id="52-data-skill-source-layout-read-only">5.2 Data: skill source layout (read-only)</h3>
+<p>All data is read from <code>$_ANW_SCRIPT_DIR/skills/&lt;name&gt;/</code>. Each skill is one or more files; we copy the entire directory verbatim. No SKILL.md parsing is required (per OQ-2 and OQ-3 defaults — trust Copilot's description semantics, do not add <code>allowed-tools</code>).</p>
+<h3 id="53-the-claude--copilot-rewrite">5.3 The <code>claude → copilot</code> rewrite</h3>
+<p>Per FR-2 last paragraph, three skills (<code>pipeline-gitlab-feature</code>, <code>pipeline-gitlab-incident</code>, <code>explore</code>) reference <code>claude --agent=</code> in their hand-off lines. After copy:</p>
+<pre class="bash"><code>sed -i.tmp &#39;s/claude --agent=/copilot --agent=/g&#39; \
+  &quot;$COPILOT_SKILLS_DIR/&lt;name&gt;/SKILL.md&quot;
+rm -f &quot;$COPILOT_SKILLS_DIR/&lt;name&gt;/SKILL.md.tmp&quot;</code></pre>
+<p>The <code>.tmp</code> suffix is for cross-platform <code>sed -i</code> portability (BSD vs GNU). We use <code>.tmp</code>, not the <code>BACKUP_SUFFIX</code> global, to avoid the bats "exactly one backup per file" assertions seeing stray files from the sed step.</p>
+<p>The list of skills to rewrite is detected dynamically:</p>
+<pre class="bash"><code>for skill_md in &quot;$COPILOT_SKILLS_DIR&quot;/*/SKILL.md; do
+  if grep -q &#39;claude --agent=&#39; &quot;$skill_md&quot; 2&gt;/dev/null; then
+    sed -i.tmp &#39;s/claude --agent=/copilot --agent=/g&#39; &quot;$skill_md&quot;
+    rm -f &quot;${skill_md}.tmp&quot;
+  fi
+done</code></pre>
+<p>This is robust against new pipeline skills being added later.</p>
+<h3 id="54-settingsjson-merge-logic">5.4 settings.json merge logic</h3>
+<pre class="bash"><code>install_global_copilot_settings() {
+  local fresh_json=&#39;{&quot;renderMarkdown&quot;: true, &quot;theme&quot;: &quot;auto&quot;, &quot;beep&quot;: true}&#39;
+  if [ ! -f &quot;$COPILOT_SETTINGS_FILE&quot; ]; then
+    mkdir -p &quot;$COPILOT_DIR&quot;
+    echo &quot;$fresh_json&quot; | jq &#39;.&#39; &gt; &quot;$COPILOT_SETTINGS_FILE&quot;
+    success &quot;~/.copilot/settings.json (fresh install with beep:true)&quot;
+    return
+  fi
+  backup_if_exists &quot;$COPILOT_SETTINGS_FILE&quot;
+  if ! command -v jq &amp;&gt;/dev/null; then
+    warn &quot;jq not found — leaving settings.json untouched&quot;
+    return
+  fi
+  # Additive merge: existing keys win, defaults fill the gaps.
+  # `$existing * $defaults` would let defaults overwrite; we want the
+  # opposite: `$defaults * $existing` — defaults first, existing wins.
+  echo &quot;$fresh_json&quot; \
+    | jq --slurpfile existing &quot;$COPILOT_SETTINGS_FILE&quot; \
+         &#39;. * $existing[0]&#39; \
+    &gt; &quot;$COPILOT_SETTINGS_FILE.tmp&quot;
+  mv &quot;$COPILOT_SETTINGS_FILE.tmp&quot; &quot;$COPILOT_SETTINGS_FILE&quot;
+  success &quot;~/.copilot/settings.json (merged with existing)&quot;
+}</code></pre>
+<p>The merge order <code>$defaults * $existing[0]</code> is the inverse of the Claude-side merge (<code>$existing * $new</code>) because the Copilot rule is "existing user keys win" (FR-4), whereas the Claude rule is "installer-managed hooks always reflect the current installer".</p>
+<h3 id="55-test-stub-for-fake-copilot-binary">5.5 Test stub for fake <code>copilot</code> binary</h3>
+<p>The bats suite needs to make <code>command -v copilot</code> return success without requiring the real Copilot CLI. The pattern (already used elsewhere for similar tests):</p>
+<pre class="bash"><code>setup() {
+  SANDBOX=&quot;$(mktemp -d /tmp/aw-cop-XXXXXX)&quot;
+  STUB_BIN=&quot;$(mktemp -d /tmp/aw-stub-XXXXXX)&quot;
+  printf &#39;#!/usr/bin/env bash\nexit 0\n&#39; &gt; &quot;$STUB_BIN/copilot&quot;
+  chmod +x &quot;$STUB_BIN/copilot&quot;
+  export PATH=&quot;$STUB_BIN:$PATH&quot;
+  export COPILOT_HOME=&quot;$SANDBOX&quot;
+  export CLAUDE_HOME=&quot;$(mktemp -d /tmp/aw-claude-XXXXXX)&quot;
+}
+teardown() {
+  rm -rf &quot;$SANDBOX&quot; &quot;$STUB_BIN&quot; &quot;$CLAUDE_HOME&quot;
+}</code></pre>
+<p>For the "Copilot absent" test (AC-8), do not stub:</p>
+<pre class="bash"><code>@test &quot;install global: skips Copilot section when copilot is not on PATH&quot; {
+  # Empty PATH dir prepended; system PATH retained for jq and bash
+  EMPTY_BIN=&quot;$(mktemp -d /tmp/aw-empty-XXXXXX)&quot;
+  PATH=&quot;$EMPTY_BIN:/usr/bin:/bin&quot; \
+    CLAUDE_HOME=&quot;$CLAUDE_HOME&quot; COPILOT_HOME=&quot;$SANDBOX&quot; \
+    &quot;$INSTALLER&quot; install global &gt;/dev/null 2&gt;&amp;1
+  [ ! -d &quot;$SANDBOX/skills&quot; ]
+  [ ! -f &quot;$SANDBOX/copilot-instructions.md&quot; ]
+  [ ! -f &quot;$SANDBOX/settings.json&quot; ]
+  rm -rf &quot;$EMPTY_BIN&quot;
+}</code></pre>
+<h2 id="6-risks">6. Risks</h2>
+<ul>
+<li><strong>R-1: <code>sed -i</code> portability.</strong> macOS BSD sed and GNU sed disagree on <code>-i</code> empty-arg handling. Mitigation: always pass an explicit suffix (<code>-i.tmp</code>), then <code>rm -f</code> the suffixed file. Already shown in §5.3.</li>
+<li>**R-2: The Claude <code>install_global_settings</code> re-merges hooks on every re-install, generating a <code>.bak</code> per run. The Copilot <code>install_global_copilot_settings</code> will do the same — bats AC-9 test must check for "exactly one new backup per second run" not "no backups across two runs".</li>
+<li>**R-3: <code>install_global_copilot_settings</code> uses <code>jq</code> to write the fresh-install JSON. If jq is unavailable, fresh install fails with a shell error. Mitigation: guard the fresh path with <code>command -v jq</code> the same way the merge path does, and fall back to a heredoc literal in the no-jq case (the JSON is short and stable).</li>
+<li>**R-4: A user with a hand-edited <code>~/.copilot/skills/&lt;name&gt;/</code> may be surprised to see their content overwritten. The <code>backup_if_exists</code> call mitigates this — the original is preserved with a <code>.bak.*</code> suffix. The caveats banner mentions this.</li>
+<li>**R-5: Single-source-of-truth drift between <code>CLAUDE.md</code> and <code>copilot-instructions.md</code>. Mitigation in §3.2: keep the heredoc functions adjacent in the script. Track a follow-up (out of scope here) to extract a common template.</li>
+</ul>
+<h2 id="7-out-of-scope">7. Out of scope</h2>
+<p>Reaffirmed from the requirements doc:</p>
+<ul>
+<li><strong>OOS-1</strong>: Project-level Copilot hooks (<code>.github/hooks/*.json</code>) — tracked as <strong>COP-2</strong>.</li>
+<li><strong>OOS-2</strong>: MCP server config (<code>~/.copilot/mcp-config.json</code>).</li>
+<li><strong>OOS-3</strong>: <code>copilot login</code> / authentication.</li>
+<li><strong>OOS-4</strong>: Copilot plugins (<code>/plugin</code>).</li>
+<li><strong>OOS-5</strong>: Per-stack global Copilot instructions.</li>
+</ul>
+<p>Also explicitly out of scope for COP-1 (architect call):</p>
+<ul>
+<li><strong>OOS-6</strong>: Refactoring the Claude install path to also <code>cp -R</code> from <code>$_ANW_SCRIPT_DIR/skills/</code> (OQ-1 option <strong>c</strong>). Today the Claude side uses a mix of heredocs and <code>cp</code> (<code>override-confidence</code> is already cp-based; the rest are heredocs). A unifying refactor is worthwhile but adds risk and review surface to COP-1; tracked as a follow-up.</li>
+<li><strong>OOS-7</strong>: Adding <code>allowed-tools</code> or <code>tools:</code> frontmatter to skills or agents (OQ-3 default — conservative).</li>
+<li><strong>OOS-8</strong>: Verifying Copilot's <code>description:</code> auto-load semantics (OQ-2 default — trust them; revisit if behavior surprises).</li>
+</ul>
+<h2 id="8-references">8. References</h2>
+<ul>
+<li>Requirements: <code>docs/context/specs/COP-1-requirements.html</code></li>
+<li>BREW-1 spec: <code>docs/context/specs/BREW-1-anw-script-dir-symlink.html</code></li>
+<li>CTX-1 todo (path-constants pattern): <code>docs/context/specs/CTX-1-todo.html</code></li>
+<li>Existing bats fixtures: <code>tests/install.bats</code></li>
+<li>Brew formula (skills shipped to libexec): <code>Formula/ai-native-workflow.rb</code> (in <code>igorilic/homebrew-tools</code> tap repo)</li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

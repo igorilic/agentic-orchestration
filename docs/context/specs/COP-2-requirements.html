@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>COP-2: Install Copilot CLI hooks per-project</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">COP-2: Install Copilot CLI hooks per-project</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p>Source: User request (2026-05-02), follow-up to COP-1. Repo integration point: <code>ai-native-workflow install project</code> → <code>install_project_copilot()</code> in <code>/Users/igorilic/open-source/agentic-orchestration/ai-native-workflow</code> (lines 3882–4022). Reference Claude implementation: <code>install_global_hooks()</code> (lines 1938–2077) and the <code>Bash</code> PreToolUse entries in <code>install_global_settings()</code> (lines 1752–1936).</p>
+</blockquote>
+<h2 id="1-goal-statement">1. Goal Statement</h2>
+<p>Extend <code>ai-native-workflow install project</code> so that, for any repo where the user runs the per-project installer, the same two enforcement gates that already protect Claude Code (<code>tdd-gate</code> and <code>confidence-gate</code>) also fire when an engineer drives the workflow with <strong>GitHub Copilot CLI</strong>. Because Copilot CLI's hooks are repository-scoped (no <code>~/.copilot/hooks.json</code> analogue), this work cannot live in <code>install_global_*</code> — it must be a per-project installer step.</p>
+<p>The installed gates must be <strong>functionally equivalent</strong> to the Claude versions: same block decisions, same bypass mechanisms (<code>/skip-tdd</code>, <code>/override-confidence</code>), same audit-log writes, same exit semantics for the user. Two AI tools, one policy.</p>
+<h2 id="2-background--copilot-hook-mechanics-research-findings">2. Background — Copilot Hook Mechanics (Research Findings)</h2>
+<p>Captured from:</p>
+<ul>
+<li><a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-hooks">https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-hooks</a></li>
+<li><a href="https://docs.github.com/en/copilot/reference/hooks-configuration">https://docs.github.com/en/copilot/reference/hooks-configuration</a></li>
+<li><a href="https://docs.github.com/en/copilot/tutorials/copilot-cli-hooks">https://docs.github.com/en/copilot/tutorials/copilot-cli-hooks</a></li>
+<li><a href="https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-hooks">https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-hooks</a></li>
+</ul>
+<h3 id="21-discovery-and-file-location">2.1 Discovery and file location</h3>
+<ul>
+<li>Hooks live in <strong><code>.github/hooks/</code></strong> of the repository. The directory is conventional and discovered automatically when Copilot CLI runs from inside the repo.</li>
+<li>The configuration filename is <strong>flexible</strong> — the docs say "Create a new <code>hooks.json</code> file with the name of your choice in <code>.github/hooks/</code>." Copilot loads <code>.github/hooks/*.json</code>. We will standardise on <strong><code>.github/hooks/copilot-cli-policy.json</code></strong> to match the user's request and the cloud-agent tutorial example.</li>
+<li>For Copilot Cloud Agent the file must exist on the default branch. For Copilot CLI the file is loaded from CWD, so the script must be <strong>committed</strong> (or at minimum present at runtime) for hooks to fire.</li>
+<li>There is <strong>no global / user-level hook mechanism</strong>. Repo-scoped only. This is why COP-2 is per-project, not global.</li>
+</ul>
+<h3 id="22-configuration-schema-verbatim-shape">2.2 Configuration schema (verbatim shape)</h3>
+<pre class="json"><code>{
+  &quot;version&quot;: 1,
+  &quot;hooks&quot;: {
+    &quot;sessionStart&quot;:        [ &lt;hookEntry&gt;, ... ],
+    &quot;sessionEnd&quot;:          [ &lt;hookEntry&gt;, ... ],
+    &quot;userPromptSubmitted&quot;: [ &lt;hookEntry&gt;, ... ],
+    &quot;preToolUse&quot;:          [ &lt;hookEntry&gt;, ... ],
+    &quot;postToolUse&quot;:         [ &lt;hookEntry&gt;, ... ],
+    &quot;agentStop&quot;:           [ &lt;hookEntry&gt;, ... ],
+    &quot;subagentStop&quot;:        [ &lt;hookEntry&gt;, ... ],
+    &quot;errorOccurred&quot;:       [ &lt;hookEntry&gt;, ... ]
+  }
+}</code></pre>
+<p><code>&lt;hookEntry&gt;</code> shape:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>type</code></td>
+<td>string</td>
+<td>Currently only <code>"command"</code>.</td>
+</tr>
+<tr>
+<td><code>bash</code></td>
+<td>string</td>
+<td>Path to bash script. Resolved relative to <code>cwd</code>.</td>
+</tr>
+<tr>
+<td><code>powershell</code></td>
+<td>string</td>
+<td>PowerShell variant (optional for our use).</td>
+</tr>
+<tr>
+<td><code>cwd</code></td>
+<td>string</td>
+<td>Working directory for the command. Repo-relative.</td>
+</tr>
+<tr>
+<td><code>timeoutSec</code></td>
+<td>number</td>
+<td>Default 30. We will set per-hook explicitly.</td>
+</tr>
+<tr>
+<td><code>env</code></td>
+<td>object</td>
+<td>Static env vars passed to the script.</td>
+</tr>
+<tr>
+<td><code>comment</code></td>
+<td>string</td>
+<td>Optional human description.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>No <code>matcher</code> field exists</strong> (unlike Claude). Filtering by command (e.g. only fire on <code>git commit</code>) must be done <strong>inside the hook script</strong> by parsing the JSON payload. This is already how the Claude scripts are written, so the porting cost is low.</p>
+<h3 id="23-invocation-contract">2.3 Invocation contract</h3>
+<p>Copilot invokes the hook command <strong>with the JSON event payload on stdin</strong> and reads exit code + stdout. There are <strong>no pre-set environment variables</strong> equivalent to <code>CLAUDE_PROJECT_DIR</code> or <code>CLAUDE_TOOL_INPUT</code>. Scripts must:</p>
+<ol type="1">
+<li>Read stdin.</li>
+<li>Parse JSON with <code>jq</code>.</li>
+<li>Determine project dir from the <code>cwd</code> field of the payload (or <code>pwd</code>).</li>
+<li>Determine the command being gated from <code>toolArgs</code> (a <strong>JSON-stringified</strong> blob — must be <code>jq</code>-parsed twice).</li>
+</ol>
+<h3 id="24-pretooluse-payload-the-one-we-care-about">2.4 <code>preToolUse</code> payload (the one we care about)</h3>
+<pre class="jsonc"><code>{
+  &quot;timestamp&quot;: 1714694400000,
+  &quot;cwd&quot;: &quot;/abs/path/to/repo&quot;,
+  &quot;toolName&quot;: &quot;bash&quot;,          // for shell commands
+  &quot;toolArgs&quot;: &quot;{\&quot;command\&quot;:\&quot;git commit -m ...\&quot;}&quot;  // JSON STRING
+}</code></pre>
+<p><code>toolName</code> for shell execution is <strong><code>"bash"</code></strong>. (Other tool names exist for file reads, etc., but our gates only care about bash.)</p>
+<h3 id="25-decision-shape">2.5 Decision shape</h3>
+<p>To <strong>block</strong>: hook prints to stdout a single-line JSON object:</p>
+<pre class="json"><code>{&quot;permissionDecision&quot;:&quot;deny&quot;,&quot;permissionDecisionReason&quot;:&quot;&lt;message&gt;&quot;}</code></pre>
+<p>To <strong>allow</strong>: print nothing (or anything other than <code>deny</code>) and exit 0. Currently only <code>"deny"</code> is processed; <code>"allow"</code> and <code>"ask"</code> are no-ops.</p>
+<p><strong>Exit code does not block by itself.</strong> This is a critical departure from Claude — see §6.1.</p>
+<h3 id="26-order-merging-sequencing">2.6 Order, merging, sequencing</h3>
+<p>The docs are silent on:</p>
+<ul>
+<li>Whether multiple files in <code>.github/hooks/*.json</code> are merged.</li>
+<li>Whether multiple entries in the same event array short-circuit on the first <code>deny</code>.</li>
+<li>Hook execution order within an array.</li>
+</ul>
+<p>We assume (and must verify in QA) that:</p>
+<ul>
+<li>Entries in a <code>preToolUse</code> array run sequentially in declaration order.</li>
+<li>Any <code>deny</code> from any entry blocks the action.</li>
+<li>A single file is sufficient — we will not split into multiple JSONs.</li>
+</ul>
+<p>These assumptions become <strong>OQ-1, OQ-2, OQ-3</strong> in §10.</p>
+<h2 id="3-hook-capability-matrix-claude--copilot">3. Hook Capability Matrix (Claude → Copilot)</h2>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Claude Code</th>
+<th>Copilot CLI (target)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Config scope</td>
+<td>Global: <code>~/.claude/settings.json</code></td>
+<td>Per-repo: <code>.github/hooks/copilot-cli-policy.json</code></td>
+</tr>
+<tr>
+<td>Hook script location</td>
+<td>Global: <code>~/.claude/hooks/*.sh</code></td>
+<td>Per-repo: <code>.github/hooks/scripts/*.sh</code></td>
+</tr>
+<tr>
+<td>Schema version</td>
+<td>n/a</td>
+<td><code>"version": 1</code></td>
+</tr>
+<tr>
+<td>Pre-bash event name</td>
+<td><code>PreToolUse</code> with <code>matcher: "Bash"</code></td>
+<td><code>preToolUse</code> (filter by <code>toolName == "bash"</code> in script)</td>
+</tr>
+<tr>
+<td>Project dir source</td>
+<td>Env: <code>CLAUDE_PROJECT_DIR</code></td>
+<td>Stdin JSON: <code>.cwd</code></td>
+</tr>
+<tr>
+<td>Tool input source</td>
+<td>Env: <code>CLAUDE_TOOL_INPUT</code> (raw command string)</td>
+<td>Stdin JSON: <code>.toolArgs</code> (JSON-stringified, parse <code>.command</code>)</td>
+</tr>
+<tr>
+<td>Block mechanism</td>
+<td><code>exit 2</code></td>
+<td>Stdout <code>{"permissionDecision":"deny","permissionDecisionReason":"..."}</code></td>
+</tr>
+<tr>
+<td>Allow mechanism</td>
+<td><code>exit 0</code></td>
+<td><code>exit 0</code> with no <code>deny</code> JSON</td>
+</tr>
+<tr>
+<td>Hook timeout default</td>
+<td>n/a (we set 10–15s)</td>
+<td>30s default; we set 10s (tdd) / 15s (confidence)</td>
+</tr>
+<tr>
+<td>Confidence scorer location</td>
+<td><code>~/.claude/scripts/confidence.sh</code> (global)</td>
+<td>TBD — see §7 Open question OQ-4 (global vs vendored)</td>
+</tr>
+<tr>
+<td>TDD bypass marker</td>
+<td><code>$PROJECT_DIR/.tdd-skip</code></td>
+<td>Same — <code>$PROJECT_DIR/.tdd-skip</code> (project-local file, tool-agnostic)</td>
+</tr>
+<tr>
+<td>Override marker</td>
+<td><code>$PROJECT_DIR/.git/aw/override-&lt;spec&gt;</code></td>
+<td>Same</td>
+</tr>
+<tr>
+<td>Active-spec pointer</td>
+<td><code>$PROJECT_DIR/.git/aw/active-spec</code></td>
+<td>Same</td>
+</tr>
+<tr>
+<td>Confidence event log</td>
+<td><code>$PROJECT_DIR/.context/specs/&lt;id&gt;-confidence.jsonl</code></td>
+<td>Same</td>
+</tr>
+</tbody>
+</table>
+<p>The right column gives us identical bypass/override UX across both AIs: the user only learns one set of files.</p>
+<h2 id="4-environment--payload-translation-table">4. Environment / Payload Translation Table</h2>
+<p>For porting <code>tdd-gate.sh</code> and <code>confidence-gate.sh</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Claude reference</th>
+<th>Copilot equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"</code></td>
+<td><code>PAYLOAD="$(cat)"; PROJECT_DIR="$(echo "$PAYLOAD" | jq -r '.cwd // "."')"</code></td>
+</tr>
+<tr>
+<td><code>TOOL_INPUT="${CLAUDE_TOOL_INPUT:-}"</code></td>
+<td><code>TOOL_NAME="$(echo "$PAYLOAD" | jq -r '.toolName // ""')"; TOOL_INPUT="$(echo "$PAYLOAD" | jq -r '.toolArgs // "{}" | fromjson? // {} | .command // ""')"</code></td>
+</tr>
+<tr>
+<td>Early-return on non-bash tool</td>
+<td><code>[ "$TOOL_NAME" = "bash" ] || exit 0</code></td>
+</tr>
+<tr>
+<td><code>exit 2</code> (block)</td>
+<td><code>jq -nc --arg r "&lt;msg&gt;" '{permissionDecision:"deny",permissionDecisionReason:$r}'; exit 0</code></td>
+</tr>
+<tr>
+<td><code>exit 0</code> (allow)</td>
+<td><code>exit 0</code> (no stdout JSON)</td>
+</tr>
+<tr>
+<td>Stderr messages (visible to Claude UI)</td>
+<td>Stderr messages — Copilot surfaces <code>permissionDecisionReason</code> in UI; stderr also captured in audit log</td>
+</tr>
+</tbody>
+</table>
+<h2 id="superseded-by-adr-001">Superseded by ADR-001</h2>
+<blockquote>
+<p><strong>The two-script design described in §5, FR-2, FR-3, and FR-4 below was superseded by ADR-001 before implementation began.</strong> The accepted architecture uses a <strong>single dispatcher script</strong> (<code>copilot-cli-dispatcher.sh</code>) as the sole <code>preToolUse</code> entry, rather than two separate hook scripts. The reasons are documented in <code>docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.html</code> (primarily: undocumented Copilot short-circuit ordering, and the fail-closed requirement which needs a single trap point).</p>
+<p>The sections below are preserved for design history. Do not use them as the source of truth for implementation — use ADR-001 and <code>docs/context/specs/COP-2-spec.html</code> instead.</p>
+</blockquote>
+<h2 id="5-githubhookscopilot-cli-policyjson--target-schema-superseded">5. <code>.github/hooks/copilot-cli-policy.json</code> — Target Schema (superseded)</h2>
+<blockquote>
+<p><strong>Superseded by ADR-001.</strong> The actual policy has one <code>preToolUse</code> entry pointing to <code>copilot-cli-dispatcher.sh</code>, not the two entries below. See <code>docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.html</code>.</p>
+</blockquote>
+<p>The installer writes the file below verbatim (with project-aware values where noted). The two <code>preToolUse</code> entries map 1:1 to the Claude <code>PreToolUse / matcher: Bash</code> entries.</p>
+<pre class="json"><code>{
+  &quot;version&quot;: 1,
+  &quot;hooks&quot;: {
+    &quot;preToolUse&quot;: [
+      {
+        &quot;type&quot;: &quot;command&quot;,
+        &quot;bash&quot;: &quot;./scripts/tdd-gate.sh&quot;,
+        &quot;cwd&quot;: &quot;.github/hooks&quot;,
+        &quot;timeoutSec&quot;: 10,
+        &quot;comment&quot;: &quot;Block git commit without staged test files. Mirror of ~/.claude/hooks/tdd-gate.sh&quot;
+      },
+      {
+        &quot;type&quot;: &quot;command&quot;,
+        &quot;bash&quot;: &quot;./scripts/confidence-gate.sh&quot;,
+        &quot;cwd&quot;: &quot;.github/hooks&quot;,
+        &quot;timeoutSec&quot;: 15,
+        &quot;comment&quot;: &quot;Block gh pr create / glab mr create on RED confidence verdict. Mirror of ~/.claude/hooks/confidence-gate.sh&quot;
+      }
+    ]
+  }
+}</code></pre>
+<p>The installer should not write <code>sessionStart</code>, <code>userPromptSubmitted</code>, <code>postToolUse</code>, etc. Adding them is out of scope (see §9).</p>
+<h2 id="6-functional-requirements">6. Functional Requirements</h2>
+<h3 id="fr-1--installer-extension">FR-1 — Installer extension</h3>
+<p><code>install_project()</code> MUST call a new helper <code>install_project_copilot_hooks()</code> <strong>after</strong> <code>install_project_copilot()</code> and <strong>before</strong> <code>install_project_gitignore()</code>. The new helper takes <code>$project_dir</code> as its sole argument.</p>
+<h3 id="fr-2--hook-script-files-superseded-by-adr-001">FR-2 — Hook script files (superseded by ADR-001)</h3>
+<blockquote>
+<p><strong>Superseded by ADR-001.</strong> The implementation installs a single <code>copilot-cli-dispatcher.sh</code> instead of the two separate scripts below. See <code>docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.html</code>.</p>
+</blockquote>
+<p>The installer MUST create the following files relative to <code>$project_dir</code>:</p>
+<ul>
+<li><code>.github/hooks/scripts/tdd-gate.sh</code> — Copilot-flavored TDD gate.</li>
+<li><code>.github/hooks/scripts/confidence-gate.sh</code> — Copilot-flavored confidence gate.</li>
+<li><code>.github/hooks/copilot-cli-policy.json</code> — registration JSON from §5.</li>
+</ul>
+<p>All three must be created with mode <code>0755</code> (or <code>0644</code> for the JSON). Scripts MUST start with <code>#!/usr/bin/env bash</code> and include <code>set -euo pipefail</code>.</p>
+<h3 id="fr-3--tdd-gate-behavior-parity-superseded-by-adr-001">FR-3 — TDD gate behavior parity (superseded by ADR-001)</h3>
+<blockquote>
+<p><strong>Superseded by ADR-001.</strong> TDD gate logic is now embedded directly in <code>copilot-cli-dispatcher.sh</code> rather than a separate <code>tdd-gate.sh</code> script. The behavioral requirements below still apply — they were ported into the dispatcher. See <code>docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.html</code>.</p>
+</blockquote>
+<p><code>.github/hooks/scripts/tdd-gate.sh</code> MUST replicate every behavioral branch of the Claude <code>tdd-gate.sh</code> (lines 2022–2069 of <code>ai-native-workflow</code>):</p>
+<ul>
+<li>Only fire when <code>toolName == "bash"</code> AND <code>toolArgs.command</code> matches <code>git\s+commit</code>.</li>
+<li>Allow <code>--amend</code> commits unconditionally.</li>
+<li>Allow when <code>$PROJECT_DIR/.tdd-skip</code> exists.</li>
+<li>Allow when all staged paths start with <code>spikes/</code>.</li>
+<li>Allow when staged file list contains a path matching the test pattern <code>(test|spec|_test\.|\.test\.|\.spec\.|tests/|__tests__/|Tests/|Test\.)</code>.</li>
+<li>Otherwise deny with the same human message text (Options 1 &amp; 2, common-reasons line).</li>
+</ul>
+<h3 id="fr-4--confidence-gate-behavior-parity-superseded-by-adr-001">FR-4 — Confidence gate behavior parity (superseded by ADR-001)</h3>
+<blockquote>
+<p><strong>Superseded by ADR-001.</strong> Confidence gate logic is now embedded directly in <code>copilot-cli-dispatcher.sh</code> rather than a separate <code>confidence-gate.sh</code> script. The behavioral requirements below still apply — they were ported into the dispatcher. See <code>docs/decisions/ADR-001-copilot-cli-dispatcher-fail-closed.html</code>.</p>
+</blockquote>
+<p><code>.github/hooks/scripts/confidence-gate.sh</code> MUST replicate every behavioral branch of the Claude <code>confidence-gate.sh</code> (lines 2074 / source at <code>hooks/confidence-gate.sh</code>):</p>
+<ul>
+<li>Only fire when <code>toolName == "bash"</code> AND <code>toolArgs.command</code> matches <code>(gh\s+pr\s+create(\s|$)|glab\s+mr\s+create(\s|$))</code>.</li>
+<li>Read <code>$PROJECT_DIR/.git/aw/active-spec</code>; deny if missing or invalid.</li>
+<li>Read <code>$PROJECT_DIR/.context/specs/&lt;id&gt;-confidence.jsonl</code>; deny if missing.</li>
+<li>Invoke the confidence scorer (see §7), parse <code>band</code>, <code>score</code>, <code>gates</code>.</li>
+<li>Append <code>{ts, event:"verdict", scope:"aggregate", ...}</code> to the log.</li>
+<li>GREEN → allow. YELLOW → allow with caution message.</li>
+<li>RED + structural-only gates + <code>.tdd-skip</code> → log auto-bypass, allow.</li>
+<li>RED + behavioral gates + <code>.tdd-skip</code> → deny with "use /override-confidence".</li>
+<li>RED + valid override marker → consume marker, log override, allow.</li>
+<li>RED + malformed override → delete marker, deny.</li>
+<li>RED + no override → deny with options message.</li>
+</ul>
+<p>The denial <strong>text</strong> sent in <code>permissionDecisionReason</code> MUST match the stderr text the Claude version emits, line for line, so users see the same UX.</p>
+<h3 id="fr-5--idempotency">FR-5 — Idempotency</h3>
+<p>Re-running <code>ai-native-workflow install project</code> MUST be safe:</p>
+<ul>
+<li>If <code>.github/hooks/copilot-cli-policy.json</code> already exists, the installer MUST merge our two <code>preToolUse</code> entries with any existing entries, deduping by the <code>bash</code> script path. This mirrors the <code>install_global_settings</code> jq-merge behavior (lines 1818–1828).</li>
+<li>If <code>.github/hooks/scripts/tdd-gate.sh</code> or <code>confidence-gate.sh</code> already exists with <strong>different content</strong>, the installer MUST back it up (<code>&lt;name&gt;.bak.&lt;timestamp&gt;</code>) and overwrite. (Same policy as <code>backup_if_exists</code> already used elsewhere.)</li>
+<li>If the existing file content matches what we would write, no change and no backup.</li>
+</ul>
+<h3 id="fr-6--graceful-degradation-when-jq-is-missing">FR-6 — Graceful degradation when <code>jq</code> is missing</h3>
+<p>If <code>jq</code> is not on <code>PATH</code> at install time, the installer MUST:</p>
+<ul>
+<li>Still create the script files (they will use <code>jq</code> at runtime — that is the user's responsibility to install <code>jq</code> for hook execution).</li>
+<li>Print a <code>warn</code>: "jq not found — Copilot hooks require jq at runtime. Install with: brew install jq".</li>
+<li>Continue rather than fail. (Mirrors line 1834.)</li>
+</ul>
+<h3 id="fr-7--gitignore-adjustments">FR-7 — <code>.gitignore</code> adjustments</h3>
+<p><code>install_project_gitignore()</code> MUST be extended to ignore:</p>
+<ul>
+<li><code>.github/hooks/logs/</code> (audit-log directory used by Copilot tutorial conventions, even though we don't use it directly today — future-proofing).</li>
+</ul>
+<p><code>.github/hooks/copilot-cli-policy.json</code> and <code>.github/hooks/scripts/*</code> MUST <strong>stay tracked</strong> — they are project policy.</p>
+<h3 id="fr-8--confidence-scorer-resolution-decision-pending--see-7">FR-8 — Confidence scorer resolution (decision pending — see §7)</h3>
+<p>The Copilot <code>confidence-gate.sh</code> MUST locate <code>confidence.sh</code> via one of:</p>
+<ul>
+<li>(A) the globally-installed copy at <code>~/.claude/scripts/confidence.sh</code> (since the Claude installer puts it there);</li>
+<li>(B) a vendored copy at <code>.github/hooks/scripts/confidence.sh</code> written by the installer;</li>
+<li>(C) a <code>$ANW_CONFIDENCE_SCORER</code> env var set by the policy <code>env</code> block, defaulting to (A).</li>
+</ul>
+<p>Recommendation: <strong>(B) vendored copy</strong>. Rationale in §7. Final choice is the architect's; this requirement just demands a single deterministic resolution path documented at the top of <code>confidence-gate.sh</code>.</p>
+<h2 id="7-confidence-scorer-resolution--trade-offs">7. Confidence Scorer Resolution — Trade-offs</h2>
+<p>The Claude version uses a path relative to its own location:</p>
+<pre class="bash"><code>SCRIPT_DIR=&quot;$(cd &quot;$(dirname &quot;${BASH_SOURCE[0]}&quot;)&quot; &amp;&amp; pwd)&quot;
+... &quot;$SCRIPT_DIR/../scripts/confidence.sh&quot; ...</code></pre>
+<p>That works because <code>~/.claude/scripts/confidence.sh</code> is sibling to <code>~/.claude/hooks/</code>. In the per-project Copilot layout there is no sibling <code>scripts/</code> directory automatically.</p>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Pros</th>
+<th>Cons</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>(A) Use global ~/.claude/scripts</strong></td>
+<td>Single source of truth; brew updates propagate automatically.</td>
+<td>Couples Copilot policy to Claude install; breaks for users who have only Copilot. Cross-tool coupling smell.</td>
+</tr>
+<tr>
+<td><strong>(B) Vendor into <code>.github/hooks/scripts/confidence.sh</code></strong></td>
+<td>Self-contained per-project; works without Claude installed; commit history visible.</td>
+<td>Drift: scorer logic can fall behind the brew-managed copy. Re-running installer would need to refresh it.</td>
+</tr>
+<tr>
+<td><strong>(C) Env-var with default</strong></td>
+<td>Flexible; testable.</td>
+<td>Complexity surface; users have to know the var.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recommended: (B).</strong> It matches the spirit of "per-project hooks = per-project enforcement," makes the gate work for Copilot-only users, and FR-5 (idempotency / refresh-on-reinstall) covers the drift concern. The <code>_ANW_SCRIPT_DIR</code> BREW-1 work makes copying this file at install time as cheap as the existing Claude scorer copy on line 2084.</p>
+<h2 id="8-non-functional-requirements">8. Non-Functional Requirements</h2>
+<h3 id="nfr-1--hook-scripts-executable">NFR-1 — Hook scripts executable</h3>
+<p>Both shell scripts created under <code>.github/hooks/scripts/</code> MUST have the executable bit set after the installer runs. This is verified by: <code>test -x .github/hooks/scripts/tdd-gate.sh &amp;&amp; test -x .github/hooks/scripts/confidence-gate.sh</code>.</p>
+<h3 id="nfr-2--json-validity">NFR-2 — JSON validity</h3>
+<p><code>copilot-cli-policy.json</code> MUST be parseable by <code>jq -e .</code> after the installer runs (no trailing commas, valid UTF-8). The installer SHOULD pipe the generated content through <code>jq</code> before writing.</p>
+<h3 id="nfr-3--hooks-fire-on-the-right-event-only">NFR-3 — Hooks fire on the right event only</h3>
+<p>The Copilot <code>preToolUse</code> entry triggers on <strong>every</strong> tool use (file reads, etc.), not only bash. The very first lines of each script MUST short-circuit (<code>exit 0</code>) when <code>toolName != "bash"</code>, before doing any work. Performance budget: each gate should add &lt; 100 ms to non-bash tool calls.</p>
+<h3 id="nfr-4--no-external-network">NFR-4 — No external network</h3>
+<p>Neither hook script MAY perform network I/O. (Same constraint Claude's hooks already meet.)</p>
+<h3 id="nfr-5--atomicity-of-file-writes">NFR-5 — Atomicity of file writes</h3>
+<p>The installer MUST write <code>copilot-cli-policy.json</code> atomically (write to <code>&lt;file&gt;.tmp</code> then <code>mv</code>). This already matches the pattern at line 1829.</p>
+<h3 id="nfr-6--cross-platform-tooling">NFR-6 — Cross-platform tooling</h3>
+<p>Scripts use only POSIX-portable bash + <code>jq</code> + <code>git</code> + <code>grep</code>. No GNU-only flags. (The Claude versions already meet this.)</p>
+<h3 id="nfr-7--deterministic-output-for-the-same-input">NFR-7 — Deterministic output for the same input</h3>
+<p>Two installer runs over the same project directory MUST produce byte-identical hook scripts and a <code>copilot-cli-policy.json</code> that differs only in the order of entries iff there were no prior entries.</p>
+<h2 id="9-out-of-scope">9. Out of Scope</h2>
+<ul>
+<li><strong>Global Copilot hooks.</strong> Copilot has no global hook concept. Do not attempt to write <code>~/.copilot/hooks.json</code>.</li>
+<li><strong>Other event types.</strong> <code>sessionStart</code>, <code>userPromptSubmitted</code>, <code>agentStop</code>, etc. — none are needed for COP-2. Future work can add audit logging via <code>userPromptSubmitted</code> if desired.</li>
+<li><strong>PowerShell variants.</strong> Mac/Linux is the target platform (per <code>CLAUDE.md</code> profile). The <code>powershell</code> field is omitted from the policy JSON.</li>
+<li><strong>Updating Copilot CLI to gate <code>gh</code>/<code>glab</code> directly via its own permission prompt UI.</strong> Use the hook mechanism only.</li>
+<li><strong>Modifying the Claude hooks</strong> to share logic with Copilot. We are porting, not refactoring.</li>
+<li><strong>Tests for the scripts themselves at the unit level beyond what bats already covers for the Claude versions.</strong> New bats coverage for COP-2 is in scope (see §11.4).</li>
+</ul>
+<h2 id="10-open-questions--blockers">10. Open Questions / Blockers</h2>
+<ul>
+<li><strong>OQ-1 (medium)</strong>: Does Copilot CLI short-circuit <code>preToolUse</code> on the first <code>deny</code>, or does it run all entries in declaration order? The docs do not say. <strong>Resolution path</strong>: spike during architect step — manually craft a two-entry policy where entry 1 denies and entry 2 has <code>set -e; exit 1</code>, observe behavior. If it does NOT short-circuit, we may need to fold both gates into a single dispatcher script.</li>
+<li><strong>OQ-2 (low)</strong>: Are multiple files in <code>.github/hooks/*.json</code> merged by Copilot, or does only one win? Not relevant for v1 (we use a single file) but informs FR-5 idempotency design if we ever need to coexist with hooks the user added themselves.</li>
+<li><strong>OQ-3 (medium)</strong>: Is <code>cwd</code> in the stdin payload <strong>always</strong> the repo root, or is it the user's actual <code>pwd</code> when they invoked Copilot? If the latter, <code>PROJECT_DIR</code> resolution must walk up to the enclosing <code>.git/</code>.</li>
+<li><strong>OQ-4 (low)</strong>: §7 — confirm with user that the recommended scorer resolution is option (B) vendored.</li>
+<li><strong>OQ-5 (medium)</strong>: Does Copilot's <code>permissionDecisionReason</code> get surfaced to the user with the same prominence Claude's stderr does? If not, we may need to also <code>&gt;&amp;2 echo</code> the message so the user sees it in the terminal regardless of Copilot's UI choices.</li>
+<li><strong>OQ-6 (low)</strong>: Should we also write a stub <code>.github/hooks/README.md</code> explaining what these files are, so engineers reviewing the PR don't delete them? Recommend yes; out of FR scope.</li>
+</ul>
+<h2 id="11-acceptance-criteria">11. Acceptance Criteria</h2>
+<p>All criteria are testable. Tests live in <code>tests/install-project-copilot-hooks.bats</code> (new file, follows the pattern of existing <code>tests/*.bats</code> in this repo).</p>
+<h3 id="111-installer-creates-the-files">11.1 Installer creates the files</h3>
+<ul>
+<li><p><strong>AC-1 (Given/When/Then)</strong>:</p>
+<ul>
+<li><strong>Given</strong> an empty git repo without <code>.github/hooks/</code>,</li>
+<li><strong>When</strong> I run <code>ai-native-workflow install project</code>,</li>
+<li><strong>Then</strong> <code>.github/hooks/copilot-cli-policy.json</code> exists, <code>.github/hooks/scripts/tdd-gate.sh</code> exists and is executable, <code>.github/hooks/scripts/confidence-gate.sh</code> exists and is executable, and (if option B) <code>.github/hooks/scripts/confidence.sh</code> exists and is executable.</li>
+</ul></li>
+<li><p><strong>AC-2</strong>: The generated <code>copilot-cli-policy.json</code> parses as valid JSON (<code>jq -e . &lt; .github/hooks/copilot-cli-policy.json</code> returns 0) and has exactly two entries under <code>.hooks.preToolUse</code>, with <code>bash</code> values <code>./scripts/tdd-gate.sh</code> and <code>./scripts/confidence-gate.sh</code>.</p></li>
+</ul>
+<h3 id="112-idempotency">11.2 Idempotency</h3>
+<ul>
+<li><p><strong>AC-3</strong>: Running the installer twice in a row produces no diff in the working tree on the second run (<code>git status --porcelain</code> empty after second invocation, given a clean state after the first).</p></li>
+<li><p><strong>AC-4</strong>: If a user has pre-existing entries in <code>copilot-cli-policy.json</code> under <code>preToolUse</code> (e.g. a custom audit-log hook), running the installer preserves those entries AND adds our two, deduping by <code>bash</code> path.</p></li>
+<li><p><strong>AC-5</strong>: If a user has hand-edited <code>.github/hooks/scripts/tdd-gate.sh</code>, running the installer creates a backup <code>tdd-gate.sh.bak.&lt;ts&gt;</code> and overwrites with the canonical script.</p></li>
+</ul>
+<h3 id="113-tdd-gate-parity">11.3 TDD gate parity</h3>
+<ul>
+<li><p><strong>AC-6 (Given/When/Then)</strong>:</p>
+<ul>
+<li><strong>Given</strong> the Copilot TDD gate is installed and no test files are staged,</li>
+<li><strong>When</strong> Copilot tries to run <code>bash</code> with command <code>git commit -m "feat: thing"</code>,</li>
+<li><strong>Then</strong> the hook returns <code>{"permissionDecision":"deny","permissionDecisionReason":"…TDD GATE…"}</code> and Copilot does not run the commit.</li>
+</ul></li>
+<li><p><strong>AC-7</strong>: Same setup but <code>.tdd-skip</code> exists → no <code>deny</code>, command proceeds.</p></li>
+<li><p><strong>AC-8</strong>: Same setup but a staged file matches the test pattern → no <code>deny</code>.</p></li>
+<li><p><strong>AC-9</strong>: Command is <code>git commit --amend</code> → no <code>deny</code>.</p></li>
+<li><p><strong>AC-10</strong>: Command is <code>git status</code> → hook exits 0 with no JSON (allow path).</p></li>
+<li><p><strong>AC-11</strong>: <code>toolName</code> is not <code>bash</code> (e.g. file read tool) → hook exits 0 with no JSON, no <code>jq</code> parsing of <code>toolArgs</code> happens.</p></li>
+</ul>
+<h3 id="114-confidence-gate-parity">11.4 Confidence gate parity</h3>
+<ul>
+<li><p><strong>AC-12 (Given/When/Then)</strong>:</p>
+<ul>
+<li><strong>Given</strong> an active spec <code>FOO-1</code> with a confidence log whose aggregate verdict is GREEN (mock the scorer),</li>
+<li><strong>When</strong> Copilot tries to run <code>bash</code> with command <code>gh pr create</code>,</li>
+<li><strong>Then</strong> the hook exits 0 with no <code>deny</code> and the log gets a new <code>{event:"verdict",band:"GREEN"}</code> line.</li>
+</ul></li>
+<li><p><strong>AC-13</strong>: Same with RED and no <code>.tdd-skip</code> and no override marker → hook returns <code>deny</code> with the "RED" message and lists gates.</p></li>
+<li><p><strong>AC-14</strong>: RED + override marker present → marker consumed (file removed), log appended, allow.</p></li>
+<li><p><strong>AC-15</strong>: RED + <code>.tdd-skip</code> + structural-only gates → auto-bypass, allow.</p></li>
+<li><p><strong>AC-16</strong>: RED + <code>.tdd-skip</code> + behavioral gates → deny with "use /override-confidence" text.</p></li>
+<li><p><strong>AC-17</strong>: Command is <code>git push</code> (not <code>gh pr create</code> or <code>glab mr create</code>) → allow.</p></li>
+<li><p><strong>AC-18</strong>: No active-spec pointer → deny with the missing-pointer message.</p></li>
+</ul>
+<h3 id="115-end-to-end-with-real-copilot-cli-smoke-manual">11.5 End-to-end with real Copilot CLI (smoke; manual)</h3>
+<ul>
+<li><strong>AC-19</strong>: Manual smoke — install in a sample repo, set up an active spec, run <code>copilot --agent=tdd-developer …</code> driving a commit attempt without test files; confirm Copilot UI surfaces the deny reason. (Documented in <code>tests/manual/COP-2-smoke.md</code>. Not in CI.)</li>
+</ul>
+<h2 id="12-risks--surprises">12. Risks &amp; Surprises</h2>
+<p>These are aspects where Copilot's hook semantics differ from Claude's in ways that affect enforcement guarantees. Surface to architect.</p>
+<h3 id="r-1-high--deny-is-communicated-via-stdout-not-exit-code">R-1 (HIGH) — <code>deny</code> is communicated via stdout, not exit code</h3>
+<p>This is a semantic departure. If the hook script crashes (e.g. <code>set -e</code> kills it before printing the JSON), the <strong>action is allowed</strong>, not blocked. Claude's <code>exit 2</code> is the safer default-deny. <strong>Mitigation</strong>: the script must <code>trap</code> errors and emit a <code>deny</code> JSON in the trap, so crashes fail closed.</p>
+<h3 id="r-2-high--no-matcher-field">R-2 (HIGH) — No <code>matcher</code> field</h3>
+<p>Every <code>preToolUse</code> hook fires on every tool use, including file reads, edits, etc. The script-side filter <code>toolName == "bash"</code> MUST be the literal first line of work. If we forget, we slow every tool use by tens of ms and risk false denies.</p>
+<h3 id="r-3-medium--repo-scoped-only">R-3 (MEDIUM) — Repo-scoped only</h3>
+<p>Engineers cloning the repo for the first time may run Copilot CLI before our installer has run, meaning the gates do not exist. Unlike Claude (global), the hooks travel with the repo as committed files. <strong>Mitigation</strong>: docs MUST explain "commit <code>.github/hooks/</code> after install or your team is unprotected."</p>
+<h3 id="r-4-medium--per-project-means-n-installs">R-4 (MEDIUM) — Per-project means N installs</h3>
+<p>Every repo needs its own install. Fix is operational, not technical: a <code>pre-commit</code> of an org-wide template, or a CI check that <code>copilot-cli-policy.json</code> exists with our two entries. Both are out of scope for COP-2.</p>
+<h3 id="r-5-medium--cwd-payload-field-semantics-unconfirmed-oq-3">R-5 (MEDIUM) — <code>cwd</code> payload field semantics unconfirmed (OQ-3)</h3>
+<p>If <code>cwd</code> is not the repo root, <code>PROJECT_DIR</code> resolution is wrong, and <code>git diff --cached</code> will fail in unexpected ways. Mitigation: fall back to <code>git -C "$cwd" rev-parse --show-toplevel</code> and use the result.</p>
+<h3 id="r-6-low--toolargs-is-double-encoded-json">R-6 (LOW) — <code>toolArgs</code> is double-encoded JSON</h3>
+<p>Easy to miss. Documentation calls it "a JSON string." First <code>jq</code> parse extracts the string; second parse extracts <code>.command</code>. The translation table in §4 covers it but reviewers should verify both <code>jq</code> calls.</p>
+<h3 id="r-7-low--hook-timeout-is-30s-default-long-running-git-operations">R-7 (LOW) — Hook timeout is 30s default; long-running git operations</h3>
+<p>If the user has a slow <code>git diff --cached</code> (huge repo) the TDD gate could time out. We set 10s explicitly. <strong>Mitigation</strong>: same as Claude, which sets 10s. Document it.</p>
+<h3 id="r-8-low--ordershort-circuit-unconfirmed-oq-1">R-8 (LOW) — Order/short-circuit unconfirmed (OQ-1)</h3>
+<p>If Copilot does NOT short-circuit on the first <code>deny</code>, the confidence gate might still run after the TDD gate denied. Worst case: extra log writes. Best case: confidence gate just exits 0 because the command is not <code>gh pr create</code>. No correctness risk identified, but worth confirming.</p>
+<h2 id="13-test-plan-outline-for-qa-agent">13. Test Plan Outline (for QA agent)</h2>
+<h3 id="131-unit-tests-bats--installer-behavior">13.1 Unit tests (bats) — installer behavior</h3>
+<ul>
+<li>Files created with correct paths and modes (covers AC-1).</li>
+<li>JSON validity (covers AC-2).</li>
+<li>Idempotency single re-run (covers AC-3).</li>
+<li>Idempotency with pre-existing custom hook (covers AC-4).</li>
+<li>Backup-on-content-mismatch (covers AC-5).</li>
+<li>Behavior when <code>jq</code> is absent at install time (FR-6 — should warn but not abort).</li>
+</ul>
+<h3 id="132-unit-tests-bats--script-behavior-in-isolation">13.2 Unit tests (bats) — script behavior in isolation</h3>
+<p>Each script is invoked with a synthetic stdin payload and the exit code</p>
+<ul>
+<li>stdout JSON is asserted. Covers AC-6 through AC-18. Test fixtures:</li>
+</ul>
+<ul>
+<li>A function <code>mk_payload</code> that produces stdin JSON for a given toolName + command + cwd.</li>
+<li>A temp git repo with controllable staged files.</li>
+<li>A mock <code>confidence.sh</code> that emits a configurable verdict JSON (GREEN/YELLOW/RED + gates).</li>
+</ul>
+<h3 id="133-integration-tests-bats">13.3 Integration tests (bats)</h3>
+<ul>
+<li>End-to-end install in a tmp dir, then run each hook script with a real payload, assert behavior.</li>
+</ul>
+<h3 id="134-manual-smoke-test">13.4 Manual smoke test</h3>
+<ul>
+<li>AC-19 — documented but not automated.</li>
+</ul>
+<h3 id="135-edge-cases-to-exercise">13.5 Edge cases to exercise</h3>
+<ul>
+<li>Payload with missing <code>cwd</code> — script should default to <code>.</code> and log a warning.</li>
+<li>Payload with malformed <code>toolArgs</code> — script should fail closed (<code>deny</code> with reason "malformed payload").</li>
+<li><code>.tdd-skip</code> with no <code>Reason:</code> line in confidence-gate auto-bypass path.</li>
+<li>Override marker file with no <code>reason</code> field (should delete + deny; parity with Claude line 100–103).</li>
+<li>Active-spec ID containing <code>..</code> or <code>/</code> (regex rejection — AC for the same exists for Claude).</li>
+<li>Confidence log path that resolves to a symlink outside the repo (low priority; document only).</li>
+</ul>
+<h2 id="14-hand-off">14. Hand-off</h2>
+<p>When this spec is approved:</p>
+<blockquote>
+<p>Use architect to design the solution based on <code>docs/context/specs/COP-2-requirements.html</code>.</p>
+</blockquote>
+<p>The architect should resolve OQ-1, OQ-3, OQ-4 before writing the todo plan, and decide between port / wrap / shared-script for code reuse (see user's prompt — three options). My recommendation: <strong>port with shared confidence-scorer file (option B)</strong>, because (a) the Claude and Copilot scripts have to diverge anyway on payload parsing and decision shape, so a "shared" script would be 80% conditionals; (b) a vendored <code>confidence.sh</code> keeps the Copilot path self-contained.</p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

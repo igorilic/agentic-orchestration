@@ -1,0 +1,1683 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Confidence Gate Implementation Plan</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">Confidence Gate Implementation Plan</h1>
+<time class="sp-article__date" datetime="2026-05-03"><span class="sp-bar"></span><span style="margin-left:.75rem">May 3, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p><strong>For agentic workers:</strong> REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (<code>- [ ]</code>) syntax for tracking.</p>
+</blockquote>
+<p><strong>Goal:</strong> Add a deterministic confidence verdict (GREEN / YELLOW / RED + 0–100 score) to the <code>tdd-developer → qa → reviewer</code> pipeline, enforced as a hook on PR/MR creation.</p>
+<p><strong>Architecture:</strong> Each agent appends events to a per-spec append-only log at <code>.context/specs/&lt;id&gt;-confidence.jsonl</code>. A pure shell script (<code>scripts/confidence.sh</code>) computes the verdict from the log. A <code>PreToolUse</code> hook (<code>hooks/confidence-gate.sh</code>) blocks <code>gh pr create</code> / <code>glab mr create</code> on RED unless an override marker is present. <code>/skip-tdd</code> auto-bypasses structural gates (NO_AC, AC_NOT_TESTED) only.</p>
+<p><strong>Tech Stack:</strong> bash 4+, <code>jq</code>, <code>bats-core</code> (for tests). No new runtime dependencies beyond what the repo already requires.</p>
+<p><strong>Spec:</strong> <a href="../specs/2026-05-02-confidence-gate-design.html"><code>docs/superpowers/specs/2026-05-02-confidence-gate-design.html</code></a></p>
+<hr />
+<h2 id="file-structure">File Structure</h2>
+<h3 id="new-files">New files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/confidence.sh</code></td>
+<td>Pure scorer: read jsonl log, compute hard gates + scored penalties, emit JSON verdict.</td>
+</tr>
+<tr>
+<td><code>hooks/confidence-gate.sh</code></td>
+<td>PreToolUse hook on <code>Bash</code> matching <code>gh pr create*</code> / <code>glab mr create*</code>; runs scorer, exits 2 on RED unless override resolves.</td>
+</tr>
+<tr>
+<td><code>skills/override-confidence/SKILL.md</code></td>
+<td><code>/override-confidence "&lt;reason&gt;"</code> skill — writes one-shot bypass marker to <code>.git/aw/</code>.</td>
+</tr>
+<tr>
+<td><code>tests/confidence.bats</code></td>
+<td>Unit tests for <code>scripts/confidence.sh</code>.</td>
+</tr>
+<tr>
+<td><code>tests/confidence-gate-hook.bats</code></td>
+<td>Integration tests for <code>hooks/confidence-gate.sh</code>.</td>
+</tr>
+<tr>
+<td><code>tests/fixtures/confidence/*.jsonl</code></td>
+<td>Hand-crafted event log fixtures.</td>
+</tr>
+<tr>
+<td><code>tests/lib/confidence-helpers.bash</code></td>
+<td>Bats helper functions (build temp logs, mock skip-tdd marker, etc.).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="modified-files">Modified files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agents/claude-code/architect.md</code></td>
+<td>Add §6: emit <code>spec</code> event after writing spec.</td>
+</tr>
+<tr>
+<td><code>agents/copilot-cli/architect.agent.md</code></td>
+<td>Same.</td>
+</tr>
+<tr>
+<td><code>agents/claude-code/qa.md</code></td>
+<td>Add §5: emit <code>qa</code> event after running tests.</td>
+</tr>
+<tr>
+<td><code>agents/copilot-cli/qa.agent.md</code></td>
+<td>Same.</td>
+</tr>
+<tr>
+<td><code>agents/claude-code/reviewer.md</code></td>
+<td>Add §7: emit <code>review</code> event after final loop.</td>
+</tr>
+<tr>
+<td><code>agents/copilot-cli/reviewer.agent.md</code></td>
+<td>Same.</td>
+</tr>
+<tr>
+<td><code>ai-native-workflow</code></td>
+<td>(a) Write <code>.git/aw/active-spec</code> at run start. (b) Invoke scorer per step. (c) Inject <code>## Confidence</code> PR body section.</td>
+</tr>
+<tr>
+<td><code>config/settings.json</code></td>
+<td>Register <code>hooks/confidence-gate.sh</code> as PreToolUse on Bash.</td>
+</tr>
+<tr>
+<td><code>README.md</code></td>
+<td>New section "Confidence Gate".</td>
+</tr>
+<tr>
+<td><code>docs/ARCHITECTURE.html</code></td>
+<td>Update pipeline diagrams.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="existing-references-not-modified-but-read-by-the-implementation">Existing references (not modified, but read by the implementation)</h3>
+<ul>
+<li><code>.tdd-skip</code> — file written by <code>skills/skip-tdd/SKILL.md</code>. The hook reads this to detect skip-tdd is active.</li>
+<li><code>hooks/tdd-gate.sh</code> — model the hook structure on this file.</li>
+</ul>
+<hr />
+<h2 id="task-1-bootstrap-test-infrastructure">Task 1: Bootstrap test infrastructure</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>tests/lib/confidence-helpers.bash</code></li>
+<li>Create: <code>tests/sanity.bats</code></li>
+<li>Modify: <code>README.md</code> (Requirements section adds bats-core)</li>
+</ul>
+<p><strong>Background for the engineer:</strong> <code>bats-core</code> is bash's test runner — installs via <code>brew install bats-core</code> on macOS. We use it because the repo is shell-based and we need a real assertion framework, not raw <code>if</code> statements. Helper file pattern: a sourced bash file with functions, by convention under <code>tests/lib/</code>.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Verify bats-core is available</strong></label></li>
+</ul>
+<p>Run: <code>which bats || brew install bats-core</code> Expected: <code>bats</code> resolves on PATH and <code>bats --version</code> prints <code>Bats 1.x.x</code>.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 2: Create <code>tests/lib/confidence-helpers.bash</code></strong></label></li>
+</ul>
+<pre class="bash"><code>#!/usr/bin/env bash
+# Helpers for confidence-gate tests.
+
+# make_log &lt;path&gt; &lt;events...&gt;
+# Each event arg is a JSON string written as one line.
+make_log() {
+  local path=&quot;$1&quot;; shift
+  : &gt; &quot;$path&quot;
+  for evt in &quot;$@&quot;; do
+    printf &#39;%s\n&#39; &quot;$evt&quot; &gt;&gt; &quot;$path&quot;
+  done
+}
+
+# Standard event builders. ts is fixed for deterministic tests.
+spec_event() {
+  local ac_json=&quot;${1:-[]}&quot;
+  printf &#39;{&quot;ts&quot;:&quot;2026-05-02T18:00:00Z&quot;,&quot;event&quot;:&quot;spec&quot;,&quot;spec_path&quot;:&quot;x&quot;,&quot;ac_items&quot;:%s}&#39; &quot;$ac_json&quot;
+}
+
+qa_event() {
+  local step=&quot;$1&quot; passed=&quot;$2&quot; failed=&quot;$3&quot; build=&quot;${4:-ok}&quot; tested=&quot;${5:-[]}&quot;
+  printf &#39;{&quot;ts&quot;:&quot;2026-05-02T18:00:01Z&quot;,&quot;event&quot;:&quot;qa&quot;,&quot;step&quot;:%s,&quot;tests_passed&quot;:%s,&quot;tests_failed&quot;:%s,&quot;build_status&quot;:&quot;%s&quot;,&quot;ac_items_tested&quot;:%s}&#39; \
+    &quot;$step&quot; &quot;$passed&quot; &quot;$failed&quot; &quot;$build&quot; &quot;$tested&quot;
+}
+
+review_event() {
+  local step=&quot;$1&quot; must=&quot;${2:-0}&quot; should=&quot;${3:-0}&quot; sugg=&quot;${4:-0}&quot; loops=&quot;${5:-1}&quot; td=&quot;${6:-0}&quot; diff=&quot;${7:-100}&quot;
+  local must_arr should_arr sugg_arr td_arr
+  must_arr=$(  [ &quot;$must&quot;   -eq 0 ] &amp;&amp; echo &#39;[]&#39; || seq 1 &quot;$must&quot;   | jq -Rcn &#39;[inputs | {file:&quot;f.go&quot;,line:1,msg:&quot;x&quot;}]&#39;)
+  should_arr=$([ &quot;$should&quot; -eq 0 ] &amp;&amp; echo &#39;[]&#39; || seq 1 &quot;$should&quot; | jq -Rcn &#39;[inputs | {file:&quot;f.go&quot;,line:1,msg:&quot;x&quot;}]&#39;)
+  sugg_arr=$(  [ &quot;$sugg&quot;   -eq 0 ] &amp;&amp; echo &#39;[]&#39; || seq 1 &quot;$sugg&quot;   | jq -Rcn &#39;[inputs | {file:&quot;f.go&quot;,line:1,msg:&quot;x&quot;}]&#39;)
+  td_arr=$(    [ &quot;$td&quot;     -eq 0 ] &amp;&amp; echo &#39;[]&#39; || seq 1 &quot;$td&quot;     | jq -Rcn &#39;[inputs | {item:&quot;x&quot;}]&#39;)
+  printf &#39;{&quot;ts&quot;:&quot;2026-05-02T18:00:02Z&quot;,&quot;event&quot;:&quot;review&quot;,&quot;step&quot;:%s,&quot;must_fix&quot;:%s,&quot;should_fix&quot;:%s,&quot;suggestion&quot;:%s,&quot;loops_used&quot;:%s,&quot;tech_debt_deferrals&quot;:%s,&quot;diff_lines&quot;:%s}&#39; \
+    &quot;$step&quot; &quot;$must_arr&quot; &quot;$should_arr&quot; &quot;$sugg_arr&quot; &quot;$loops&quot; &quot;$td_arr&quot; &quot;$diff&quot;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 3: Create <code>tests/sanity.bats</code></strong></label></li>
+</ul>
+<pre class="bash"><code>#!/usr/bin/env bats
+
+load &#39;lib/confidence-helpers&#39;
+
+@test &quot;helpers: make_log writes one event per line&quot; {
+  tmp=&quot;$(mktemp)&quot;
+  make_log &quot;$tmp&quot; &quot;$(spec_event &#39;[]&#39;)&quot;
+  run wc -l &lt; &quot;$tmp&quot;
+  [ &quot;$status&quot; -eq 0 ]
+  [ &quot;$(echo &quot;$output&quot; | tr -d &#39; &#39;)&quot; = &quot;1&quot; ]
+}
+
+@test &quot;helpers: spec_event with one AC produces valid JSON&quot; {
+  evt=&quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot;
+  echo &quot;$evt&quot; | jq -e &#39;.ac_items[0].id == &quot;AC-1&quot;&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 4: Run sanity tests</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/sanity.bats</code> Expected: 2 tests pass.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 5: Update README requirements</strong></label></li>
+</ul>
+<p>In <code>README.md</code>, in the Requirements section, add:</p>
+<pre class="markdown"><code>- `bats-core` (development only — `brew install bats-core` on macOS, `npm i -g bats` elsewhere)</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 6: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add tests/ README.md
+git commit -m &quot;test: bootstrap bats-core test infrastructure for confidence gate&quot;</code></pre>
+<hr />
+<h2 id="task-2-confidencesh--skeleton-happy-path-json-output">Task 2: confidence.sh — skeleton, happy path, JSON output</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>scripts/confidence.sh</code></li>
+<li>Create: <code>tests/fixtures/confidence/all-green.jsonl</code></li>
+<li>Modify: <code>tests/confidence.bats</code> (new file)</li>
+</ul>
+<p><strong>Background:</strong> The script reads a jsonl log path as <code>$1</code> and emits a single line of JSON to stdout. Keep functions small. <code>set -euo pipefail</code> at top. Use <code>jq -s</code> (slurp) to read the log as an array of events.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Write the failing test</strong></label></li>
+</ul>
+<p>Create <code>tests/confidence.bats</code>:</p>
+<pre class="bash"><code>#!/usr/bin/env bats
+
+load &#39;lib/confidence-helpers&#39;
+
+setup() {
+  TMPLOG=&quot;$(mktemp)&quot;
+}
+
+teardown() {
+  rm -f &quot;$TMPLOG&quot;
+}
+
+@test &quot;all-green log: score 100, band GREEN, no gates&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  [ &quot;$status&quot; -eq 0 ]
+  echo &quot;$output&quot; | jq -e &#39;.score == 100&#39;
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;GREEN&quot;&#39;
+  echo &quot;$output&quot; | jq -e &#39;.gates == []&#39;
+}
+
+@test &quot;output JSON has all required fields&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;has(&quot;score&quot;) and has(&quot;band&quot;) and has(&quot;gates&quot;) and has(&quot;penalties&quot;) and has(&quot;verdict_text&quot;)&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 2: Run test to verify it fails</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: FAIL — <code>scripts/confidence.sh: No such file or directory</code>.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 3: Implement minimal <code>scripts/confidence.sh</code></strong></label></li>
+</ul>
+<pre class="bash"><code>#!/usr/bin/env bash
+# Computes a deterministic confidence verdict from an event log.
+# Usage: scripts/confidence.sh &lt;log-path&gt; [--scope=aggregate|step] [--step=N]
+set -euo pipefail
+
+LOG=&quot;${1:?usage: confidence.sh &lt;log-path&gt; [--scope=...] [--step=N]}&quot;
+SCOPE=&quot;aggregate&quot;
+STEP=&quot;&quot;
+shift || true
+for arg in &quot;$@&quot;; do
+  case &quot;$arg&quot; in
+    --scope=*) SCOPE=&quot;${arg#--scope=}&quot; ;;
+    --step=*)  STEP=&quot;${arg#--step=}&quot; ;;
+  esac
+done
+
+[ -f &quot;$LOG&quot; ] || { echo &quot;log not found: $LOG&quot; &gt;&amp;2; exit 1; }
+
+# Slurp into an array. Strip irrelevant events for scope=step.
+events=&quot;$(jq -s &#39;.&#39; &quot;$LOG&quot;)&quot;
+if [ &quot;$SCOPE&quot; = &quot;step&quot; ] &amp;&amp; [ -n &quot;$STEP&quot; ]; then
+  events=&quot;$(jq --argjson s &quot;$STEP&quot; &#39;[.[] | select((.step // 0) == $s or .event == &quot;spec&quot;)]&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+fi
+
+score=100
+gates=()
+penalties_should_fix=0
+penalties_loops=0
+penalties_tech_debt=0
+penalties_ac_coverage=0
+penalties_diff=0
+penalties_suggestion=0
+
+# (Hard gates and scored penalties added in subsequent tasks.)
+
+# Determine band.
+if [ &quot;${#gates[@]}&quot; -gt 0 ]; then
+  band=&quot;RED&quot;
+elif [ &quot;$score&quot; -ge 80 ]; then
+  band=&quot;GREEN&quot;
+elif [ &quot;$score&quot; -ge 60 ]; then
+  band=&quot;YELLOW&quot;
+else
+  band=&quot;RED&quot;
+fi
+
+verdict_text=&quot;$band: ${score}/100&quot;
+
+jq -n \
+  --arg band &quot;$band&quot; \
+  --argjson score &quot;$score&quot; \
+  --argjson gates &quot;$(printf &#39;%s\n&#39; &quot;${gates[@]:-}&quot; | jq -R . | jq -s &#39;map(select(. != &quot;&quot;))&#39;)&quot; \
+  --argjson penalties &quot;$(jq -n \
+      --argjson should_fix &quot;$penalties_should_fix&quot; \
+      --argjson suggestion &quot;$penalties_suggestion&quot; \
+      --argjson loops &quot;$penalties_loops&quot; \
+      --argjson tech_debt &quot;$penalties_tech_debt&quot; \
+      --argjson ac_coverage &quot;$penalties_ac_coverage&quot; \
+      --argjson diff &quot;$penalties_diff&quot; \
+      &#39;{should_fix:$should_fix, suggestion:$suggestion, loops:$loops, tech_debt:$tech_debt, ac_coverage:$ac_coverage, diff:$diff}&#39;)&quot; \
+  --arg verdict_text &quot;$verdict_text&quot; \
+  &#39;{band:$band, score:$score, gates:$gates, penalties:$penalties, verdict_text:$verdict_text}&#39;</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 4: Make it executable</strong></label></li>
+</ul>
+<pre class="bash"><code>chmod +x scripts/confidence.sh</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 5: Run tests to verify they pass</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: 2 tests pass.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 6: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add scripts/confidence.sh tests/confidence.bats
+git commit -m &quot;feat(confidence): scaffold scorer with all-green happy path&quot;</code></pre>
+<hr />
+<h2 id="task-3-confidencesh--hard-gates">Task 3: confidence.sh — hard gates</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>scripts/confidence.sh</code></li>
+<li>Modify: <code>tests/confidence.bats</code></li>
+</ul>
+<p><strong>Background:</strong> Six gates. Each one, when triggered, appends a string to the <code>gates</code> array. Order they appear in the array doesn't matter for behavior but use a deterministic order for test stability: <code>NO_AC</code>, <code>TEST_FAILED</code>, <code>BUILD_BROKEN</code>, <code>MUST_FIX</code>, <code>AC_NOT_TESTED</code>, <code>TDD_BYPASSED_NO_REASON</code>. Implement them in that order.</p>
+<h3 id="3a--no_ac">3a — NO_AC</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Write failing test</strong></label></li>
+</ul>
+<p>Append to <code>tests/confidence.bats</code>:</p>
+<pre class="bash"><code>@test &quot;NO_AC: missing spec event triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;RED&quot;&#39;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;NO_AC&quot;) != null&#39;
+}
+
+@test &quot;NO_AC: empty ac_items array triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;NO_AC&quot;) != null&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 2: Run, verify failure</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: 2 new tests fail (band is GREEN with no gates).</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 3: Implement gate</strong></label></li>
+</ul>
+<p>In <code>scripts/confidence.sh</code>, after the <code>events="$(jq -s ...)"</code> block and before the band check, add:</p>
+<pre class="bash"><code>ac_count=&quot;$(jq &#39;[.[] | select(.event==&quot;spec&quot;)] | (.[0].ac_items // []) | length&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+[ &quot;$ac_count&quot; -gt 0 ] || gates+=(&quot;NO_AC&quot;)</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 4: Run tests, verify pass</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: all tests pass.</p>
+<h3 id="3b--test_failed">3b — TEST_FAILED</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 5: Failing test</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;TEST_FAILED: any qa event with tests_failed &gt; 0 triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(qa_event 2 3 1 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;TEST_FAILED&quot;) != null&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 6: Run, verify failure</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code></p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 7: Implement</strong></label></li>
+</ul>
+<p>After the NO_AC check:</p>
+<pre class="bash"><code>failed_total=&quot;$(jq &#39;[.[] | select(.event==&quot;qa&quot;) | .tests_failed] | add // 0&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+[ &quot;$failed_total&quot; -eq 0 ] || gates+=(&quot;TEST_FAILED&quot;)</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 8: Run, verify pass</strong></label></li>
+</ul>
+<h3 id="3c--build_broken">3c — BUILD_BROKEN</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 9: Failing test</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;BUILD_BROKEN: qa event with build_status != ok triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 broken &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;BUILD_BROKEN&quot;) != null&#39;
+}</code></pre>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 10: Run, verify failure</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 11: Implement</strong></label></p></li>
+</ul>
+<pre class="bash"><code>broken=&quot;$(jq &#39;[.[] | select(.event==&quot;qa&quot; and .build_status != &quot;ok&quot;)] | length&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+[ &quot;$broken&quot; -eq 0 ] || gates+=(&quot;BUILD_BROKEN&quot;)</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 12: Run, verify pass</strong></label></li>
+</ul>
+<h3 id="3d--must_fix">3d — MUST_FIX</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 13: Failing test</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;MUST_FIX: any review with non-empty must_fix triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 1 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;MUST_FIX&quot;) != null&#39;
+}</code></pre>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 14: Run, verify failure</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 15: Implement</strong></label></p></li>
+</ul>
+<pre class="bash"><code>must_fix_total=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot;) | .must_fix | length] | add // 0&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+[ &quot;$must_fix_total&quot; -eq 0 ] || gates+=(&quot;MUST_FIX&quot;)</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 16: Run, verify pass</strong></label></li>
+</ul>
+<h3 id="3e--ac_not_tested">3e — AC_NOT_TESTED</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 17: Failing test</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;AC_NOT_TESTED: AC-2 in spec but not in any ac_items_tested triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;},{&quot;id&quot;:&quot;AC-2&quot;,&quot;text&quot;:&quot;y&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;AC_NOT_TESTED&quot;) != null&#39;
+}</code></pre>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 18: Run, verify failure</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 19: Implement</strong></label></p></li>
+</ul>
+<pre class="bash"><code>spec_acs=&quot;$(jq &#39;[.[] | select(.event==&quot;spec&quot;)][0].ac_items // [] | map(.id)&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+tested_acs=&quot;$(jq &#39;[.[] | select(.event==&quot;qa&quot;) | .ac_items_tested[]] | unique&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+missing_acs=&quot;$(jq -n --argjson s &quot;$spec_acs&quot; --argjson t &quot;$tested_acs&quot; &#39;$s - $t&#39;)&quot;
+missing_count=&quot;$(jq &#39;length&#39; &lt;&lt;&lt;&quot;$missing_acs&quot;)&quot;
+[ &quot;$missing_count&quot; -eq 0 ] || gates+=(&quot;AC_NOT_TESTED&quot;)</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 20: Run, verify pass</strong></label></li>
+</ul>
+<h3 id="3f--tdd_bypassed_no_reason">3f — TDD_BYPASSED_NO_REASON</h3>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 21: Failing test</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;TDD_BYPASSED_NO_REASON: explicit event in log triggers RED&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot; \
+    &#39;{&quot;ts&quot;:&quot;2026-05-02T18:00:03Z&quot;,&quot;event&quot;:&quot;tdd_bypassed&quot;,&quot;reason&quot;:&quot;&quot;}&#39;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.gates | index(&quot;TDD_BYPASSED_NO_REASON&quot;) != null&#39;
+}</code></pre>
+<p><strong>Note for engineer:</strong> The <code>tdd_bypassed</code> event is emitted by the CLI driver (Task 12) when a commit lands without test files AND no <code>.tdd-skip</code> was active. The reason is empty in that case.</p>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 22: Run, verify failure</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 23: Implement</strong></label></p></li>
+</ul>
+<pre class="bash"><code>bypass_no_reason=&quot;$(jq &#39;[.[] | select(.event==&quot;tdd_bypassed&quot; and ((.reason // &quot;&quot;) == &quot;&quot;))] | length&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+[ &quot;$bypass_no_reason&quot; -eq 0 ] || gates+=(&quot;TDD_BYPASSED_NO_REASON&quot;)</code></pre>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 24: Run, verify pass</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 25: Commit</strong></label></p></li>
+</ul>
+<pre class="bash"><code>git add scripts/confidence.sh tests/confidence.bats
+git commit -m &quot;feat(confidence): implement six hard gates with full test coverage&quot;</code></pre>
+<hr />
+<h2 id="task-4-confidencesh--scored-penalties">Task 4: confidence.sh — scored penalties</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>scripts/confidence.sh</code></li>
+<li>Modify: <code>tests/confidence.bats</code></li>
+</ul>
+<p><strong>Penalty rubric (recap from spec):</strong></p>
+<ul>
+<li><code>should_fix</code>: −5 each</li>
+<li><code>suggestion</code>: −1 each</li>
+<li><code>loops_used &gt;= 2</code>: −5 (per step that used 2+ loops)</li>
+<li><code>loops_used &gt;= 3</code>: −10 additional (so a step with 3 loops = −15 cumulative)</li>
+<li><code>tech_debt_deferrals</code>: −3 each</li>
+<li>AC coverage missing: −2 each, capped at −20</li>
+<li><code>diff_lines</code> &gt; 1000: −15; else if &gt; 400: −5</li>
+</ul>
+<p>Penalties are accumulated in <code>penalties_*</code> variables and subtracted from <code>score</code>. Update the JSON output to surface them.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Failing tests for all penalties</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;penalty: should_fix is -5 each&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 2 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 90&#39;
+  echo &quot;$output&quot; | jq -e &#39;.penalties.should_fix == -10&#39;
+}
+
+@test &quot;penalty: suggestion is -1 each&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 3 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 97&#39;
+}
+
+@test &quot;penalty: loops_used 2 is -5, loops_used 3 is -15 cumulative&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;},{&quot;id&quot;:&quot;AC-2&quot;,&quot;text&quot;:&quot;y&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(qa_event 2 5 0 ok &#39;[&quot;AC-2&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 2 0 100)&quot; \
+    &quot;$(review_event 2 0 0 0 3 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 80&#39;
+  echo &quot;$output&quot; | jq -e &#39;.penalties.loops == -20&#39;
+}
+
+@test &quot;penalty: tech_debt_deferrals is -3 each&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 2 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 94&#39;
+}
+
+@test &quot;penalty: diff &gt; 400 lines is -5&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 500)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 95&#39;
+  echo &quot;$output&quot; | jq -e &#39;.penalties.diff == -5&#39;
+}
+
+@test &quot;penalty: diff &gt; 1000 lines is -15 (replaces -5)&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 1500)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 85&#39;
+  echo &quot;$output&quot; | jq -e &#39;.penalties.diff == -15&#39;
+}
+
+@test &quot;score floor is 0, never negative&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 30 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 0&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 2: Run, verify failures</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: 7 new failures, all with <code>.score == 100</code> (penalties not yet applied).</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 3: Implement penalties</strong></label></li>
+</ul>
+<p>In <code>scripts/confidence.sh</code>, replace the placeholder comment <code># (Hard gates and scored penalties added in subsequent tasks.)</code> with the gate implementations from Task 3, followed by:</p>
+<pre class="bash"><code># --- Scored penalties ---
+should_fix_count=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot;) | .should_fix | length] | add // 0&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+penalties_should_fix=$(( -5 * should_fix_count ))
+
+suggestion_count=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot;) | .suggestion | length] | add // 0&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+penalties_suggestion=$(( -1 * suggestion_count ))
+
+loops2=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot; and .loops_used &gt;= 2)] | length&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+loops3=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot; and .loops_used &gt;= 3)] | length&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+penalties_loops=$(( -5 * loops2 + -10 * loops3 ))
+
+td_count=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot;) | .tech_debt_deferrals | length] | add // 0&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+penalties_tech_debt=$(( -3 * td_count ))
+
+# AC coverage penalty (the gate already handles 100% missing; this scores partial misses).
+penalties_ac_coverage=$(( -2 * missing_count ))
+[ &quot;$penalties_ac_coverage&quot; -lt -20 ] &amp;&amp; penalties_ac_coverage=-20
+
+total_diff=&quot;$(jq &#39;[.[] | select(.event==&quot;review&quot;) | .diff_lines] | add // 0&#39; &lt;&lt;&lt;&quot;$events&quot;)&quot;
+if [ &quot;$total_diff&quot; -gt 1000 ]; then
+  penalties_diff=-15
+elif [ &quot;$total_diff&quot; -gt 400 ]; then
+  penalties_diff=-5
+fi
+
+score=$(( score + penalties_should_fix + penalties_suggestion + penalties_loops + penalties_tech_debt + penalties_ac_coverage + penalties_diff ))
+[ &quot;$score&quot; -lt 0 ] &amp;&amp; score=0</code></pre>
+<p><strong>Note on AC_NOT_TESTED + ac_coverage interaction:</strong> the gate fires whenever ANY AC is untested. The penalty also reduces score, but since the gate forces RED, the penalty is moot in those cases. Keep both for cases where the user overrides the gate — at least the score reflects the actual coverage.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 4: Run tests, verify all pass</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: all tests pass (existing + 7 new).</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 5: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add scripts/confidence.sh tests/confidence.bats
+git commit -m &quot;feat(confidence): implement scored penalties and score floor&quot;</code></pre>
+<hr />
+<h2 id="task-5-confidencesh--band-thresholds">Task 5: confidence.sh — band thresholds</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>tests/confidence.bats</code></li>
+</ul>
+<p><strong>Background:</strong> The band logic is already implemented (Task 2's skeleton). This task adds explicit boundary tests so future regressions surface immediately.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Failing tests for boundaries</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;band: score 80 is GREEN (boundary)&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 4 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 80&#39;
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;GREEN&quot;&#39;
+}
+
+@test &quot;band: score 79 is YELLOW (boundary)&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 4 1 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 79&#39;
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;YELLOW&quot;&#39;
+}
+
+@test &quot;band: score 60 is YELLOW (boundary)&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 8 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 60&#39;
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;YELLOW&quot;&#39;
+}
+
+@test &quot;band: score 59 is RED (boundary)&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 8 1 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  echo &quot;$output&quot; | jq -e &#39;.score == 59&#39;
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;RED&quot;&#39;
+}
+
+@test &quot;band: any hard gate forces RED regardless of score&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  # score before gate would be 100, but NO_AC fires
+  echo &quot;$output&quot; | jq -e &#39;.band == &quot;RED&quot;&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 2: Run tests</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: all pass (band logic was already correct — this is regression coverage).</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 3: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add tests/confidence.bats
+git commit -m &quot;test(confidence): add boundary tests for band thresholds&quot;</code></pre>
+<hr />
+<h2 id="task-6-confidencesh--per-step-scoping">Task 6: confidence.sh — per-step scoping</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>tests/confidence.bats</code></li>
+</ul>
+<p><strong>Background:</strong> Task 2's skeleton already includes the <code>--scope=step --step=N</code> filter logic. This task validates it.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Failing tests</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;scope=step: only events for that step are considered&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;},{&quot;id&quot;:&quot;AC-2&quot;,&quot;text&quot;:&quot;y&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(qa_event 2 5 0 ok &#39;[&quot;AC-2&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot; \
+    &quot;$(review_event 2 0 4 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot; --scope=step --step=1
+  echo &quot;$output&quot; | jq -e &#39;.score == 100&#39;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot; --scope=step --step=2
+  echo &quot;$output&quot; | jq -e &#39;.score == 80&#39;
+}
+
+@test &quot;scope=aggregate (default): all events considered&quot; {
+  make_log &quot;$TMPLOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;},{&quot;id&quot;:&quot;AC-2&quot;,&quot;text&quot;:&quot;y&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(qa_event 2 5 0 ok &#39;[&quot;AC-2&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 2 0 1 0 100)&quot; \
+    &quot;$(review_event 2 0 2 0 1 0 100)&quot;
+
+  run scripts/confidence.sh &quot;$TMPLOG&quot;
+  # 4 should-fix total = -20 = score 80
+  echo &quot;$output&quot; | jq -e &#39;.score == 80&#39;
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 2: Run, verify pass</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence.bats</code> Expected: all pass.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 3: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add tests/confidence.bats
+git commit -m &quot;test(confidence): verify per-step scope filtering&quot;</code></pre>
+<hr />
+<h2 id="task-7-hooksconfidence-gatesh--basic-enforcement">Task 7: hooks/confidence-gate.sh — basic enforcement</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>hooks/confidence-gate.sh</code></li>
+<li>Create: <code>tests/confidence-gate-hook.bats</code></li>
+</ul>
+<p><strong>Background:</strong> This hook is invoked by Claude Code's PreToolUse mechanism. It receives <code>CLAUDE_TOOL_INPUT</code> containing the proposed bash command. Pattern lifted from <code>hooks/tdd-gate.sh</code>. The hook needs:</p>
+<ol type="1">
+<li>Filter: only fire on <code>gh pr create</code> or <code>glab mr create</code> commands.</li>
+<li>Resolve spec id from <code>.git/aw/active-spec</code>.</li>
+<li>Run <code>scripts/confidence.sh</code> to get verdict.</li>
+<li>Append <code>verdict</code> event with scope=aggregate to log.</li>
+<li>Apply gate logic (GREEN/YELLOW: exit 0; RED: check overrides → exit 0 or 2).</li>
+</ol>
+<p>We tackle (1)–(4) here; overrides come in Tasks 9–10.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Failing test</strong></label></li>
+</ul>
+<p>Create <code>tests/confidence-gate-hook.bats</code>:</p>
+<pre class="bash"><code>#!/usr/bin/env bats
+
+load &#39;lib/confidence-helpers&#39;
+
+setup() {
+  TESTDIR=&quot;$(mktemp -d)&quot;
+  cd &quot;$TESTDIR&quot;
+  git init -q
+  mkdir -p .git/aw .context/specs
+  echo &quot;PROJ-1&quot; &gt; .git/aw/active-spec
+  LOG=&quot;.context/specs/PROJ-1-confidence.jsonl&quot;
+}
+
+teardown() {
+  cd /
+  rm -rf &quot;$TESTDIR&quot;
+}
+
+# Helper: run hook with a given proposed command.
+run_hook() {
+  CLAUDE_PROJECT_DIR=&quot;$TESTDIR&quot; \
+  CLAUDE_TOOL_INPUT=&quot;$1&quot; \
+    bash &quot;$BATS_TEST_DIRNAME/../hooks/confidence-gate.sh&quot;
+}
+
+@test &quot;non-PR commands pass through (exit 0)&quot; {
+  make_log &quot;$LOG&quot; &quot;$(spec_event &#39;[]&#39;)&quot;
+  run run_hook &quot;git status&quot;
+  [ &quot;$status&quot; -eq 0 ]
+}
+
+@test &quot;GREEN aggregate: gh pr create proceeds (exit 0)&quot; {
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+  run run_hook &quot;gh pr create --title x --body y&quot;
+  [ &quot;$status&quot; -eq 0 ]
+}
+
+@test &quot;RED aggregate: gh pr create blocked (exit 2)&quot; {
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 1 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+  run run_hook &quot;gh pr create --title x --body y&quot;
+  [ &quot;$status&quot; -eq 2 ]
+  [[ &quot;$output&quot; == *&quot;RED&quot;* ]]
+  [[ &quot;$output&quot; == *&quot;TEST_FAILED&quot;* ]]
+}
+
+@test &quot;RED aggregate: glab mr create blocked (exit 2)&quot; {
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 1 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+  run run_hook &quot;glab mr create --title x&quot;
+  [ &quot;$status&quot; -eq 2 ]
+}
+
+@test &quot;YELLOW aggregate: pr create proceeds with warning (exit 0)&quot; {
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 8 0 1 0 100)&quot;
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 0 ]
+  [[ &quot;$output&quot; == *&quot;YELLOW&quot;* ]]
+}
+
+@test &quot;missing active-spec pointer: exit 2 with clear error&quot; {
+  rm .git/aw/active-spec
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 2 ]
+  [[ &quot;$output&quot; == *&quot;active-spec&quot;* ]]
+}
+
+@test &quot;verdict event appended to log on every gate fire&quot; {
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 0 ]
+  run jq -s &#39;[.[] | select(.event==&quot;verdict&quot; and .scope==&quot;aggregate&quot;)] | length&#39; &quot;$LOG&quot;
+  [ &quot;$output&quot; = &quot;1&quot; ]
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 2: Run, verify failures</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence-gate-hook.bats</code> Expected: all fail (hook file doesn't exist).</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 3: Implement hook</strong></label></li>
+</ul>
+<pre class="bash"><code>#!/usr/bin/env bash
+# Confidence gate: blocks PR/MR creation on RED aggregate verdict.
+# Modeled on hooks/tdd-gate.sh — exit 2 to block.
+set -euo pipefail
+
+PROJECT_DIR=&quot;${CLAUDE_PROJECT_DIR:-.}&quot;
+TOOL_INPUT=&quot;${CLAUDE_TOOL_INPUT:-}&quot;
+
+# Filter: only fire on PR/MR creation commands.
+if ! echo &quot;$TOOL_INPUT&quot; | grep -qE &#39;(gh\s+pr\s+create|glab\s+mr\s+create)&#39;; then
+  exit 0
+fi
+
+ACTIVE_SPEC_FILE=&quot;$PROJECT_DIR/.git/aw/active-spec&quot;
+if [ ! -f &quot;$ACTIVE_SPEC_FILE&quot; ]; then
+  echo &quot;🚫 Confidence gate: no .git/aw/active-spec pointer.&quot; &gt;&amp;2
+  echo &quot;  The pipeline driver writes this file. If you ran agents manually,&quot; &gt;&amp;2
+  echo &quot;  set it explicitly: echo PROJ-123 &gt; .git/aw/active-spec&quot; &gt;&amp;2
+  exit 2
+fi
+
+SPEC_ID=&quot;$(cat &quot;$ACTIVE_SPEC_FILE&quot;)&quot;
+LOG=&quot;$PROJECT_DIR/.context/specs/${SPEC_ID}-confidence.jsonl&quot;
+
+if [ ! -f &quot;$LOG&quot; ]; then
+  echo &quot;🚫 Confidence gate: log not found at $LOG&quot; &gt;&amp;2
+  exit 2
+fi
+
+# Compute verdict.
+VERDICT_JSON=&quot;$(&quot;$PROJECT_DIR/scripts/confidence.sh&quot; &quot;$LOG&quot;)&quot;
+BAND=&quot;$(echo &quot;$VERDICT_JSON&quot; | jq -r &#39;.band&#39;)&quot;
+SCORE=&quot;$(echo &quot;$VERDICT_JSON&quot; | jq -r &#39;.score&#39;)&quot;
+GATES=&quot;$(echo &quot;$VERDICT_JSON&quot; | jq -c &#39;.gates&#39;)&quot;
+
+# Append aggregate verdict to log.
+TS=&quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot;
+jq -n \
+  --arg ts &quot;$TS&quot; \
+  --arg band &quot;$BAND&quot; \
+  --argjson score &quot;$SCORE&quot; \
+  --argjson gates &quot;$GATES&quot; \
+  &#39;{ts:$ts, event:&quot;verdict&quot;, scope:&quot;aggregate&quot;, band:$band, score:$score, gates:$gates}&#39; \
+  &gt;&gt; &quot;$LOG&quot;
+
+case &quot;$BAND&quot; in
+  GREEN)
+    echo &quot;✅ Confidence: GREEN ($SCORE/100) — proceeding.&quot; &gt;&amp;2
+    exit 0
+    ;;
+  YELLOW)
+    echo &quot;⚠ Confidence: YELLOW ($SCORE/100) — proceeding with caution.&quot; &gt;&amp;2
+    exit 0
+    ;;
+  RED)
+    echo &quot;🚫 Confidence: RED ($SCORE/100) — gates: $GATES&quot; &gt;&amp;2
+    echo &quot;&quot; &gt;&amp;2
+    echo &quot;Options:&quot; &gt;&amp;2
+    echo &quot;  1. Address the failing gates and retry&quot; &gt;&amp;2
+    echo &quot;  2. /override-confidence \&quot;&lt;reason&gt;\&quot; to bypass (logged)&quot; &gt;&amp;2
+    exit 2
+    ;;
+esac</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 4: Make executable</strong></label></li>
+</ul>
+<pre class="bash"><code>chmod +x hooks/confidence-gate.sh</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 5: Run tests, verify pass</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence-gate-hook.bats</code> Expected: all 7 tests pass.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 6: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add hooks/confidence-gate.sh tests/confidence-gate-hook.bats
+git commit -m &quot;feat(confidence): add PreToolUse hook for PR/MR creation gating&quot;</code></pre>
+<hr />
+<h2 id="task-8-skillsoverride-confidence">Task 8: skills/override-confidence</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Create: <code>skills/override-confidence/SKILL.md</code></li>
+<li>Create: <code>tests/override-confidence.bats</code></li>
+</ul>
+<p><strong>Background:</strong> Mirrors <code>/skip-tdd</code>. Writes <code>.git/aw/override-&lt;spec-id&gt;</code> with <code>{reason, ts, branch}</code>. The hook (Task 9) consumes the marker. Refuses empty/boilerplate reasons.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Failing test</strong></label></li>
+</ul>
+<p>Create <code>tests/override-confidence.bats</code>:</p>
+<pre class="bash"><code>#!/usr/bin/env bats
+
+setup() {
+  TESTDIR=&quot;$(mktemp -d)&quot;
+  cd &quot;$TESTDIR&quot;
+  git init -q
+  mkdir -p .git/aw
+  echo &quot;PROJ-1&quot; &gt; .git/aw/active-spec
+}
+
+teardown() {
+  cd /
+  rm -rf &quot;$TESTDIR&quot;
+}
+
+# Simulate the skill body. The skill itself is markdown that Claude executes,
+# so we factor the bash logic into a sourceable function for testing.
+source_skill() {
+  source &quot;$BATS_TEST_DIRNAME/../skills/override-confidence/skill.bash&quot;
+}
+
+@test &quot;override-confidence: writes marker with reason&quot; {
+  source_skill
+  override_confidence &quot;Reviewer flagged perf issue tracked in PERF-42; not blocking&quot;
+  [ -f &quot;.git/aw/override-PROJ-1&quot; ]
+  run jq -r &#39;.reason&#39; &quot;.git/aw/override-PROJ-1&quot;
+  [[ &quot;$output&quot; == *&quot;PERF-42&quot;* ]]
+}
+
+@test &quot;override-confidence: rejects empty reason&quot; {
+  source_skill
+  run override_confidence &quot;&quot;
+  [ &quot;$status&quot; -ne 0 ]
+  [ ! -f &quot;.git/aw/override-PROJ-1&quot; ]
+}
+
+@test &quot;override-confidence: rejects boilerplate reason&quot; {
+  source_skill
+  run override_confidence &quot;fix&quot;
+  [ &quot;$status&quot; -ne 0 ]
+  run override_confidence &quot;.&quot;
+  [ &quot;$status&quot; -ne 0 ]
+  run override_confidence &quot;override&quot;
+  [ &quot;$status&quot; -ne 0 ]
+}
+
+@test &quot;override-confidence: refuses if no active-spec&quot; {
+  source_skill
+  rm .git/aw/active-spec
+  run override_confidence &quot;valid reason text here&quot;
+  [ &quot;$status&quot; -ne 0 ]
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 2: Run, verify failures</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/override-confidence.bats</code> Expected: fail — <code>skill.bash</code> doesn't exist.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 3: Create the skill bash function</strong></label></li>
+</ul>
+<p>The skill is markdown that Claude executes. To make it testable, factor the actual bash into a separate file the skill sources.</p>
+<p>Create <code>skills/override-confidence/skill.bash</code>:</p>
+<pre class="bash"><code>#!/usr/bin/env bash
+# Sourceable function — used by SKILL.md and tests.
+
+override_confidence() {
+  local reason=&quot;$1&quot;
+  local boilerplate_re=&#39;^(\.|fix|override|x|y|skip|bypass|no|none)$&#39;
+
+  # Trim whitespace.
+  reason=&quot;${reason#&quot;${reason%%[![:space:]]*}&quot;}&quot;
+  reason=&quot;${reason%&quot;${reason##*[![:space:]]}&quot;}&quot;
+
+  if [ -z &quot;$reason&quot; ]; then
+    echo &quot;🚫 /override-confidence requires a non-empty reason.&quot; &gt;&amp;2
+    return 1
+  fi
+
+  # Reject boilerplate single tokens.
+  if echo &quot;$reason&quot; | grep -qiE &quot;$boilerplate_re&quot;; then
+    echo &quot;🚫 /override-confidence reason looks like boilerplate. Be specific.&quot; &gt;&amp;2
+    return 1
+  fi
+
+  # Require minimum length to discourage low-effort reasons.
+  if [ &quot;${#reason}&quot; -lt 12 ]; then
+    echo &quot;🚫 /override-confidence reason must be at least 12 characters.&quot; &gt;&amp;2
+    return 1
+  fi
+
+  if [ ! -f &quot;.git/aw/active-spec&quot; ]; then
+    echo &quot;🚫 /override-confidence: no .git/aw/active-spec pointer.&quot; &gt;&amp;2
+    return 1
+  fi
+
+  local spec_id branch ts
+  spec_id=&quot;$(cat .git/aw/active-spec)&quot;
+  branch=&quot;$(git branch --show-current 2&gt;/dev/null || echo unknown)&quot;
+  ts=&quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot;
+
+  jq -n \
+    --arg reason &quot;$reason&quot; \
+    --arg branch &quot;$branch&quot; \
+    --arg ts &quot;$ts&quot; \
+    &#39;{reason:$reason, branch:$branch, ts:$ts}&#39; \
+    &gt; &quot;.git/aw/override-${spec_id}&quot;
+
+  echo &quot;✅ /override-confidence active for spec $spec_id. Auto-clears after next PR/MR creation.&quot; &gt;&amp;2
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 4: Create SKILL.md</strong></label></li>
+</ul>
+<pre class="markdown"><code>---
+name: override-confidence
+description: &gt;
+  Bypass the confidence gate for the next PR/MR creation. Logs the reason
+  for accountability. Auto-clears after the next gate fire.
+  Triggers on: override confidence, bypass confidence, force PR.
+---
+
+## Override Confidence Gate
+
+Creates a one-shot bypass marker so the confidence-gate hook allows the
+next `gh pr create` or `glab mr create` even on RED.
+
+### Usage
+`/override-confidence &quot;&lt;reason&gt;&quot;`
+
+Reason must be at least 12 characters and not boilerplate. Example:
+&gt; /override-confidence &quot;Reviewer flagged perf regression tracked in PERF-42; not blocking this delivery&quot;
+
+### Execute
+Run:
+```bash
+source skills/override-confidence/skill.bash
+override_confidence &quot;$ARGUMENTS&quot;</code></pre>
+<p>The marker file <code>.git/aw/override-&lt;spec-id&gt;</code> is consumed by the next hook fire (success or failure). Reason is logged to the spec's confidence.jsonl as an <code>override</code> event with <code>trigger: "manual"</code>.</p>
+<pre><code>
+- [x] **Step 5: Run tests, verify pass**
+
+Run: `bats tests/override-confidence.bats`
+Expected: all pass.
+
+- [x] **Step 6: Commit**
+
+```bash
+git add skills/override-confidence/ tests/override-confidence.bats
+git commit -m &quot;feat(confidence): add /override-confidence skill for one-shot bypass&quot;</code></pre>
+<hr />
+<h2 id="task-9-hooksconfidence-gatesh--manual-override-consumption">Task 9: hooks/confidence-gate.sh — manual override consumption</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>hooks/confidence-gate.sh</code></li>
+<li>Modify: <code>tests/confidence-gate-hook.bats</code></li>
+</ul>
+<p><strong>Background:</strong> When the hook fires RED and <code>.git/aw/override-&lt;spec-id&gt;</code> exists, consume it (read, log, delete) and exit 0.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Failing test</strong></label></li>
+</ul>
+<p>Append to <code>tests/confidence-gate-hook.bats</code>:</p>
+<pre class="bash"><code>@test &quot;RED with override marker: proceeds, marker deleted, override event logged&quot; {
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 1 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+  echo &#39;{&quot;reason&quot;:&quot;valid reason text here that is long enough&quot;,&quot;branch&quot;:&quot;x&quot;,&quot;ts&quot;:&quot;2026-05-02T00:00:00Z&quot;}&#39; \
+    &gt; .git/aw/override-PROJ-1
+
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 0 ]
+  [ ! -f &quot;.git/aw/override-PROJ-1&quot; ]
+
+  # override event was appended
+  run jq -s &#39;[.[] | select(.event==&quot;override&quot; and .trigger==&quot;manual&quot;)] | length&#39; &quot;$LOG&quot;
+  [ &quot;$output&quot; = &quot;1&quot; ]
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 2: Run, verify failure</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence-gate-hook.bats</code> Expected: new test fails (still exits 2 because override logic not implemented).</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 3: Implement override consumption</strong></label></li>
+</ul>
+<p>In <code>hooks/confidence-gate.sh</code>, replace the <code>RED)</code> case with:</p>
+<pre class="bash"><code>  RED)
+    OVERRIDE_FILE=&quot;$PROJECT_DIR/.git/aw/override-${SPEC_ID}&quot;
+    if [ -f &quot;$OVERRIDE_FILE&quot; ]; then
+      OVERRIDE_REASON=&quot;$(jq -r &#39;.reason&#39; &quot;$OVERRIDE_FILE&quot;)&quot;
+      jq -n \
+        --arg ts &quot;$TS&quot; \
+        --arg reason &quot;$OVERRIDE_REASON&quot; \
+        --argjson gates &quot;$GATES&quot; \
+        &#39;{ts:$ts, event:&quot;override&quot;, trigger:&quot;manual&quot;, reason:$reason, gates_bypassed:$gates}&#39; \
+        &gt;&gt; &quot;$LOG&quot;
+      rm -f &quot;$OVERRIDE_FILE&quot;
+      echo &quot;⚠ Confidence: RED ($SCORE/100) — override consumed: \&quot;$OVERRIDE_REASON\&quot;&quot; &gt;&amp;2
+      exit 0
+    fi
+
+    echo &quot;🚫 Confidence: RED ($SCORE/100) — gates: $GATES&quot; &gt;&amp;2
+    echo &quot;&quot; &gt;&amp;2
+    echo &quot;Options:&quot; &gt;&amp;2
+    echo &quot;  1. Address the failing gates and retry&quot; &gt;&amp;2
+    echo &quot;  2. /override-confidence \&quot;&lt;reason&gt;\&quot; to bypass (logged)&quot; &gt;&amp;2
+    exit 2
+    ;;</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 4: Run tests, verify pass</strong></label></li>
+</ul>
+<p>Run: <code>bats tests/confidence-gate-hook.bats</code> Expected: all pass.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 5: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add hooks/confidence-gate.sh tests/confidence-gate-hook.bats
+git commit -m &quot;feat(confidence): consume /override-confidence marker in hook&quot;</code></pre>
+<hr />
+<h2 id="task-10-hooksconfidence-gatesh--skip-tdd-auto-bypass">Task 10: hooks/confidence-gate.sh — skip-tdd auto-bypass</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>hooks/confidence-gate.sh</code></li>
+<li>Modify: <code>tests/confidence-gate-hook.bats</code></li>
+</ul>
+<p><strong>Background:</strong> When <code>.tdd-skip</code> exists AND verdict is RED AND only structural gates (NO_AC, AC_NOT_TESTED) fired, auto-bypass using the skip-tdd reason. Behavioral gates (TEST_FAILED, BUILD_BROKEN, MUST_FIX, TDD_BYPASSED_NO_REASON) still block.</p>
+<p>The <code>.tdd-skip</code> file lives in repo root (per <code>skills/skip-tdd/SKILL.md</code>). Format is plain text with <code>Reason: &lt;text&gt;</code> line.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Failing tests</strong></label></li>
+</ul>
+<pre class="bash"><code>@test &quot;skip-tdd active + only NO_AC: auto-bypass, exit 0, trigger=skip-tdd-auto&quot; {
+  printf &#39;TDD bypass active\nReason: docs-only change\nBranch: x\nTime: x\n&#39; &gt; .tdd-skip
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 0 ]
+
+  run jq -s &#39;[.[] | select(.event==&quot;override&quot; and .trigger==&quot;skip-tdd-auto&quot;)] | length&#39; &quot;$LOG&quot;
+  [ &quot;$output&quot; = &quot;1&quot; ]
+}
+
+@test &quot;skip-tdd active + MUST_FIX: still blocks (exit 2)&quot; {
+  printf &#39;TDD bypass active\nReason: docs-only change\nBranch: x\nTime: x\n&#39; &gt; .tdd-skip
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 1 0 0 1 0 100)&quot;
+
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 2 ]
+  [[ &quot;$output&quot; == *&quot;behavioral&quot;* ]] || [[ &quot;$output&quot; == *&quot;MUST_FIX&quot;* ]]
+}
+
+@test &quot;skip-tdd active + mixed (NO_AC + TEST_FAILED): blocks (exit 2)&quot; {
+  printf &#39;TDD bypass active\nReason: docs-only change\nBranch: x\nTime: x\n&#39; &gt; .tdd-skip
+  make_log &quot;$LOG&quot; \
+    &quot;$(spec_event &#39;[]&#39;)&quot; \
+    &quot;$(qa_event 1 5 1 ok &#39;[]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  run run_hook &quot;gh pr create&quot;
+  [ &quot;$status&quot; -eq 2 ]
+}</code></pre>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 2: Run, verify failures</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 3: Implement structural-only auto-bypass</strong></label></p></li>
+</ul>
+<p>In <code>hooks/confidence-gate.sh</code>, in the <code>RED)</code> case, BEFORE the existing manual-override check:</p>
+<pre class="bash"><code>  RED)
+    SKIP_TDD_FILE=&quot;$PROJECT_DIR/.tdd-skip&quot;
+    if [ -f &quot;$SKIP_TDD_FILE&quot; ]; then
+      # Classify gates.
+      STRUCTURAL_GATES=&#39;[&quot;NO_AC&quot;,&quot;AC_NOT_TESTED&quot;]&#39;
+      ALL_STRUCTURAL=&quot;$(jq -n --argjson g &quot;$GATES&quot; --argjson s &quot;$STRUCTURAL_GATES&quot; \
+        &#39;($g | length) &gt; 0 and ($g - $s | length) == 0&#39;)&quot;
+
+      if [ &quot;$ALL_STRUCTURAL&quot; = &quot;true&quot; ]; then
+        SKIP_REASON=&quot;$(grep &#39;^Reason:&#39; &quot;$SKIP_TDD_FILE&quot; | sed &#39;s/^Reason: *//&#39;)&quot;
+        jq -n \
+          --arg ts &quot;$TS&quot; \
+          --arg reason &quot;${SKIP_REASON:-skip-tdd active}&quot; \
+          --argjson gates &quot;$GATES&quot; \
+          &#39;{ts:$ts, event:&quot;override&quot;, trigger:&quot;skip-tdd-auto&quot;, reason:$reason, gates_bypassed:$gates}&#39; \
+          &gt;&gt; &quot;$LOG&quot;
+        echo &quot;⚠ Confidence: RED ($SCORE/100) — auto-bypassed by /skip-tdd (structural gates only)&quot; &gt;&amp;2
+        exit 0
+      else
+        echo &quot;🚫 Confidence: RED ($SCORE/100) — gates: $GATES&quot; &gt;&amp;2
+        echo &quot;&quot; &gt;&amp;2
+        echo &quot;/skip-tdd does not bypass behavioral gates. Use /override-confidence \&quot;&lt;reason&gt;\&quot;.&quot; &gt;&amp;2
+        exit 2
+      fi
+    fi
+
+    # ... existing OVERRIDE_FILE check follows</code></pre>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 4: Run tests, verify all pass</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 5: Commit</strong></label></p></li>
+</ul>
+<pre class="bash"><code>git add hooks/confidence-gate.sh tests/confidence-gate-hook.bats
+git commit -m &quot;feat(confidence): auto-bypass structural gates when /skip-tdd is active&quot;</code></pre>
+<hr />
+<h2 id="task-11-modify-agent-files-to-emit-events">Task 11: Modify agent files to emit events</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>agents/claude-code/architect.md</code></li>
+<li>Modify: <code>agents/copilot-cli/architect.agent.md</code></li>
+<li>Modify: <code>agents/claude-code/qa.md</code></li>
+<li>Modify: <code>agents/copilot-cli/qa.agent.md</code></li>
+<li>Modify: <code>agents/claude-code/reviewer.md</code></li>
+<li>Modify: <code>agents/copilot-cli/reviewer.agent.md</code></li>
+</ul>
+<p><strong>Background:</strong> Agents are markdown instructions. Each one needs a section telling the model to append an event to the per-spec log after completing its primary work. The event is created via <code>jq -n</code> and <code>&gt;&gt;</code>-appended to <code>.context/specs/&lt;id&gt;-confidence.jsonl</code>.</p>
+<p>This task has no automated tests — agent instructions are validated end-to-end in Task 13. Reviewer should manually verify each <code>.md</code> change reads naturally and matches the event schema in the spec.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Modify <code>agents/claude-code/architect.md</code></strong></label></li>
+</ul>
+<p>Append a new section before the <code>## Rules</code> section:</p>
+<pre class="markdown"><code>### 6. Emit Confidence Event
+After writing the spec, append a `spec` event to the confidence log:
+
+```bash
+LOG=&quot;.context/specs/&lt;id&gt;-confidence.jsonl&quot;
+mkdir -p &quot;$(dirname &quot;$LOG&quot;)&quot;
+
+# Build ac_items JSON from spec&#39;s AC section.
+AC_JSON=&#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;...&quot;},{&quot;id&quot;:&quot;AC-2&quot;,&quot;text&quot;:&quot;...&quot;}]&#39;  # extracted from spec
+
+jq -n \
+  --arg ts &quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot; \
+  --arg path &quot;.context/specs/&lt;id&gt;-spec.md&quot; \
+  --argjson ac &quot;$AC_JSON&quot; \
+  &#39;{ts:$ts, event:&quot;spec&quot;, spec_path:$path, ac_items:$ac}&#39; \
+  &gt;&gt; &quot;$LOG&quot;</code></pre>
+<p>Each AC item must have <code>id</code> (e.g. AC-1) and <code>text</code> (the criterion).</p>
+<pre><code>
+- [ ] **Step 2: Modify `agents/copilot-cli/architect.agent.md`**
+
+Same content, adapted to that file&#39;s format. Read the existing file first to match its tone/structure.
+
+- [ ] **Step 3: Modify `agents/claude-code/qa.md`**
+
+Append a new section before `## Rules`:
+```markdown
+### 5. Emit Confidence Event
+After running tests, append a `qa` event to the confidence log:
+
+```bash
+LOG=&quot;.context/specs/&lt;id&gt;-confidence.jsonl&quot;
+TESTED=&#39;[&quot;AC-1&quot;,&quot;AC-3&quot;]&#39;  # AC ids covered by tests run for this step
+
+jq -n \
+  --arg ts &quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot; \
+  --argjson step &quot;$STEP&quot; \
+  --argjson passed &quot;$PASSED&quot; \
+  --argjson failed &quot;$FAILED&quot; \
+  --argjson added &quot;$ADDED&quot; \
+  --arg build &quot;$BUILD_STATUS&quot; \
+  --argjson tested &quot;$TESTED&quot; \
+  &#39;{ts:$ts, event:&quot;qa&quot;, step:$step, tests_passed:$passed, tests_failed:$failed, tests_added:$added, build_status:$build, ac_items_tested:$tested}&#39; \
+  &gt;&gt; &quot;$LOG&quot;</code></pre>
+<p>Determine which AC ids the tests cover by mapping test names → spec AC numbers.</p>
+<pre><code>
+- [ ] **Step 4: Modify `agents/copilot-cli/qa.agent.md`**
+
+Same content, adapted.
+
+- [ ] **Step 5: Modify `agents/claude-code/reviewer.md`**
+
+Append a new section before `## Rules`:
+```markdown
+### 7. Emit Confidence Event
+After your final review pass (whether clean or after fix loops), append a `review` event:
+
+```bash
+LOG=&quot;.context/specs/&lt;id&gt;-confidence.jsonl&quot;
+
+# Build findings arrays from your categorized review.
+MUST_FIX_JSON=&#39;[{&quot;file&quot;:&quot;x.go&quot;,&quot;line&quot;:42,&quot;msg&quot;:&quot;...&quot;}]&#39;   # or []
+SHOULD_FIX_JSON=&#39;[]&#39;
+SUGGESTION_JSON=&#39;[]&#39;
+TECH_DEBT_JSON=&#39;[]&#39;
+DIFF_LINES=$(git diff --stat HEAD~1..HEAD | tail -1 | awk &#39;{print $4 + $6}&#39;)
+
+jq -n \
+  --arg ts &quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot; \
+  --argjson step &quot;$STEP&quot; \
+  --argjson must &quot;$MUST_FIX_JSON&quot; \
+  --argjson should &quot;$SHOULD_FIX_JSON&quot; \
+  --argjson sugg &quot;$SUGGESTION_JSON&quot; \
+  --argjson loops &quot;$LOOPS_USED&quot; \
+  --argjson td &quot;$TECH_DEBT_JSON&quot; \
+  --argjson diff &quot;$DIFF_LINES&quot; \
+  &#39;{ts:$ts, event:&quot;review&quot;, step:$step, must_fix:$must, should_fix:$should, suggestion:$sugg, loops_used:$loops, tech_debt_deferrals:$td, diff_lines:$diff}&#39; \
+  &gt;&gt; &quot;$LOG&quot;</code></pre>
+<p><code>loops_used</code> is the number of fix-loops that ran for this step (1, 2, or 3).</p>
+<pre><code>
+- [ ] **Step 6: Modify `agents/copilot-cli/reviewer.agent.md`**
+
+Same content, adapted.
+
+- [ ] **Step 7: Visual review of all six files**
+
+Read each modified file in full. Verify:
+- Section number is sequential (doesn&#39;t conflict with existing section)
+- `.md` formatting renders correctly
+- Code blocks fence properly
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add agents/
+git commit -m &quot;feat(confidence): instruct architect/qa/reviewer agents to emit events&quot;</code></pre>
+<hr />
+<h2 id="task-12-ai-native-workflow-cli-integration">Task 12: ai-native-workflow CLI integration</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>ai-native-workflow</code></li>
+<li>Create: <code>tests/cli-confidence.bats</code></li>
+</ul>
+<p><strong>Background:</strong> Three integration points in the CLI:</p>
+<ol type="1">
+<li><strong>At pipeline start</strong> — write <code>.git/aw/active-spec</code> with the resolved spec id.</li>
+<li><strong>After each step</strong> — invoke <code>scripts/confidence.sh --scope=step --step=N</code>, append <code>verdict</code> event with <code>scope=step</code>, surface to user; if YELLOW/RED, prompt <code>[go / fix / abort]</code>.</li>
+<li><strong>Before PR/MR creation</strong> — invoke aggregate scorer, inject <code>## Confidence</code> section into the PR body string passed to <code>gh pr create</code> / <code>glab mr create</code>.</li>
+</ol>
+<p>The CLI is a single bash script. Search for the pipeline runner functions (<code>run_github_feature</code>, <code>run_gitlab_feature</code>, etc.). Add the integration there.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Read existing pipeline runner</strong></label></li>
+</ul>
+<p>Read <code>ai-native-workflow</code> and locate functions:</p>
+<ul>
+<li>The function that handles <code>run github-feature</code> / <code>run gitlab-feature</code></li>
+<li>The loop that iterates todo.md steps</li>
+</ul>
+<p>Document where each integration point goes inline before writing tests. (No code change in this step — orientation only.)</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 2: Write integration test for active-spec write</strong></label></li>
+</ul>
+<p>Create <code>tests/cli-confidence.bats</code>:</p>
+<pre class="bash"><code>#!/usr/bin/env bats
+
+setup() {
+  TESTDIR=&quot;$(mktemp -d)&quot;
+  cd &quot;$TESTDIR&quot;
+  git init -q
+  CLI=&quot;$BATS_TEST_DIRNAME/../ai-native-workflow&quot;
+}
+
+teardown() {
+  cd /
+  rm -rf &quot;$TESTDIR&quot;
+}
+
+@test &quot;CLI: pipeline start writes .git/aw/active-spec&quot; {
+  # Stub Jira/gh fetches; just exercise the active-spec write path.
+  AW_DRY_RUN=1 AW_SPEC_ID=PROJ-42 &quot;$CLI&quot; run github-feature --spec-id PROJ-42 || true
+  [ -f &quot;.git/aw/active-spec&quot; ]
+  [ &quot;$(cat .git/aw/active-spec)&quot; = &quot;PROJ-42&quot; ]
+}</code></pre>
+<p>The <code>AW_DRY_RUN=1</code> environment is a new flag we'll add — when set, the CLI sets up state but doesn't actually call agents. Search for any existing dry-run handling first; reuse if present.</p>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 3: Run, verify failure</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 4: Implement active-spec write</strong></label></p></li>
+</ul>
+<p>In <code>ai-native-workflow</code>, locate the pipeline-start path. Add at the top:</p>
+<pre class="bash"><code>write_active_spec() {
+  local spec_id=&quot;$1&quot;
+  mkdir -p .git/aw
+  printf &#39;%s\n&#39; &quot;$spec_id&quot; &gt; .git/aw/active-spec
+}
+
+# In each pipeline runner, after spec id is resolved:
+write_active_spec &quot;$SPEC_ID&quot;</code></pre>
+<p>If <code>AW_DRY_RUN=1</code>, return after writing active-spec (skip agent invocations).</p>
+<ul class="task-list">
+<li><p><label><input type="checkbox" checked="" /><strong>Step 5: Run, verify pass</strong></label></p></li>
+<li><p><label><input type="checkbox" checked="" /><strong>Step 6: Add per-step verdict invocation</strong></label></p></li>
+</ul>
+<p>After each step's <code>qa</code> and <code>reviewer</code> invocations finish, add:</p>
+<pre class="bash"><code>emit_step_verdict() {
+  local spec_id=&quot;$1&quot; step=&quot;$2&quot;
+  local log=&quot;.context/specs/${spec_id}-confidence.jsonl&quot;
+  local verdict
+  verdict=&quot;$(scripts/confidence.sh &quot;$log&quot; --scope=step --step=&quot;$step&quot;)&quot;
+
+  # Append verdict event.
+  local ts band score
+  ts=&quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot;
+  band=&quot;$(jq -r &#39;.band&#39; &lt;&lt;&lt;&quot;$verdict&quot;)&quot;
+  score=&quot;$(jq -r &#39;.score&#39; &lt;&lt;&lt;&quot;$verdict&quot;)&quot;
+  jq -n --arg ts &quot;$ts&quot; --argjson step &quot;$step&quot; --arg band &quot;$band&quot; --argjson score &quot;$score&quot; \
+    &#39;{ts:$ts, event:&quot;verdict&quot;, scope:&quot;step&quot;, step:$step, band:$band, score:$score}&#39; \
+    &gt;&gt; &quot;$log&quot;
+
+  # Surface.
+  echo &quot;[step $step] confidence: $band ($score/100)&quot;
+
+  # Prompt if not GREEN.
+  if [ &quot;$band&quot; != &quot;GREEN&quot; ]; then
+    read -rp &quot;Continue? [go/fix/abort]: &quot; choice
+    case &quot;$choice&quot; in
+      go)    return 0 ;;
+      fix)   return 10 ;;  # caller loops back to reviewer
+      abort) exit 130 ;;
+      *)     echo &quot;unrecognized; aborting&quot; &gt;&amp;2; exit 1 ;;
+    esac
+  fi
+}</code></pre>
+<p>Call <code>emit_step_verdict "$SPEC_ID" "$STEP_NUMBER"</code> after each step.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 7: Add PR body confidence section injection</strong></label></li>
+</ul>
+<p>In the PR/MR creation function:</p>
+<pre class="bash"><code>build_pr_body() {
+  local spec_id=&quot;$1&quot; base_body=&quot;$2&quot;
+  local log=&quot;.context/specs/${spec_id}-confidence.jsonl&quot;
+  local verdict band score penalties_summary
+
+  verdict=&quot;$(scripts/confidence.sh &quot;$log&quot;)&quot;
+  band=&quot;$(jq -r &#39;.band&#39; &lt;&lt;&lt;&quot;$verdict&quot;)&quot;
+  score=&quot;$(jq -r &#39;.score&#39; &lt;&lt;&lt;&quot;$verdict&quot;)&quot;
+  penalties_summary=&quot;$(jq -r &#39;.penalties | to_entries | map(select(.value != 0)) | map(&quot;\(.value) \(.key)&quot;) | join(&quot;, &quot;)&#39; &lt;&lt;&lt;&quot;$verdict&quot;)&quot;
+  [ -z &quot;$penalties_summary&quot; ] &amp;&amp; penalties_summary=&quot;(none)&quot;
+
+  cat &lt;&lt;EOF
+$base_body
+
+## Confidence
+**$band: $score/100**
+
+Penalties: $penalties_summary
+Audit: \`.context/specs/${spec_id}-confidence.jsonl\`
+EOF
+}</code></pre>
+<p>Pipe through this when invoking <code>gh pr create --body</code> / <code>glab mr create --description</code>.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 8: Test end-to-end</strong></label></li>
+</ul>
+<p>Add to <code>tests/cli-confidence.bats</code>:</p>
+<pre class="bash"><code>@test &quot;CLI: build_pr_body injects ## Confidence section&quot; {
+  source &quot;$CLI&quot; &gt;/dev/null 2&gt;&amp;1 || true  # source for function access; may need a refactor
+  mkdir -p .context/specs .git/aw
+  echo &quot;PROJ-1&quot; &gt; .git/aw/active-spec
+  source &quot;$BATS_TEST_DIRNAME/lib/confidence-helpers&quot;
+  make_log &quot;.context/specs/PROJ-1-confidence.jsonl&quot; \
+    &quot;$(spec_event &#39;[{&quot;id&quot;:&quot;AC-1&quot;,&quot;text&quot;:&quot;x&quot;}]&#39;)&quot; \
+    &quot;$(qa_event 1 5 0 ok &#39;[&quot;AC-1&quot;]&#39;)&quot; \
+    &quot;$(review_event 1 0 0 0 1 0 100)&quot;
+
+  result=&quot;$(build_pr_body PROJ-1 &quot;Initial body&quot;)&quot;
+  [[ &quot;$result&quot; == *&quot;## Confidence&quot;* ]]
+  [[ &quot;$result&quot; == *&quot;GREEN&quot;* ]]
+}</code></pre>
+<p>If sourcing the CLI is impractical (because of side effects on source), refactor <code>build_pr_body</code> and <code>emit_step_verdict</code> into a helper file <code>scripts/confidence-cli.sh</code> that the CLI sources. Tests source the same helper.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 9: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add ai-native-workflow scripts/confidence-cli.sh tests/cli-confidence.bats
+git commit -m &quot;feat(confidence): integrate scorer into ai-native-workflow pipeline&quot;</code></pre>
+<hr />
+<h2 id="task-13-hook-registration">Task 13: Hook registration</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>config/settings.json</code></li>
+<li>Modify: <code>ai-native-workflow</code> (the installer that copies these to <code>~/.claude/</code>)</li>
+</ul>
+<p><strong>Background:</strong> Add a second PreToolUse hook entry. The existing tdd-gate hook already matches <code>Bash</code>; both can coexist as separate entries in the same hook list.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 1: Read current settings.json</strong></label></li>
+</ul>
+<p>Run: <code>cat config/settings.json</code> Confirm the structure: <code>hooks.PreToolUse[0].matcher == "Bash"</code>, <code>hooks.PreToolUse[0].hooks</code> is an array.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 2: Add confidence-gate hook entry</strong></label></li>
+</ul>
+<p>Modify <code>config/settings.json</code>:</p>
+<pre class="json"><code>{
+  &quot;hooks&quot;: {
+    &quot;SessionStart&quot;: [...],
+    &quot;PreToolUse&quot;: [
+      {
+        &quot;matcher&quot;: &quot;Bash&quot;,
+        &quot;hooks&quot;: [
+          {
+            &quot;type&quot;: &quot;command&quot;,
+            &quot;command&quot;: &quot;bash ~/.claude/hooks/tdd-gate.sh&quot;,
+            &quot;timeout&quot;: 10
+          },
+          {
+            &quot;type&quot;: &quot;command&quot;,
+            &quot;command&quot;: &quot;bash ~/.claude/hooks/confidence-gate.sh&quot;,
+            &quot;timeout&quot;: 15
+          }
+        ]
+      }
+    ],
+    &quot;Notification&quot;: [...]
+  }
+}</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 3: Update installer to copy confidence-gate.sh</strong></label></li>
+</ul>
+<p>Search <code>ai-native-workflow</code> for where <code>tdd-gate.sh</code> is copied to <code>~/.claude/hooks/</code>. Add <code>confidence-gate.sh</code> to the same copy step. Likewise copy <code>scripts/confidence.sh</code> to <code>~/.claude/scripts/</code>.</p>
+<p>The installer should also copy <code>skills/override-confidence/</code> to <code>~/.claude/skills/</code>.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 4: Verify install on a sandbox</strong></label></li>
+</ul>
+<p>Run:</p>
+<pre class="bash"><code>CLAUDE_HOME=/tmp/aw-confidence-test ./ai-native-workflow install global
+ls /tmp/aw-confidence-test/.claude/hooks/confidence-gate.sh
+ls /tmp/aw-confidence-test/.claude/scripts/confidence.sh
+ls /tmp/aw-confidence-test/.claude/skills/override-confidence/
+jq &#39;.hooks.PreToolUse[0].hooks | length&#39; /tmp/aw-confidence-test/.claude/settings.json</code></pre>
+<p>Expected: all paths exist; hook count is 2.</p>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 5: Commit</strong> — done</label></li>
+</ul>
+<pre class="bash"><code>git add config/settings.json ai-native-workflow
+git commit -m &quot;feat(confidence): register hook and copy scorer in installer&quot;</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" /><strong>Step 5: Commit</strong> — done (e4c69b2)</label></li>
+</ul>
+<hr />
+<h2 id="task-14-documentation">Task 14: Documentation</h2>
+<p><strong>Files:</strong></p>
+<ul>
+<li>Modify: <code>README.md</code></li>
+<li>Modify: <code>docs/ARCHITECTURE.html</code></li>
+</ul>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 1: Add Confidence Gate section to README</strong></label></li>
+</ul>
+<p>Insert after the "TDD Bypass" section, before "Multi-Cluster Troubleshooting":</p>
+<pre class="markdown"><code>## Confidence Gate
+
+After every pipeline run, a deterministic confidence verdict is computed
+from the events that `architect`, `qa`, and `reviewer` write to
+`.context/specs/&lt;id&gt;-confidence.jsonl`. The verdict surfaces both as a
+0–100 score and as a band (GREEN / YELLOW / RED).
+
+**The hook (`hooks/confidence-gate.sh`) blocks `gh pr create` /
+`glab mr create` on RED.** It also surfaces YELLOW as a non-blocking
+warning, and writes a `## Confidence` section into the PR/MR body.
+
+### Hard gates (any one → RED)
+- `NO_AC` — no acceptance criteria in spec
+- `TEST_FAILED` — any test failed
+- `BUILD_BROKEN` — build/typecheck broken
+- `MUST_FIX` — reviewer flagged an unresolved must-fix item
+- `AC_NOT_TESTED` — an AC item has no corresponding test
+- `TDD_BYPASSED_NO_REASON` — TDD gate bypassed without `/skip-tdd`
+
+### Scored penalties
+Score starts at 100; subtractions: −5 per should-fix, −1 per suggestion,
+−5 per step that needed a 2nd review loop, −10 more for a 3rd, −3 per
+tech-debt deferral, −2 per missing AC (cap −20), −5 if diff &gt; 400 lines
+(−15 if &gt; 1000).
+
+### Bands
+- `GREEN` ≥ 80 — proceed
+- `YELLOW` 60–79 — pause and prompt during pipeline; informational at PR
+- `RED` &lt; 60 or any hard gate — block PR
+
+### Bypass
+- `/override-confidence &quot;&lt;reason&gt;&quot;` — explicit one-shot bypass; reason
+  must be ≥12 chars and not boilerplate.
+- `/skip-tdd &quot;&lt;reason&gt;&quot;` — auto-bypasses **structural** gates only
+  (`NO_AC`, `AC_NOT_TESTED`). Behavioral gates (test/build/must-fix)
+  still block.
+
+### Audit trail
+The full event history per spec lives in
+`.context/specs/&lt;id&gt;-confidence.jsonl` and is committed to the repo.
+Every verdict, every override, every gate fire is auditable in git
+history.</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 2: Update ARCHITECTURE.md pipeline diagrams</strong></label></li>
+</ul>
+<p>Find each pipeline diagram (search for <code>tdd-developer</code>). Add a <code>confidence</code> step after <code>reviewer</code>, before the PR/MR creation step. Example:</p>
+<pre><code>ai-native-workflow run github-feature specs.md
+  │
+  ├─ requirements-engineer
+  ├─ architect              → writes .context/specs/&lt;id&gt;-spec.md
+  │                           emits spec event to &lt;id&gt;-confidence.jsonl
+  ├─ tdd-developer (per step)
+  │   ├─ qa                 → emits qa event
+  │   ├─ reviewer           → emits review event
+  │   └─ confidence (per-step verdict, prompts on YELLOW/RED)
+  ├─ confidence (aggregate verdict — hook enforces RED at PR step)
+  └─ gh pr create           → PR body includes ## Confidence section</code></pre>
+<ul class="task-list">
+<li><label><input type="checkbox" /><strong>Step 3: Commit</strong></label></li>
+</ul>
+<pre class="bash"><code>git add README.md docs/ARCHITECTURE.html
+git commit -m &quot;docs: document confidence gate in README and ARCHITECTURE&quot;</code></pre>
+<hr />
+<h2 id="verification-checklist-after-all-tasks-complete">Verification checklist (after all tasks complete)</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" />All bats tests pass: <code>bats tests/</code></label></li>
+<li><label><input type="checkbox" />Manual end-to-end: run <code>ai-native-workflow run github-feature</code> against a fixture spec, observe per-step verdicts, observe aggregate verdict in PR body</label></li>
+<li><label><input type="checkbox" />Manual override path: induce RED, run <code>/override-confidence "valid reason of sufficient length"</code>, verify PR creation succeeds and <code>override</code> event is in the log</label></li>
+<li><label><input type="checkbox" />Manual skip-tdd structural path: produce a NO_AC RED, set <code>.tdd-skip</code>, verify PR proceeds with <code>trigger: "skip-tdd-auto"</code> event</label></li>
+<li><label><input type="checkbox" />Manual skip-tdd behavioral path: produce a MUST_FIX RED, set <code>.tdd-skip</code>, verify PR is still blocked</label></li>
+<li><label><input type="checkbox" />No new <code>.gitignore</code> entries</label></li>
+<li><label><input type="checkbox" /><code>bash -n</code> clean: <code>find scripts hooks -name '*.sh' -exec bash -n {} \;</code></label></li>
+<li><label><input type="checkbox" />All AC items from the spec (AC-1 through AC-10) have a passing test or a documented manual verification step</label></li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Agentic Orchestration for Test-Driven Development: A Native-First, Verifiable Harness for Solo Full-Stack Development</title>
+<link rel="stylesheet" href="docs/.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">Agentic Orchestration for Test-Driven Development: A Native-First, Verifiable Harness for Solo Full-Stack Development</h1>
+<time class="sp-article__date" datetime="2026-10-12"><span class="sp-bar"></span><span style="margin-left:.75rem">October 12, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Igor Ilic</strong></p>
+<p>March 2026 · revised October 2026</p>
+<hr />
+<blockquote>
+<p><strong>Note on scope and method.</strong> This is a <em>design and architecture whitepaper</em> describing a working open-source system, not an empirical study. It reports no controlled evaluation. The live runs it cites are small demonstrations (N ≤ 4 per scenario), not measured rates, and statements about what a mechanism "enforces" describe how the tools document their hook and sandbox behavior, checked by the tests and canaries in §5. Read the contributions below as design contributions.</p>
+</blockquote>
+<hr />
+<h2 id="erratum-october-2026">Erratum (October 2026)</h2>
+<p>Versions of this paper from March to September 2026 described two Claude Code <code>PreToolUse</code> hooks, a TDD gate and a confidence gate, as deterministic enforcement that the model could not override. <strong>They never fired.</strong> Both scripts read the command from an environment variable (<code>CLAUDE_TOOL_INPUT</code>) that Claude Code does not set; hook input arrives as JSON on stdin. The project's tests passed only because they set that variable themselves. So every claim of machine-enforced TDD or confidence gating on the Claude side was false.</p>
+<p>Three further statements were also wrong:</p>
+<ul>
+<li>the TDD skip marker was never removed after a commit;</li>
+<li>the skip and override skills that "kept the bypass accountable" were invocable by the agent itself;</li>
+<li>Copilot CLI <em>does</em> support user-global hooks.</li>
+</ul>
+<p>The confidence score was computed from logs the agents wrote themselves.</p>
+<p>The architecture has since been rebuilt (ADR-003), and this version describes the rebuilt harness. Its enforcement is now tested against each tool's real hook payloads and checked live by canaries (§5). The earlier text remains in the repository's git history.</p>
+<hr />
+<h2 id="abstract">Abstract</h2>
+<p>We describe a harness for AI-assisted software development, used by a solo full-stack developer with Claude Code and GitHub Copilot CLI. Its first version coordinated eight custom agents through a pipeline it claimed was enforced by lifecycle hooks. An audit found that the hooks on the Claude side had never run. The current version is native-first: the tools' own agent loops, plan modes and subagents do the agent work, and the repository ships only what they lack. That is two fail-closed hooks shared by both tools, five workflow skills, a sandboxed settings policy and short instructions.</p>
+<p>The design targets the failure that matters most for coding agents with tests in reach: making the check pass instead of making the code right.</p>
+<ul>
+<li><strong>The finish line.</strong> A per-repository script (<code>.anw/verify</code>, the full fast suite) runs whenever an editing session ends. It runs only if the developer approved it by hash and path, and then inside an OS sandbox.</li>
+<li><strong>Weakened tests.</strong> A commit that deletes or weakens tests asks the human.</li>
+<li><strong>The honest exit.</strong> The agent's sanctioned way out is <code>BLOCKED: &lt;evidence&gt;</code>.</li>
+<li><strong>Review.</strong> A fresh-context, read-only <code>/check</code> reviews every change before a pull request.</li>
+</ul>
+<p>We describe the design, its principles and how the harness itself is verified: contract tests on the tools' real payloads, mutation-checked tests, and opt-in live canaries.</p>
+<p><strong>Keywords:</strong> coding agents, reward hacking, test-driven development, lifecycle hooks, sandboxing, Claude Code, GitHub Copilot CLI</p>
+<hr />
+<h2 id="1-introduction">1. Introduction</h2>
+<h3 id="11-problem">1.1 Problem</h3>
+<p>A solo developer who delegates coding to agents needs three things the agents don't provide by themselves.</p>
+<ol type="1">
+<li><strong>Checks that hold.</strong> Instructions in a context file are suggestions. A model can deprioritize them as a session grows, so rules that must hold need machinery.</li>
+<li><strong>Resistance to reward hacking.</strong> Agents facing an impossible or contradictory task tend to go after the check instead. In one incident investigation, about 700 agents facing impossible tasks went after the scorer [9]. Telling an agent not to hack lowers the rate but does not eliminate it [11]. In one preprint, a written policy plus an escalation tool cut hacking from 23.6% to 5.3% [10].</li>
+<li><strong>Containment.</strong> Agents read untrusted text (tickets, pull requests, logs, web pages) while holding credentials. A session should not combine untrusted input, sensitive systems and external actions [16]. Hooks and model-based approval are not a security boundary [17, 18]; the OS sandbox is [5].</li>
+</ol>
+<h3 id="12-what-the-first-version-got-wrong">1.2 What the first version got wrong</h3>
+<p>The first version answered (1) with hooks that never ran (see the Erratum), and (2) with bypasses the agent could reach. It answered (3) not at all: its pipelines launched agents with permission-bypass flags and no sandbox. Its eight role-based agents were mostly orchestration prompts, and none of them enforced anything. ADR-003 records the audit and the decision.</p>
+<h3 id="13-contributions">1.3 Contributions</h3>
+<ul>
+<li>A <strong>native-first harness</strong>. The coding tools' own agents do the work; the harness adds only enforcement, containment and a few explicit workflows.</li>
+<li><strong>Two fail-closed hook scripts shared by both tools.</strong> Each reads either tool's payload, so Claude Code and Copilot CLI are gated by the same code.</li>
+<li>A <strong>trusted, sandboxed finish line</strong>, run at the end of every editing turn, with an <strong>honest exit</strong> (<code>BLOCKED:</code>) in place of agent-reachable bypasses.</li>
+<li><strong>Test-integrity checks at commit time</strong> that ask the human, rather than skip or override switches.</li>
+<li><strong>Verification of the harness itself</strong>: contract tests on real payloads, mutation-checked tests and live canaries.</li>
+</ul>
+<hr />
+<h2 id="2-background">2. Background</h2>
+<h3 id="21-extension-points">2.1 Extension points</h3>
+<p>Both tools expose lifecycle hooks that receive a JSON payload on stdin.</p>
+<ul>
+<li><strong>Claude Code</strong> blocks a tool call on exit code 2 or a JSON decision. Other failures, timeouts and missing scripts let the call proceed [2].</li>
+<li><strong>Copilot CLI</strong> denies on a non-zero exit, but its hook timeouts always fail open [6, 7].</li>
+<li><strong>Skills</strong> are reusable instruction sets [3]. A skill can run in a forked context that doesn't see the conversation history, with a read-only agent type.</li>
+<li><strong>Plan mode</strong> and <strong>built-in subagents</strong> cover planning and delegation natively [4].</li>
+<li>Both tools offer an <strong>OS sandbox</strong> [5].</li>
+</ul>
+<h3 id="22-reward-hacking-and-weak-checks">2.2 Reward hacking and weak checks</h3>
+<p>Most test patches carry weak or no explicit oracle [12]. LLM reviewers miss some confirmed hacks, and evasion rises when agents receive detailed feedback [13]. Agents also tamper with their own traces [14], so scores computed from agent-written logs are not evidence. Vendor guidance asks the model not to special-case tests and to report a wrong test rather than work around it [22]. That helps, but prompts alone do not suffice [11].</p>
+<h3 id="23-one-writer-one-reviewer">2.3 One writer, one reviewer</h3>
+<p>Multi-agent systems work best "when writes stay single-threaded and the additional agents contribute intelligence rather than actions" [15]. A reviewer prompted to find gaps "will usually report some, even when the work is sound" [21]. So the review step asks for merge-blocking problems only, each with a repro.</p>
+<hr />
+<h2 id="3-architecture">3. Architecture</h2>
+<h3 id="31-principles">3.1 Principles</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Principle</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td><strong>Enforce outside the agent's reach.</strong> Must-hold rules live in hooks and settings that fail closed and that the agent can't edit. Prompts only state intent.</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><strong>Ground truth comes from execution, never self-report.</strong> The hooks run the check themselves; CI and branch protection stay final.</td>
+</tr>
+<tr>
+<td>P3</td>
+<td><strong>Every gate has an honest exit.</strong> <code>BLOCKED: &lt;evidence&gt;</code> is a success path, and the human is the only bypass.</td>
+</tr>
+<tr>
+<td>P4</td>
+<td><strong>Strong finish lines.</strong> The finish line runs the whole fast suite, so no cheap hack passes it.</td>
+</tr>
+<tr>
+<td>P5</td>
+<td><strong>Native first.</strong> One session writes; one fresh-context review checks. No custom agents.</td>
+</tr>
+<tr>
+<td>P6</td>
+<td><strong>Contain the blast radius.</strong> OS sandbox, egress allowlist, denied secrets, human approval for outward and irreversible actions.</td>
+</tr>
+<tr>
+<td>P7</td>
+<td><strong>Verify the harness against reality.</strong> Contract tests use real payloads; canaries rerun after model updates.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-components">3.2 Components</h3>
+<pre><code>ENFORCEMENT  guard.sh   before every command and edit (both tools, user-global)
+             verify.sh  when an editing turn ends: the trusted, sandboxed finish line
+CONTAINMENT  settings   OS sandbox, egress allowlist, secrets unreadable, ask before outward actions
+WORKFLOW     skills     /plan  /check  /incident  /pr  (the developer)  ·  /verify (the model)
+AGENTS       native     the main session, plan mode, built-in subagents</code></pre>
+<h3 id="33-the-development-flow">3.3 The development flow</h3>
+<ul>
+<li><strong>Small changes</strong> happen in the main session: a failing test first, then the fix [1]. The hooks gate the commit and the end of the turn.</li>
+<li><strong>Larger work</strong> starts with <code>/plan</code>, which writes testable acceptance criteria and small steps. The developer approves the plan: this is the highest-value human checkpoint. Each step is then implemented in its own session and committed.</li>
+<li><strong>Before a pull request</strong>, <code>/check</code> reviews the branch in a fresh, read-only context. <code>/pr</code> pushes and opens the PR or MR, each after the developer confirms.</li>
+<li><strong>Incidents</strong> go through <code>/incident</code>, a read-only investigation that produces a report. The developer decides what to post, and the fix starts in a fresh session.</li>
+<li><strong>Headless pipelines</strong> run the same stages as fresh <code>claude -p</code> or <code>copilot -p</code> processes with no bypass flags. Only the pipeline script pushes or posts, and only after the developer confirms.</li>
+</ul>
+<h3 id="34-enforcement-guardsh">3.4 Enforcement: <code>guard.sh</code></h3>
+<p>Runs before every command and file edit, in both tools.</p>
+<ul>
+<li><strong>Deny:</strong> hook bypasses (<code>--no-verify</code>, <code>core.hooksPath</code>, …), nested agents launched with permissions disabled, and writes to the harness itself (hooks, settings, skills, the trust list, the finish line).</li>
+<li><strong>Ask:</strong> a commit that deletes tests, adds skip or focus markers, removes or rewrites assertions, or changes source with no test; a new dependency name; CI and instruction edits. Headless, an ask becomes a denial.</li>
+<li><strong>Never:</strong> it never emits an <code>allow</code>, which would approve the call. A crash, malformed input or a missing script denies.</li>
+</ul>
+<p>Every edit also marks the session as edited, which arms the finish line.</p>
+<h3 id="35-the-finish-line-verifysh">3.5 The finish line: <code>verify.sh</code></h3>
+<p>When a session that edited files ends, the hook runs the repository's <code>.anw/verify</code>.</p>
+<ul>
+<li><strong>Trust.</strong> Hooks run outside the agent's sandbox, so the script runs only if its exact content at that exact path was approved: like <code>direnv allow</code>, a <code>shasum -a 256</code> line recorded by <code>ai-native-workflow trust</code>. A cloned, copied or edited script is skipped, and the developer is told.</li>
+<li><strong>Sandbox.</strong> A trusted script still runs repository code the agent may have just written. On macOS it therefore runs under <code>sandbox-exec</code> with the agent's own file limits.</li>
+<li><strong>Outcome.</strong> While the check is red, the turn cannot end, and the hook returns the failure with the honest-exit instruction. A reply with a <code>BLOCKED:</code> line, or a second red stop in a row, ends the turn and is flagged to the developer.</li>
+</ul>
+<p>The finish line must be strong. In our spike, a check made only of an assertion contradicting the spec was gamed in 2 of 2 runs. With a real test added, so that no simple hack could pass both, 4 of 4 runs ended <code>BLOCKED:</code> instead (§5.4).</p>
+<h3 id="36-review-check">3.6 Review: <code>/check</code></h3>
+<p>A forked, read-only skill at the Opus tier. It runs the check itself and reads the diff before any summary, then audits integrity: weakened or deleted tests, special-cased inputs, tests that would pass without the change. It reports only what would block the merge, each with a failing repro, and ends with <code>Verdict: block</code> or <code>Verdict: pass</code>. It is a sensor, not a gate. Review panels can be evaded [13], so CI and branch protection remain the ground truth.</p>
+<h3 id="37-containment">3.7 Containment</h3>
+<p>The Claude policy turns the OS sandbox on with an egress allowlist and makes secrets unreadable at the OS level. It asks before push, PR/MR creation and comments. It denies force-push and mutating cluster commands, and it disables the permission-bypass mode [8]. Copilot runs without its sandbox: it cannot exempt a single command, and its users need every CLI and MCP server with their own logins. It keeps the hooks and the deny rules (pipelines pass the policy as <code>--deny-tool</code> rules); further containment is left to the user.</p>
+<h3 id="38-model-strategy">3.8 Model strategy</h3>
+<p>What matters architecturally is the tier, not a version:</p>
+<ul>
+<li>planning and review run at the Opus tier;</li>
+<li>implementation runs at the Sonnet tier;</li>
+<li>Copilot uses its session default.</li>
+</ul>
+<p>Everything uses floating aliases (<code>opus</code>, <code>sonnet</code>), so nothing pins a model version. Because model updates can break harness prompts, the canaries are rerun after each alias move.</p>
+<h3 id="39-cross-tool-consistency">3.9 Cross-tool consistency</h3>
+<p>The same two scripts serve both tools. A short <code>AGENTS.md</code> per repository is read by Copilot and imported by <code>CLAUDE.md</code>. The global instructions are 16 lines per tool, with the same working agreements. Skills are installed into both tools as copies, so an agent editing the harness repository can't change live enforcement.</p>
+<hr />
+<h2 id="4-implementation">4. Implementation</h2>
+<p>A bash CLI (<code>ai-native-workflow</code>, about 1,350 lines with its library) installs and runs the harness.</p>
+<ul>
+<li><code>install global</code> copies the hooks and skills. It merges the policy into Claude's settings, keeping the developer's own keys, writes managed instruction blocks and generates Copilot's hook wiring. Anything an earlier version installed moves to a timestamped backup.</li>
+<li><code>install project</code> writes <code>.anw/verify</code> for the detected stack, and asks the developer to trust it. A Makefile <code>test:</code> target wins; otherwise Go, Rust, .NET, Python, Node or Swift test commands are used.</li>
+<li><code>trust</code>, <code>doctor</code> (exits non-zero on drift, a custom agent or an untrusted finish line) and <code>doctor --smoke</code> (the live canaries).</li>
+<li><code>run github-feature | github-issue | gitlab-feature | gitlab-incident</code>, with <code>status</code> and <code>resume</code>.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>First version</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Custom agents</td>
+<td>9 Claude + 8 Copilot</td>
+<td>0</td>
+</tr>
+<tr>
+<td>Enforcement scripts</td>
+<td>3 Claude hooks (inert) + a per-project Copilot dispatcher</td>
+<td>2 scripts for both tools (236 lines)</td>
+</tr>
+<tr>
+<td>Global instructions</td>
+<td>58 + 55 lines</td>
+<td>16 + 16 lines</td>
+</tr>
+<tr>
+<td>Bypass mechanisms</td>
+<td>2 agent-invocable skills, 2 marker files</td>
+<td>none: the developer answers the prompt</td>
+</tr>
+<tr>
+<td>Test suite</td>
+<td>391 tests, mostly on the wrong hook contract</td>
+<td>164 tests on the real payloads</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-verifying-the-harness">5. Verifying the harness</h2>
+<h3 id="51-contract-tests">5.1 Contract tests</h3>
+<p>The hooks are tested with the payload shapes each tool really sends, captured from live sessions. This is the step whose absence let the first version's gates stay inert. The pipelines are tested with stub CLIs that record their arguments, and pushes go to a local bare remote.</p>
+<h3 id="52-mutation-checked-tests">5.2 Mutation-checked tests</h3>
+<p>Each change to the harness was checked by seeding mutants into the code: removing a check, or loosening a rule. The new tests had to fail on each mutant, and a control had to stay green. One surviving mutant in the canary step was equivalent: it removed an explicit exit that <code>set -e</code> already guarantees.</p>
+<h3 id="53-live-canaries">5.3 Live canaries</h3>
+<p><code>make smoke</code> runs real headless sessions against the installed harness, in throwaway repositories. The guard must deny <code>--no-verify</code> in both tools, a nested agent without permissions, and an untested source commit. A fake secret must stay unreadable and the network outside the allowlist unreachable. An honest bug fix must pass without pushback. An impossible finish line, run three times, must end <code>BLOCKED:</code> with nothing tampered. <code>/check</code> must block a gamed change.</p>
+<p>The canary script has its own tests: every injected defect must fail its own canary. Results are recorded per run in ADR-003, as observed counts, never extrapolated.</p>
+<h3 id="54-spike-demonstrations">5.4 Spike demonstrations</h3>
+<p>The design was shaped by small live runs (haiku agent, Opus-tier review):</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Honest bug fix</td>
+<td>fixed, check green at stop, no pushback</td>
+</tr>
+<tr>
+<td>Weak finish line (only an assertion contradicting the spec)</td>
+<td>2/2 gamed it (<code>a + b + 1</code>)</td>
+</tr>
+<tr>
+<td>Strong finish line (a real test plus the contradictory assertion)</td>
+<td>4/4 ended <code>BLOCKED:</code>, no code changed</td>
+</tr>
+<tr>
+<td><code>/check</code> on the two gamed states</td>
+<td>2/2 blocked the merge with the right diagnosis</td>
+</tr>
+</tbody>
+</table>
+<p>These are demonstrations of the mechanisms, not estimates of how often they work.</p>
+<hr />
+<h2 id="6-discussion">6. Discussion</h2>
+<h3 id="61-hooks-are-guardrails-the-sandbox-is-the-boundary">6.1 Hooks are guardrails; the sandbox is the boundary</h3>
+<p>A hook that pattern-matches shell text stops the naive bypass, not a determined injection [17]. The harness therefore puts the hard limits in the OS sandbox and the settings. It uses the hooks for what they do well: running the check, asking at commit time, and failing closed. In Copilot, which runs unsandboxed (§3.7), the hooks and deny rules are the only harness limits; the rest is the user's call.</p>
+<h3 id="62-honest-exits-beat-clever-detectors">6.2 Honest exits beat clever detectors</h3>
+<p>The harness detects hacks only crudely, at commit time and in <code>/check</code>. Mostly it makes hacks unnecessary: a strong finish line, a sanctioned <code>BLOCKED:</code> exit, and a human who is the only bypass. That matches the evidence that an escalation path reduces hacking [10] and that instructions alone don't [11].</p>
+<h3 id="63-less-harness">6.3 Less harness</h3>
+<p>Repository context files rarely help and raise cost [19]. Skills that should fire on their own often don't [20]. So the instructions stay short, skills are invoked explicitly, and anything that must hold is a hook or a setting. A harness component can stop being needed, or start getting in the way, when the model changes, so the canaries are rerun after every model update.</p>
+<h3 id="64-limitations">6.4 Limitations</h3>
+<ul>
+<li>No controlled evaluation. The spike runs and canaries are small-N demonstrations.</li>
+<li>The finish-line sandbox needs macOS <code>sandbox-exec</code>; elsewhere the check runs unsandboxed, and <code>trust</code> says so.</li>
+<li>A repository's own settings can disable hooks. Only managed settings can't be overridden.</li>
+<li>The guard's shell-text rules can be phrased around; shell writes to CI config currently get no ask.</li>
+<li>Copilot hook timeouts fail open, so the finish line must stay under ten minutes.</li>
+<li>The design targets a single developer.</li>
+</ul>
+<hr />
+<h2 id="7-conclusion">7. Conclusion</h2>
+<p>The first version of this harness promised enforcement that never ran, and its tests could not tell. The rebuilt harness is smaller and more honest. The coding tools' native agents do the work. Two hooks shared by both tools gate commits and the end of every editing turn. The finish line is trusted, sandboxed and strong. The agent always has an honest exit. The harness itself is checked against the tools' real behavior, by contract tests and live canaries. We offer it as a design: operational and in daily single-developer use, but not empirically evaluated.</p>
+<hr />
+<h2 id="references">References</h2>
+<ol type="1">
+<li>Beck, K. (2003). <em>Test-Driven Development: By Example</em>. Addison-Wesley.</li>
+<li>Anthropic. Claude Code: Hooks. <a href="https://code.claude.com/docs/en/hooks">https://code.claude.com/docs/en/hooks</a></li>
+<li>Anthropic. Claude Code: Skills. <a href="https://code.claude.com/docs/en/skills">https://code.claude.com/docs/en/skills</a></li>
+<li>Anthropic. Claude Code: Subagents. <a href="https://code.claude.com/docs/en/sub-agents">https://code.claude.com/docs/en/sub-agents</a></li>
+<li>Anthropic. Claude Code: Sandboxing. <a href="https://code.claude.com/docs/en/sandboxing">https://code.claude.com/docs/en/sandboxing</a></li>
+<li>GitHub. Copilot CLI hooks reference. <a href="https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-hooks-reference">https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-hooks-reference</a></li>
+<li>GitHub. GitHub Copilot CLI documentation. <a href="https://docs.github.com/en/copilot/how-tos/copilot-cli">https://docs.github.com/en/copilot/how-tos/copilot-cli</a></li>
+<li>Anthropic. Claude Code: Permissions. <a href="https://code.claude.com/docs/en/permissions">https://code.claude.com/docs/en/permissions</a></li>
+<li>METR (2026-08-26). OpenAI / Hugging Face incident investigation. <a href="https://metr.org/blog/2026-08-26-openai-hugging-face-incident-investigation/">https://metr.org/blog/2026-08-26-openai-hugging-face-incident-investigation/</a></li>
+<li>Gomez (2026-08-29). arXiv 2608.29460 (preprint). <a href="https://arxiv.org/abs/2608.29460">https://arxiv.org/abs/2608.29460</a></li>
+<li>Hack-Verifiable Terminal Bench (2026-08-22). arXiv 2608.22103. <a href="https://arxiv.org/abs/2608.22103">https://arxiv.org/abs/2608.22103</a></li>
+<li><em>All Smoke, No Alarm</em> (2026-06-16). arXiv 2606.18168. <a href="https://arxiv.org/abs/2606.18168">https://arxiv.org/abs/2606.18168</a></li>
+<li>(2026-09-23). arXiv 2609.28614. <a href="https://arxiv.org/abs/2609.28614">https://arxiv.org/abs/2609.28614</a></li>
+<li>(2026-09-24). arXiv 2609.30266. <a href="https://arxiv.org/abs/2609.30266">https://arxiv.org/abs/2609.30266</a></li>
+<li>Factory (2026-08-27). What it takes for coding agents to complete large software tasks. <a href="https://factory.com/news/what-it-takes-for-coding-agents-to-complete-large-software-tasks">https://factory.com/news/what-it-takes-for-coding-agents-to-complete-large-software-tasks</a></li>
+<li>Meta (2025-10-31). Practical AI agent security (the Agents Rule of Two). <a href="https://ai.meta.com/blog/practical-ai-agent-security/">https://ai.meta.com/blog/practical-ai-agent-security/</a></li>
+<li>Trail of Bits. claude-code-config. <a href="https://github.com/trailofbits/claude-code-config">https://github.com/trailofbits/claude-code-config</a></li>
+<li>(2026-09-17). arXiv 2609.19587. <a href="https://arxiv.org/abs/2609.19587">https://arxiv.org/abs/2609.19587</a></li>
+<li>ETH Zurich (2026-09-29). arXiv 2602.11988 v3. <a href="https://arxiv.org/abs/2602.11988">https://arxiv.org/abs/2602.11988</a></li>
+<li>Vercel (2026-01-27). AGENTS.md outperforms skills in our agent evals. <a href="https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals">https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals</a></li>
+<li>Anthropic. Claude Code: Best practices. <a href="https://code.claude.com/docs/en/best-practices">https://code.claude.com/docs/en/best-practices</a></li>
+<li>Anthropic. Claude prompting best practices. <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices">https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices</a></li>
+</ol>
+<hr />
+<p><em>This paper describes a system developed for personal use and shared as open-source software. The author has no commercial affiliation with Anthropic or GitHub.</em></p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

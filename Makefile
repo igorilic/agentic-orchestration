@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
-.PHONY: help test test-file smoke lint install install-project status uninstall
+.PHONY: help test test-file smoke lint install install-project status uninstall docs-share
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -28,6 +28,9 @@ install: ## Install the harness globally (~/.claude + ~/.copilot)
 
 install-project: ## Install per-project hooks into DIR (default: .)
 	./ai-native-workflow install project $(or $(DIR),.)
+
+docs-share: ## Self-contained, shareable copies of the HTML docs in dist/docs (Spotlight CSS inlined)
+	./lib/docs-share.sh dist/docs
 
 status: ## Show what is installed
 	./ai-native-workflow status

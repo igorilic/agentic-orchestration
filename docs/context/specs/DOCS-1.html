@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>DOCS-1: Docs, plans and specs in HTML</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">DOCS-1: Docs, plans and specs in HTML</h1>
+<time class="sp-article__date" datetime="2026-10-18"><span class="sp-bar"></span><span style="margin-left:.75rem">October 18, 2026 · Proposed</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+
+<h2 id="problem">Problem</h2>
+<p>Agents write docs, plans and specs as Markdown. They should be HTML in the dark mode of the Spotlight design system, in every project the harness reaches. The design system is licensed and stays uncommitted. It lives in a gitignored <code>skills/spotlight-design/</code>, which <code>make install</code> copies to both tools like any skill. Each project links it in as a gitignored <code>docs/.design</code>.</p>
+<p><strong>Out of scope:</strong> converting other projects’ existing docs (their call, one pandoc run each); Claude’s own plan-mode files; files a tool reads as Markdown (README, CONTRIBUTING, CLAUDE.md, AGENTS.md, SKILL.md, CURRENT_SPRINT.md, PR/MR bodies, Obsidian notes); resuming a pipeline whose spec is still <code>.md</code> (rename it); committing any part of the design system, inlined CSS included.</p>
+
+<h2 id="acceptance-criteria">Acceptance criteria</h2>
+<ul>
+<li><strong>AC-1:</strong> Given <code>run github-feature</code>, when the plan stage runs, then the spec is <code>docs/context/specs/&lt;id&gt;.html</code>, its <code>&lt;h3&gt;Step n</code> headings set the steps, and the approval prompt shows it as text with no tags.</li>
+<li><strong>AC-2:</strong> Given <code>run gitlab-incident &lt;id&gt;</code>, then the report is <code>&lt;id&gt;-incident.html</code>, it is shown as text, and the fix is planned from it.</li>
+<li><strong>AC-3:</strong> Given a spec file <code>x.md</code> or <code>x.html</code>, then the pipeline id is <code>x</code>.</li>
+<li><strong>AC-4:</strong> Given <code>install project</code>, then ARCHITECTURE, CONVENTIONS, GLOSSARY and <code>specs/templates/doc.html</code> are dark HTML linking <code>.design/styles.css</code>, CURRENT_SPRINT stays Markdown, <code>docs/.design</code> links to the installed <code>spotlight-design</code> skill if there is one (an existing path is kept), and <code>.gitignore</code> gets <code>docs/.design</code>.</li>
+<li><strong>AC-5:</strong> Given the skills and both instruction files, then every doc they produce is <code>.html</code>, and the instructions carry one rule: HTML docs from the template, dark Spotlight look (not its demo voice), Markdown only where a tool reads it.</li>
+<li><strong>AC-6:</strong> Given this repo, then PAPER, ARCHITECTURE, ADRs 001–003, the specs and <code>docs/superpowers/</code> are HTML with the same text, no link points at a moved <code>.md</code>, and the doc tests read the HTML.</li>
+</ul>
+
+<h2 id="steps">Steps</h2>
+
+<h3 id="step-1">Step 1</h3>
+<p><strong>Test</strong> (AC-1, AC-3), <code>tests/pipeline-safety.bats</code>: the stub plans <code>&lt;h3&gt;Step 1&lt;/h3&gt;&lt;h3&gt;Step 2&lt;/h3&gt;</code>; <code>run github-feature toy.md</code> writes <code>specs/toy.html</code>, runs two step stages, and prints “Step 1” but no <code>&lt;h3&gt;</code>; <code>toy.html</code> as input also gives id <code>toy</code>.<br>
+<strong>Implement:</strong> <code>.html</code> spec, count <code>&lt;h3…&gt;Step n</code>, a <code>show_doc</code> that strips tags, decodes <code>&amp;lt; &amp;gt; &amp;amp;</code> and squeezes blank lines; id = basename minus its extension.<br>
+<strong>Files:</strong> <code>lib/pipeline-core.sh</code>, <code>lib/pipelines.sh</code>, <code>tests/pipeline-safety.bats</code></p>
+
+<h3 id="step-2">Step 2</h3>
+<p><strong>Test</strong> (AC-2): <code>gitlab-incident INC-9</code> writes and shows <code>INC-9-incident.html</code> as text, and plans with <code>/plan docs/context/specs/INC-9-incident.html</code>.<br>
+<strong>Implement:</strong> the report path, shown through <code>show_doc</code>.<br>
+<strong>Files:</strong> <code>lib/pipelines.sh</code>, <code>tests/pipeline-safety.bats</code></p>
+
+<h3 id="step-3">Step 3</h3>
+<p><strong>Test</strong> (AC-4), <code>tests/install.bats</code>: the four HTML scaffolds exist with <code>class="dark"</code> and the <code>.design/styles.css</code> link; CURRENT_SPRINT.md unchanged; with <code>$CLAUDE_HOME/skills/spotlight-design</code> present, <code>docs/.design</code> resolves to it; a pre-existing <code>docs/.design</code> is untouched; without the skill there is no link and no error; <code>.gitignore</code> lists <code>docs/.design</code>.<br>
+<strong>Implement:</strong> one skeleton function for the scaffolds; link the first of the Claude and Copilot skill dirs that exists.<br>
+<strong>Files:</strong> <code>lib/install-project.sh</code>, <code>tests/install.bats</code></p>
+
+<h3 id="step-4">Step 4</h3>
+<p><strong>Test</strong> (AC-5), new <code>tests/docs-html.bats</code>: no skill or instruction file names a <code>.md</code> spec, incident report, ADR, ticket spec or FINDINGS; the plan skill names <code>&lt;h3&gt;Step n&lt;/h3&gt;</code> (the pipeline’s contract); both instruction files name <code>docs/.design/styles.css</code> and the template.<br>
+<strong>Implement:</strong> the plan, incident, adr (numbering globs any extension), ticket and explore skills; one line in each instruction file.<br>
+<strong>Files:</strong> <code>skills/{plan,incident,adr,ticket,explore}/SKILL.md</code>, <code>instructions/*.md</code>, <code>tests/docs-html.bats</code></p>
+
+<h3 id="step-5">Step 5</h3>
+<p><strong>Test</strong> (AC-6), <code>tests/docs-html.bats</code>: the only tracked <code>.md</code> files are README, CONTRIBUTING, AGENTS, CURRENT_SPRINT, the instructions and SKILL.md files; no tracked file links a moved <code>.md</code>. The doc tests in <code>no-legacy</code>, <code>install</code> and <code>install-copilot</code> read the <code>.html</code> and check the same facts.<br>
+<strong>Implement:</strong> <code>pandoc -f gfm</code> each doc into the template (one-off, not committed); fix the links; add this repo’s <code>specs/templates/doc.html</code>; README and ARCHITECTURE say <code>.html</code> and <code>docs/.design</code>.<br>
+<strong>Files:</strong> <code>PAPER.html</code>, <code>docs/**/*.html</code>, <code>README.md</code>, <code>CONTRIBUTING.md</code>, <code>tests/*.bats</code></p>
+
+<h2 id="assumptions">Assumptions</h2>
+<ul>
+<li>Without the design system (fresh clone, CI, another machine) docs render as plain dark HTML. That is the price of not committing it.</li>
+<li>I set <code>disable-model-invocation: true</code> in the local design system’s SKILL.md. Otherwise it would offer itself for product UIs in your other projects. <code>/spotlight-design</code> still works.</li>
+<li>Existing tests change only in fixtures and paths (<code>### Step</code> → <code>&lt;h3&gt;</code>, <code>.md</code> → <code>.html</code>). They check the same facts. The guard will ask at those commits.</li>
+<li>HTML specs cost each step session more tokens to read than Markdown did.</li>
+</ul>
+
+<h2 id="done-when">Done when</h2>
+<p>Every AC has a test and <code>./.anw/verify</code> is green. Then you run <code>make install</code> and open a spec in a browser.</p>
+
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Architecture v4: native-first</title>
+<link rel="stylesheet" href=".design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">Architecture v4: native-first</h1>
+<time class="sp-article__date" datetime="2026-10-12"><span class="sp-bar"></span><span style="margin-left:.75rem">October 12, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p>The tools' own agent loops do the agent work. This repo ships only what they lack: two fail-closed hooks, five workflow skills, a sandboxed settings policy, short instructions, and a CLI that installs them and runs headless pipelines.</p>
+<ul>
+<li>Why: <a href="../PAPER.html">PAPER.html</a> · Decision: <a href="decisions/ADR-003-native-first-harness.html">ADR-003</a> · Spec: <a href="context/specs/HARNESS-2-spec.html">HARNESS-2</a></li>
+</ul>
+<pre><code>┌───────────────────────────────────────────────────────────────────────────┐
+│  ENFORCEMENT  hooks, user-global in both tools, fail closed               │
+│    guard.sh   before every command and edit: deny bypasses and harness    │
+│               writes; ask about weakened tests, new deps, CI edits        │
+│    verify.sh  when an editing turn ends: run the trusted .anw/verify      │
+│               (sandboxed); red → keep working or end with BLOCKED:        │
+├───────────────────────────────────────────────────────────────────────────┤
+│  CONTAINMENT  settings: OS sandbox, egress allowlist, secrets unreadable, │
+│               ask before push/PR/comments, deny force-push and prod edits │
+├───────────────────────────────────────────────────────────────────────────┤
+│  WORKFLOW     skills: /plan /check /incident /pr (you), /verify (model)   │
+├───────────────────────────────────────────────────────────────────────────┤
+│  AGENTS       native: the main session, plan mode, built-in subagents     │
+│               (no custom agents)                                          │
+└───────────────────────────────────────────────────────────────────────────┘</code></pre>
+<h2 id="the-development-flow">The development flow</h2>
+<table>
+<thead>
+<tr>
+<th>Work</th>
+<th>Flow</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Small change (1–2 files)</td>
+<td>Ask in the main session. A failing test first, then the fix. The hooks gate the commit and the end of the turn. <code>/check</code>, then <code>/pr</code>.</td>
+</tr>
+<tr>
+<td>Feature or unclear work</td>
+<td><code>/plan &lt;ticket&gt;</code> writes <code>docs/context/specs/&lt;id&gt;.html</code> (its steps are <code>&lt;h3&gt;Step n&lt;/h3&gt;</code>); <strong>you approve</strong>. Implement one step per session, committing each. <code>/check</code>, then <code>/pr</code>.</td>
+</tr>
+<tr>
+<td>Incident</td>
+<td><code>/incident &lt;ticket&gt;</code> investigates read-only and writes a report. You decide what to post; the fix starts in a fresh session.</td>
+</tr>
+<tr>
+<td>PR/MR review</td>
+<td>The built-in <code>/code-review</code> (Claude) or <code>/review</code> (Copilot).</td>
+</tr>
+</tbody>
+</table>
+<p>In Copilot, plan in plan mode (<code>/model plan</code> picks the planner) and follow <code>/check</code> with <code>/rubber-duck</code>.</p>
+<h2 id="enforcement-the-two-hooks">Enforcement: the two hooks</h2>
+<p>Both scripts read either tool's stdin JSON, and both are installed <strong>user-global</strong>: in Claude Code through <code>~/.claude/settings.json</code>, and in Copilot CLI through <code>~/.copilot/hooks/anw.json</code>.</p>
+<p><strong><code>guard.sh</code></strong> (Claude <code>PreToolUse</code> as <code>guard.sh || exit 2</code>; Copilot <code>preToolUse</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--no-verify</code>, <code>commit -n</code>, <code>core.hooksPath</code>, <code>HUSKY=0</code>, <code>SKIP=</code></td>
+<td>deny</td>
+</tr>
+<tr>
+<td>A nested <code>claude</code>/<code>copilot</code> with permissions or hooks disabled</td>
+<td>deny</td>
+</tr>
+<tr>
+<td>Edits to <code>~/.claude</code>, <code>~/.copilot</code> (including the trust list), <code>.claude/settings*.json</code>, <code>.git/</code>, <code>.github/hooks/</code>, <code>.anw/</code>; shell writes to the hooks, settings, trust list and finish line</td>
+<td>deny</td>
+</tr>
+<tr>
+<td>A commit that deletes tests, adds skip/focus markers, removes or rewrites assertions, or changes source with no test, judged on what it will commit (<code>git add … &amp;&amp; git commit</code> and <code>commit -a</code> included)</td>
+<td>ask</td>
+</tr>
+<tr>
+<td>A new dependency name; edits to CI config, instruction files or <code>.claude/</code></td>
+<td>ask</td>
+</tr>
+<tr>
+<td>Any edit</td>
+<td>marks the session as edited, which arms <code>verify.sh</code></td>
+</tr>
+</tbody>
+</table>
+<p>It never emits <code>allow</code>. A crash, malformed input or a missing script denies. Headless, an ask becomes a denial.</p>
+<p><strong><code>verify.sh</code></strong> (Claude <code>Stop</code>; Copilot <code>agentStop</code>; <code>--run</code> for scripts) acts only when the session edited files and the repo has an executable <code>.anw/verify</code> that you trusted:</p>
+<ul>
+<li><strong>Trust.</strong> <code>ai-native-workflow trust</code> shows you the script and, on your <code>y</code>, records its <code>shasum -a 256</code> line (hash and physical path) in <code>~/.claude/anw/trusted-verify</code>. A cloned, copied or edited script is never run. Agents can't write the trust list.</li>
+<li><strong>Sandbox.</strong> Hooks run outside the agent's sandbox, and the trusted script runs repo code the agent may have just written. So on macOS it runs under <code>sandbox-exec</code> with the agent's file limits: writes only to the repo, temp and caches; never to git hooks, agent config or the finish line; no reading keys. The network stays open.</li>
+<li><strong>Outcome.</strong> Green ends the turn. Red blocks it with the failure output and the honest-exit instruction. A reply with a <code>BLOCKED:</code> line (bold allowed), or a second red stop in a row, ends the turn and is flagged to you.</li>
+</ul>
+<h2 id="skills">Skills</h2>
+<table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Invoked by</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plan</code></td>
+<td>you</td>
+<td>ticket → testable ACs and small test-first steps, then stops for your approval</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td>you</td>
+<td>fresh context, read-only, Opus tier: runs the check, reads the diff, audits integrity, reports merge blockers with repros, ends with <code>Verdict: block</code> or <code>Verdict: pass</code></td>
+</tr>
+<tr>
+<td><code>verify</code></td>
+<td>the model (Claude runs it before each commit)</td>
+<td>runs <code>.anw/verify</code> and quotes the real result</td>
+</tr>
+<tr>
+<td><code>incident</code></td>
+<td>you</td>
+<td>read-only investigation → diagnosis and fix plan; never posts</td>
+</tr>
+<tr>
+<td><code>pr</code></td>
+<td>you</td>
+<td>verify, then push and open the PR/MR (each asks you)</td>
+</tr>
+</tbody>
+</table>
+<p>Knowledge skills (<code>clusters</code>, <code>gh-cli</code>, <code>glab-cli</code>, <code>ticket</code>, <code>adr</code>, <code>explore</code>, …) are optional. Hooks and skills are installed as <strong>copies</strong>, never symlinks, so an agent editing this repo can't change live enforcement; <code>doctor</code> reports drift.</p>
+<h2 id="pipelines-ai-native-workflow-run-">Pipelines (<code>ai-native-workflow run …</code>)</h2>
+<p>Each stage is a fresh headless session with stdin closed, running a skill:</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Claude (<code>github-feature</code>, <code>github-issue</code>)</th>
+<th>Copilot (<code>gitlab-feature</code>, <code>gitlab-incident</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>plan</td>
+<td><code>/plan</code> on opus, then you approve</td>
+<td><code>/plan</code>, then you approve</td>
+</tr>
+<tr>
+<td>each step</td>
+<td>"implement step N" on sonnet</td>
+<td>the same</td>
+</tr>
+<tr>
+<td>check</td>
+<td><code>/check</code> on opus, edit tools disallowed</td>
+<td><code>/check</code> with <code>--deny-tool=write</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Claude runs with <code>--permission-mode acceptEdits --permission-prompts none</code>. Copilot runs with <code>--allow-all-tools --no-ask-user</code>.</li>
+<li>Neither gets a bypass flag. The policy's ask and deny rules (push, PR/MR, Jira writes, <code>gh</code>/<code>glab</code> <code>api</code>, mutating kubectl) are passed as disallowed tools.</li>
+<li>A <code>BLOCKED:</code> stage stops the pipeline.</li>
+<li>The script runs the trusted <code>.anw/verify</code> (<code>verify.sh --run</code>, same sandbox). Then, each on your yes (Enter means no), it pushes, opens the PR/MR and posts to Jira.</li>
+<li>State lives in <code>.anw/.pipeline-state</code>, parsed and never sourced. <code>run resume</code> continues from the last finished stage.</li>
+</ul>
+<h2 id="what-gets-installed">What gets installed</h2>
+<table>
+<thead>
+<tr>
+<th>Where</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>~/.claude/</code></td>
+<td><code>hooks/guard.sh</code>, <code>hooks/verify.sh</code>; the policy merged into <code>settings.json</code> (your keys kept); a managed block in <code>CLAUDE.md</code>; <code>skills/</code></td>
+</tr>
+<tr>
+<td><code>~/.copilot/</code></td>
+<td>the same two hooks plus <code>hooks/anw.json</code>; <code>sandbox.enabled: false</code> merged into <code>settings.json</code> (your keys kept); a managed block in <code>copilot-instructions.md</code>; <code>skills/</code></td>
+</tr>
+<tr>
+<td>a project (<code>install project</code>)</td>
+<td><code>.anw/verify</code> for the detected stack (never overwritten; trusted on your <code>y</code>); a short <code>AGENTS.md</code> that <code>CLAUDE.md</code> imports; <code>.gitignore</code> rules <code>.anw/*</code> + <code>!.anw/verify</code> + <code>docs/.design</code>; <code>docs/context/</code> (HTML docs and the <code>specs/templates/doc.html</code> template), <code>docs/decisions/</code>; <code>docs/.design</code>, a link to the installed <code>spotlight-design</code> skill</td>
+</tr>
+</tbody>
+</table>
+<p>Older installs are cleaned up: retired agents, skills and hooks move to <code>&lt;home&gt;/anw-backup/&lt;stamp&gt;/</code>.</p>
+<h2 id="path-conventions">Path conventions</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Tracked</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>docs/context/</code></td>
+<td>yes</td>
+<td>sprint board, specs and plans, reviewed in PRs</td>
+</tr>
+<tr>
+<td><code>docs/.design</code></td>
+<td>no</td>
+<td>a link to the local Spotlight design system (licensed; a gitignored skill here, installed like the others). HTML docs link its <code>styles.css</code>; without it they render as plain dark HTML</td>
+</tr>
+<tr>
+<td><code>.anw/verify</code></td>
+<td>yes</td>
+<td>the finish line</td>
+</tr>
+<tr>
+<td><code>.anw/*</code> (everything else)</td>
+<td>no</td>
+<td>pipeline state and stage transcripts</td>
+</tr>
+<tr>
+<td><code>~/.claude/anw/trusted-verify</code></td>
+<td>—</td>
+<td>the trust list; agents can't write it</td>
+</tr>
+</tbody>
+</table>
+<h2 id="verifying-the-harness">Verifying the harness</h2>
+<ul>
+<li><code>make test</code> runs the bats suite. The hooks are driven with each tool's real payload shapes, and the pipelines with stub CLIs and a local bare remote.</li>
+<li><code>make smoke</code> (<code>ai-native-workflow doctor --smoke</code>) runs live canaries against the installed harness. It covers bypasses, containment, an honest fix, an impossible finish line ×3 and <code>/check</code> on a gamed change. It spends model calls, so run it after every model or tool update.</li>
+</ul>
+<h2 id="key-design-decisions">Key design decisions</h2>
+<ul>
+<li><strong>Enforce outside the agent's reach.</strong> Must-hold rules live in hooks and settings that fail closed and that the agent can't edit. Prompts only state intent.</li>
+<li><strong>Ground truth comes from execution.</strong> The hooks run the check themselves; no self-reported scores.</li>
+<li><strong>Every gate has an honest exit.</strong> <code>BLOCKED: &lt;evidence&gt;</code> is a success path, and you are the only bypass.</li>
+<li><strong>Strong finish lines.</strong> <code>.anw/verify</code> runs the whole fast suite, so no cheap hack passes it.</li>
+<li><strong>One writer, one fresh-context reviewer.</strong> No role-based agent teams.</li>
+<li><strong>Contain the blast radius.</strong> In Claude the OS sandbox is the security boundary. Hooks are a guardrail. Copilot runs unsandboxed so every CLI and MCP server works with your logins; its containment is the hooks, the deny rules and your own settings.</li>
+<li><strong>Floating model aliases</strong> (<code>opus</code>, <code>sonnet</code>), never pinned versions.</li>
+</ul>
+<h2 id="architecture-decision-records">Architecture Decision Records</h2>
+<ul>
+<li><a href="decisions/ADR-003-native-first-harness.html">ADR-003</a>: native-first harness. It supersedes ADR-001 and ADR-002, which stay in <a href="decisions/">decisions/</a> as history.</li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

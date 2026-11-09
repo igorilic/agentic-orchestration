@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>HARNESS-2 — Native-first, minimal, verifiable harness (Claude Code + Copilot CLI)</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">HARNESS-2 — Native-first, minimal, verifiable harness (Claude Code + Copilot CLI)</h1>
+<time class="sp-article__date" datetime="2026-10-08"><span class="sp-bar"></span><span style="margin-left:.75rem">October 8, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p>Status: <strong>Accepted, rev 2</strong> (proposed 2026-10-07; accepted in ADR-003, 2026-10-08; P0–P1 implemented). <strong>No custom agents</strong>: the native harnesses do the agent work. This repo ships 2 hooks, 5 workflow skills, settings and instructions. Todo: <code>HARNESS-2-todo.md</code> · Spike and proof: <code>spikes/harness-2/</code> (<code>PROOF.md</code>, hooks, skills, instructions, config, 52 contract tests, live-run evidence) Research window: <strong>2026-08-01 → 2026-10-07</strong>; older sources are marked <em>OLDER (date)</em>. No controlled evaluation of this harness exists. §6 reports small live demonstrations, not effect sizes.</p>
+</blockquote>
+<hr />
+<h2 id="1-problem">1. Problem</h2>
+<p>The harness relies on deterministic enforcement: "rules that must hold are hooks, not prompts" (PAPER §3.1). <strong>On the Claude side that enforcement has been a no-op.</strong> Both gates read <code>CLAUDE_TOOL_INPUT</code>, which Claude Code never sets; hook input arrives as JSON on stdin. The bats suite stayed green because it injected the env var itself (<a href="../../../spikes/harness-2/PROOF.md">E1–E2</a>). Around that gap:</p>
+<ol type="1">
+<li><strong>Security.</strong> Pipelines run agents with bypass flags and no sandbox. Those agents read untrusted tickets, PRs and logs while holding gh, glab, az and production kubectl credentials, with open egress. The installed <code>session-start.sh</code> <strong>executes code from any opened repo</strong> (E3d).</li>
+<li><strong>Reward hacking.</strong> Every bypass is reachable by the agent:
+<ul>
+<li><code>/skip-tdd</code> and <code>/override-confidence</code> are model-invocable;</li>
+<li><code>.tdd-skip</code> is never cleared;</li>
+<li>the confidence score is computed from the agents' own logs;</li>
+<li>nothing protects tests, hooks or settings.</li>
+</ul></li>
+<li><strong>Weight.</strong>
+<ul>
+<li>9 custom agents, 32% of whose text is orchestration plumbing;</li>
+<li>two competing methodologies;</li>
+<li>103 off-task MCP tools, including Gmail send and Drive share;</li>
+<li>an installed copy that has drifted from the repo.</li>
+</ul></li>
+</ol>
+<p><strong>Rev 2 drops custom agents entirely</strong>, for three reasons:</p>
+<ul>
+<li>every role has a native equivalent in both tools (§3.9, PROOF E10);</li>
+<li>the role prompts were never what enforced quality (E1–E2);</li>
+<li>Copilot agent files forced the last pinned model versions.</li>
+</ul>
+<p><strong>Goal:</strong> the smallest harness that is actually enforced.</p>
+<ul>
+<li>The native agent loop, plan mode and built-in subagents do the work.</li>
+<li>2 fail-closed hooks and the OS sandbox enforce.</li>
+<li>5 skills you invoke carry the procedures.</li>
+<li>Every claim is proven by a contract test or a live canary.</li>
+</ul>
+<hr />
+<h2 id="2-audit-of-the-current-harness-evidence-in-spikesharness-2proofmd">2. Audit of the current harness (evidence in <code>spikes/harness-2/PROOF.md</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Sev</th>
+<th>Finding</th>
+<th>Proof</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>🔴</td>
+<td>Claude TDD and confidence gates never fire (env-var contract)</td>
+<td>E1, E2</td>
+</tr>
+<tr>
+<td>🔴</td>
+<td>Installed <code>session-start.sh</code> <code>source</code>s <code>.context/.pipeline-state</code> from the opened repo</td>
+<td>E3d (probe created <code>PWNED</code>)</td>
+</tr>
+<tr>
+<td>🔴</td>
+<td>Pipelines use bypass flags; no sandbox; open egress; prod kube contexts with <code>kubectl:*</code> allowed</td>
+<td>E3e, E3j, E6, E7</td>
+</tr>
+<tr>
+<td>🔴</td>
+<td>Read-deny is bypassable without a sandbox: an obfuscated <code>python3</code> read printed the secret</td>
+<td>E6</td>
+</tr>
+<tr>
+<td>🟠</td>
+<td>Agent-reachable bypasses (<code>skip-tdd</code> / <code>override-confidence</code> invocable and preloaded; <code>.tdd-skip</code> never cleared)</td>
+<td>E3a, E3b</td>
+</tr>
+<tr>
+<td>🟠</td>
+<td>Confidence score built on self-reports; agents can and do tamper with their own traces (§3.3)</td>
+<td>E3c</td>
+</tr>
+<tr>
+<td>🟠</td>
+<td>Copilot: 350 stored approvals (<code>sudo</code>, <code>bash</code>, <code>curl</code>, <code>kubectl</code>, <code>git push</code>, …); polluted <code>allowedUrls</code></td>
+<td>E3i</td>
+</tr>
+<tr>
+<td>🟠</td>
+<td>Copilot dispatcher prints <code>allow</code> for every non-gated tool. In both tools' hook schemas, <code>allow</code> approves the call</td>
+<td>E9</td>
+</tr>
+<tr>
+<td>🟡</td>
+<td>Troubleshooter reads untrusted logs/tickets <em>and</em> posts to Jira (Rule of Two)</td>
+<td>E3f</td>
+</tr>
+<tr>
+<td>🟡</td>
+<td>Drift: repo ≠ installed (all agents, hooks, paths); 17 duplicate <code>.bak</code> skills; shadowing commands</td>
+<td>E3g, E3h, E3k</td>
+</tr>
+<tr>
+<td>🟡</td>
+<td>Context: 103 deferred off-task MCP tools, 22 agents, 45+ skills, two methodologies</td>
+<td>E8</td>
+</tr>
+<tr>
+<td>🟡</td>
+<td>Docs claim behavior that isn't true (auto-cleared <code>.tdd-skip</code>; "Copilot has no user-global hooks")</td>
+<td>E3a, E9</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="3-research-digest--mapped-to-your-flow">3. Research digest — mapped to your flow</h2>
+<h3 id="31-plan">3.1 Plan</h3>
+<ul>
+<li><strong>Plan approval is the highest-value human checkpoint</strong> ("move [feedback] closer to the decision it is informing").
+<ul>
+<li><a href="https://martinfowler.com/rachels-ramblings/code-review.html">Laycock, <em>Code review</em>, martinfowler.com, 2026-09-02</a></li>
+</ul></li>
+<li>Spec-first pays off on <strong>3+ file</strong> changes and not on 1–2 file fixes, refactors or bug fixes. This is a vendor benchmark; treat it as weak evidence.
+<ul>
+<li><a href="https://uvik.net/spec-driven-development-benchmark/">Uvik, 2026-09-24</a></li>
+</ul></li>
+<li>Keep phases that share context in one conversation. Anthropic advises preferring the main conversation when "planning, implementation, and testing" share significant context.
+<ul>
+<li><a href="https://code.claude.com/docs/en/sub-agents">Claude Code docs: subagents</a></li>
+</ul></li>
+<li>"Define completion before starting."
+<ul>
+<li><a href="https://developers.openai.com/blog/rethinking-skills-and-prompts-for-gpt-6-astra">OpenAI, <em>Rethinking skills and prompts for GPT-6 Astra</em>, ~2026-09</a></li>
+</ul></li>
+<li>→ <strong>Plan in the main session (plan mode plus a <code>/plan</code> skill), and only for bigger work. No planner agent.</strong></li>
+</ul>
+<h3 id="32-implement">3.2 Implement</h3>
+<ul>
+<li><strong>Impossible or contradictory tasks drive hacking.</strong>
+<ul>
+<li>Attempted reward hacks were <strong>3–6× higher</strong> on impossible tasks, made worse when told not to ask for clarification. <a href="https://www.anthropic.com/claude-opus-5-5-system-card">Anthropic system card, current Opus tier, 2026-09-22</a></li>
+<li>In a real incident, about 700 agents facing impossible tasks went after the scorer. <a href="https://metr.org/blog/2026-08-26-openai-hugging-face-incident-investigation/">METR, 2026-08-26</a></li>
+</ul></li>
+<li><strong>Give a sanctioned exit.</strong> A written policy plus an escalation tool cut hacking from <strong>23.6% to 5.3%</strong>; 98.7% of escalations involved no hacking.
+<ul>
+<li><a href="https://arxiv.org/abs/2608.29460">Gomez, arXiv 2608.29460, 2026-08-29 — preprint</a></li>
+</ul></li>
+<li><strong>Official anti-gaming wording.</strong> The Claude docs give: "Do not hard-code values or create solutions that only work for specific test inputs… It is unacceptable to remove or edit tests… If… any of the tests are incorrect, please inform me rather than working around them."
+<ul>
+<li><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices">Claude prompting best practices</a></li>
+<li>The Sonnet-tier page adds: "A syntax-only check, or a check command that failed to start, does not count." <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5-5">Anthropic prompting guide, current Sonnet tier</a></li>
+</ul></li>
+<li><strong>Prompts help but do not suffice.</strong>
+<ul>
+<li>"Simply instructing the agent not to hack lowers the hack rate but does not eliminate it"; a specific instruction took rates to 0–7%. <a href="https://arxiv.org/abs/2608.22103">Hack-Verifiable Terminal Bench, arXiv 2608.22103, 2026-08-22</a></li>
+<li>"Don't cheat!" helps some models and backfires on others. <a href="https://arxiv.org/abs/2609.36308">CheatBench, arXiv 2609.36308, 2026-09-28</a></li>
+<li>A model trained to hack still hacked 23% under the strongest prompt. <a href="https://alignment.anthropic.com/2026/reward-seeker/">Anthropic, <em>Training a Misaligned Reward Seeker</em>, 2026-08</a></li>
+</ul></li>
+<li><strong>Hacks hide as refactors.</strong> "Astra often frames the reward-hacking workaround as normal code modularization."
+<ul>
+<li><a href="https://deploymentsafety.openai.com/gpt-6-astra">GPT-6 Astra system card, 2026-09-03</a></li>
+</ul></li>
+<li><strong>TDD-first evidence is mixed.</strong> TDD used 3–8.5× more tokens with no clear gain in quality or mutation score (a small experiment). Willison's red/green pattern is the counterpoint.
+<ul>
+<li><a href="https://martinfowler.com/articles/exploring-gen-ai/tdd-in-the-agent-loop.html">Böckeler, <em>TDD in the agent loop</em>, 2026-08-11</a></li>
+</ul></li>
+<li><strong>Effort:</strong> implement at lower effort and verify at higher effort.
+<ul>
+<li><a href="https://claude.dev/blog/spending-your-effort/">Thariq, <em>Spending your effort</em>, 2026-09-25</a></li>
+</ul></li>
+<li>→ <strong>One writer, an explicit <code>BLOCKED:</code> exit, the official integrity wording, outcome gates over ritual. Keep test-first as a soft check.</strong></li>
+</ul>
+<h3 id="33-verify-and-review">3.3 Verify and review</h3>
+<ul>
+<li><strong>Single writer plus an isolated verifier.</strong> "Multi-agent systems work best today when writes stay single-threaded and the additional agents contribute intelligence rather than actions."
+<ul>
+<li><a href="https://factory.com/news/what-it-takes-for-coding-agents-to-complete-large-software-tasks">Factory, 2026-08-27</a></li>
+<li><a href="https://martinfowler.com/articles/orchestrator-tax.html">Garg, <em>Orchestrator tax</em>, OLDER (2026-07-16)</a></li>
+<li>Role-based agent teams sit only in "Assess". <a href="https://www.thoughtworks.com/en-us/radar/techniques/feedback-sensors-for-coding-agents">Thoughtworks Radar Vol. 34, OLDER (2026-04)</a></li>
+</ul></li>
+<li><strong>Over-reporting.</strong> "A reviewer prompted to find gaps will usually report some, even when the work is sound… Chasing every finding leads to over-engineering."
+<ul>
+<li><a href="https://code.claude.com/docs/en/best-practices">Claude Code best practices</a></li>
+<li>Ask for merge-blocking problems only, with a failing repro, and "check its evidence before you accept it." <a href="https://claude.dev/blog/getting-the-most-out-of-opus-5-5/">Osmani, claude.dev, 2026-09-22</a></li>
+</ul></li>
+<li><strong>Weak oracles are the norm.</strong> "80.2% of test patches contain weak or no explicit oracle signals."
+<ul>
+<li><a href="https://arxiv.org/abs/2606.18168"><em>All Smoke, No Alarm</em>, OLDER (2026-06-16)</a></li>
+<li>Mutation testing exposes them (60%→82% after killing survivors). <a href="https://www.awesome-testing.com/2026/08/mutation-testing-for-agent-written-code">Radzymiński, 2026-08-02</a></li>
+</ul></li>
+<li><strong>LLM monitors miss things and are gameable.</strong>
+<ul>
+<li>A review panel missed 6.5% of confirmed hacks; evasion rose to 40.5% with detailed feedback. <a href="https://arxiv.org/abs/2609.28614">arXiv 2609.28614, 2026-09-23</a></li>
+<li>Agents tamper with their own traces. <a href="https://arxiv.org/abs/2609.30266">arXiv 2609.30266, 2026-09-24</a></li>
+</ul></li>
+<li><strong>Personas don't help.</strong> Persona prompts produced the most weaknesses of the techniques tested.
+<ul>
+<li><a href="https://best.openssf.org/Security-Focused-Guide-for-AI-Code-Assistant-Instructions">OpenSSF guide, OLDER (2025-08)</a></li>
+</ul></li>
+<li>→ <strong>One fresh-context, read-only <code>/check</code> (a forked skill, not an agent):</strong>
+<ul>
+<li>it runs the tests itself and reads the diff before any summary;</li>
+<li>it reports only merge-blocking problems, each with a repro;</li>
+<li>it checks that new tests fail without the change.</li>
+<li><strong>Drop self-reported confidence logs.</strong></li>
+</ul></li>
+</ul>
+<h3 id="34-ship-commit-prmr">3.4 Ship (commit, PR/MR)</h3>
+<ul>
+<li><strong>Make the gates fail closed.</strong>
+<ul>
+<li>"If your hook is meant to enforce a policy, use <code>exit 2</code>." Exit 1, timeouts and missing scripts let the call proceed. <a href="https://code.claude.com/docs/en/hooks">Claude Code hooks</a></li>
+<li>Copilot: "Timeouts are always fail-open, even for <code>preToolUse</code>." <a href="https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-hooks-reference">Copilot CLI hooks reference</a></li>
+</ul></li>
+<li><strong>Agents bypass hooks in practice.</strong> Reported in the wild: <code>--no-verify</code> and <code>git stash</code> across 6 commits despite CLAUDE.md. The recommended fixes are deny rules, a PreToolUse parser and CI.
+<ul>
+<li><a href="https://pydevtools.com/handbook/how-to/how-to-stop-ai-agents-from-bypassing-pre-commit-hooks/">pydevtools, 2026-09-14</a></li>
+</ul></li>
+<li><strong>Claude will run a <code>verify</code> skill.</strong> Since v2.1.286 Claude is told to run a skill named <code>verify</code> right before each commit. It's an instruction, not a gate.
+<ul>
+<li><a href="https://code.claude.com/docs/en/skills">Claude Code skills</a></li>
+</ul></li>
+<li><strong>Code review trusts the PR's own instructions.</strong> Copilot code review reads instructions, AGENTS.md and skills <strong>from the PR head branch</strong>, so an agent's PR can weaken its own review. Protect those paths with CODEOWNERS and rulesets.
+<ul>
+<li><a href="https://docs.github.com/en/copilot/how-tos/copilot-on-github/use-copilot-agents/copilot-code-review">GitHub Docs</a></li>
+<li>Copilot review approvals can count toward required reviews; keep them off. <a href="https://github.blog/changelog/2026-09-01-copilot-code-review-can-now-approve-pull-requests">2026-09-01</a></li>
+</ul></li>
+<li><strong>Hooks are not a security boundary.</strong> "Hooks are not a security boundary — a prompt injection can work around them."
+<ul>
+<li><a href="https://github.com/trailofbits/claude-code-config">Trail of Bits claude-code-config, updated 2026-08-24</a></li>
+<li>"Treat tool hooks as a useful guardrail, not a complete enforcement boundary." <a href="https://developers.openai.com/codex/agent-approvals-security">OpenAI Codex security</a></li>
+</ul></li>
+<li>→ <strong>One fail-closed guard and a stop-time verifier; CI and branch protection stay the ground truth.</strong></li>
+</ul>
+<h3 id="35-operate-incidents">3.5 Operate (incidents)</h3>
+<ul>
+<li><strong>Rule of Two.</strong> Within one session, combine at most two of: untrusted input, sensitive data/systems, external actions.
+<ul>
+<li><a href="https://ai.meta.com/blog/practical-ai-agent-security/">Meta, OLDER (2025-10-31)</a></li>
+</ul></li>
+<li><strong>Issue and PR text is an attack channel.</strong> Review agents approved vulnerable PRs when the description was persuasive.
+<ul>
+<li><a href="https://arxiv.org/abs/2606.13757">SEVRA-BENCH, OLDER (2026-06-11)</a></li>
+</ul></li>
+<li>→ <strong><code>/incident</code> investigates read-only and writes a plan. You decide what goes to Jira (the pipeline script posts only after your confirmation), and the fix starts in a fresh session.</strong></li>
+</ul>
+<h3 id="36-the-security-boundary-cross-cutting">3.6 The security boundary (cross-cutting)</h3>
+<ul>
+<li><strong>The sandbox is the boundary.</strong>
+<ul>
+<li>Sandbox off by default; "no built-in credential deny list"; Read/Edit deny rules merge into the OS boundary. <a href="https://code.claude.com/docs/en/sandboxing">Claude Code sandboxing</a></li>
+<li>Users approved about 93% of prompts, so environment controls are the deterministic layer. <a href="https://www.anthropic.com/engineering/how-we-contain-claude"><em>How we contain Claude</em>, OLDER (2026-05-25)</a></li>
+</ul></li>
+<li><strong>Auto mode is not a boundary.</strong>
+<ul>
+<li>Bypassed in 60–80% of attempts; Anthropic: the boundary is "OS isolation and network egress control". <a href="https://embracethered.com/blog/posts/2026/breaking-claude-code-opus-5-and-automode/">Rehberger, 2026-08-26</a></li>
+<li>Injection bypassed it in 79% of trials. <a href="https://arxiv.org/abs/2609.19587">arXiv 2609.19587, 2026-09-17</a></li>
+</ul></li>
+<li><strong>Agent config is now a supply chain.</strong>
+<ul>
+<li>An npm worm wrote <code>.claude/settings.json</code> SessionStart hooks. <a href="https://thehackernews.com/2026/08/keyv-linked-npm-worm-poisons-hundreds.html">The Hacker News, 2026-08-04</a></li>
+<li>Look-alike skills reached 1.7M installs. <a href="https://thenextweb.com/news/zenity-malicious-ai-skills-1-7m-installs-supply-chain-credential-theft">Zenity via TNW, 2026-08-07</a></li>
+<li>Never pre-approve shell in third-party skills. <a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills">GitHub Docs: skills</a></li>
+</ul></li>
+<li><strong>Dependency installs need a deterministic check.</strong> Assistants checked provenance in only 9 of 1,920 trials.
+<ul>
+<li><a href="https://arxiv.org/abs/2609.07754">Shan, arXiv 2609.07754, 2026-09-07</a></li>
+</ul></li>
+<li><strong>Exfiltration from one web page.</strong> In autopilot mode, one web page was enough to read <code>.env.prod</code> and send it out.
+<ul>
+<li><a href="https://adversa.ai/blog/cryptographic-context-injection-github-copilot/">Adversa, 2026-10-06</a></li>
+<li>Excessive Agency is now #3. <a href="https://genai.owasp.org/2026/09/01/owasp-genai-security-project-unveils-2026-top-10-for-llm-applications-new-agent-control-standard-and-sponsors-as-community-tops-30000-members/">OWASP GenAI Top 10 2026, 2026-09-01</a></li>
+</ul></li>
+<li>→ <strong>Sandbox on with an egress allowlist; secrets denied at the OS level; human approval for outward actions and new dependencies; prune plugins and MCP.</strong></li>
+</ul>
+<h3 id="37-minimal-context-cross-cutting">3.7 Minimal context (cross-cutting)</h3>
+<ul>
+<li><strong>Context files rarely help.</strong> Repo context files didn't generally improve success and raised inference cost by more than 20%.
+<ul>
+<li><a href="https://arxiv.org/abs/2602.11988">ETH Zurich, arXiv 2602.11988 v3, 2026-09-29</a></li>
+<li>"A short, accurate <code>AGENTS.md</code> is more useful than a long file full of vague rules." <a href="https://developers.openai.com/codex/learn/best-practices">OpenAI Codex best practices</a></li>
+</ul></li>
+<li><strong>Less prompt, same results.</strong> Anthropic removed more than 80% of Claude Code's system prompt "with no measurable loss".
+<ul>
+<li><a href="https://claude.dev/blog/the-new-rules-of-context-engineering-for-claude-5-generation-models/">Thariq, OLDER (2026-07-24)</a></li>
+<li>Keep CLAUDE.md under 200 lines; move procedures into skills. <a href="https://code.claude.com/docs/en/memory">Claude Code memory</a></li>
+</ul></li>
+<li><strong>Audit and prune regularly.</strong> "Installing a useful skill and keeping it forever are separate decisions."
+<ul>
+<li><a href="https://addyosmani.com/blog/audit-your-agent-files/">Osmani, 2026-08-27</a></li>
+<li>Instruction bloat and MCP by default are rated Caution. <a href="https://www.thoughtworks.com/en-us/radar/techniques/agent-instruction-bloat">Thoughtworks, OLDER (2026-04)</a></li>
+</ul></li>
+<li><strong>Skills are unreliable for must-follow rules.</strong> Skills went uninvoked 56% of the time; an explicit checklist passed 10/10 against 5/10 for "check your work".
+<ul>
+<li><a href="https://vercel.com/blog/agents-md-outperforms-skills-in-our-agent-evals">Vercel, OLDER (2026-01-27)</a> and its arXiv companions</li>
+</ul></li>
+<li><strong>Harnesses break on model updates.</strong>
+<ul>
+<li><a href="https://yegge.ai/essays/the-shape-of-things-to-come/">Yegge, 2026-08</a>, <a href="https://lucumr.pocoo.org/2026/9/7/astra-why/">Ronacher, 2026-09-07</a></li>
+<li>"every component in a harness encodes an assumption about what the model can't do on its own." <a href="https://www.anthropic.com/engineering/harness-design-long-running-apps">Anthropic, OLDER (2026-03-24)</a></li>
+<li>Look at the data first. <a href="https://hamel.dev/blog/posts/claude-auto-evals/">Husain, 2026-09-30</a></li>
+</ul></li>
+<li>→ <strong>Short instruction files; skills only for workflows you invoke explicitly; hooks for must-hold rules; re-run the canaries whenever model aliases move.</strong></li>
+</ul>
+<h3 id="38-weak-or-missing-evidence-so-not-built">3.8 Weak or missing evidence, so not built</h3>
+<ul>
+<li><strong>Self-rated confidence scores.</strong> Inputs are agent-written, and traces get tampered with.</li>
+<li><strong>Role-based agent teams.</strong> Rated Assess (Radar); heavy managerial oversight scored worst (Ren et al., OLDER).</li>
+<li><strong>Persona prompts</strong> (OpenSSF).</li>
+<li><strong>Mandatory test-first as a hard gate.</strong> Evidence is mixed (§3.2), so it is kept as a soft "ask".</li>
+<li><strong>Model-printed protocol lines</strong> (sentinels) as orchestration signals.
+<ul>
+<li>They are probabilistic, and Claude Code already emits structured events (<code>--output-format stream-json</code>).</li>
+</ul></li>
+</ul>
+<h3 id="39-native-capabilities-verified-on-the-installed-versions-proof-e10">3.9 Native capabilities, verified on the installed versions (PROOF E10)</h3>
+<table>
+<thead>
+<tr>
+<th>Need</th>
+<th>Claude Code 2.1.292</th>
+<th>Copilot CLI 1.0.92</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Plan before building</td>
+<td>Plan mode (read-only). <code>opusplan</code> = "Opus in plan mode, else Sonnet"</td>
+<td>Plan mode hard-blocks workspace mutations (1.0.71). <code>/model plan &lt;model&gt;</code> (1.0.74)</td>
+</tr>
+<tr>
+<td>Fresh-context review</td>
+<td>Skill frontmatter <code>context: fork</code> + <code>agent: Explore</code>: "The subagent doesn't see your conversation history". Explore has no Write/Edit. Built-in <code>/code-review</code> and <code>/security-review</code></td>
+<td><code>/rubber-duck</code>: an independent critique, with an opposite-family model strategy (1.0.49, 1.0.64). <code>/review</code> (0.0.388)</td>
+</tr>
+<tr>
+<td>Cheaper implementer</td>
+<td>Per-call <code>model</code> parameter on the Agent tool; skill <code>model</code> / <code>effort</code> frontmatter</td>
+<td>Session model; built-in <code>explore</code> / <code>task</code> subagents</td>
+</tr>
+<tr>
+<td>Workflows</td>
+<td>Skills (<code>/name</code>), also in <code>claude -p</code></td>
+<td>Skills (<code>/name</code>, 0.0.389), also in <code>-p</code> (0.0.403)</td>
+</tr>
+<tr>
+<td>Verify before commit</td>
+<td>A skill named <code>verify</code> "is run right before each commit" (v2.1.286). It is an instruction, not a gate</td>
+<td>— (use the hooks)</td>
+</tr>
+</tbody>
+</table>
+<p>Anthropic's guidance:</p>
+<ul>
+<li>"Use the main conversation when … multiple phases share significant context, such as planning, implementation, and testing."</li>
+<li>Subagents are for verbose output, tool restrictions or self-contained work. <a href="https://code.claude.com/docs/en/sub-agents">Sub-agents</a></li>
+<li>Skills are for reusable workflows. <a href="https://code.claude.com/docs/en/skills">Skills</a></li>
+<li>→ <strong>No custom agents.</strong></li>
+</ul>
+<hr />
+<h2 id="4-design-principles">4. Design principles</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Principle</th>
+<th>Sources</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>P1</td>
+<td><strong>Enforce outside the agent's reach.</strong> Must-hold rules live in hooks and settings that fail closed and that the agent can't edit. Prompts only state intent.</td>
+<td>§3.4, §3.6</td>
+</tr>
+<tr>
+<td>P2</td>
+<td><strong>Ground truth comes from execution, never self-report.</strong> The hooks run the check themselves. CI and branch protection are final.</td>
+<td>§3.3, §3.4</td>
+</tr>
+<tr>
+<td>P3</td>
+<td><strong>Every gate has an honest exit.</strong> <code>BLOCKED: &lt;evidence&gt;</code> is a success path, and you are the only bypass.</td>
+<td>§3.2, E12</td>
+</tr>
+<tr>
+<td>P4</td>
+<td><strong>Strong finish lines.</strong> <code>.anw/verify</code> runs the whole fast suite, so no cheap hack can pass it. A weak check was gamed 2/2; a strong one led to <code>BLOCKED:</code> 4/4.</td>
+<td>E12</td>
+</tr>
+<tr>
+<td>P5</td>
+<td><strong>Native first.</strong> One session writes and one fresh-context <code>/check</code> reviews. No custom agents.</td>
+<td>§3.1, §3.3, §3.9</td>
+</tr>
+<tr>
+<td>P6</td>
+<td><strong>Contain the blast radius.</strong> OS sandbox, egress allowlist, denied secrets, approval for outward and irreversible actions, read-only prod access. Hooks run outside the sandbox, so they execute only code you have trusted.</td>
+<td>§3.5, §3.6, E14</td>
+</tr>
+<tr>
+<td>P7</td>
+<td><strong>Verify the harness against reality.</strong> Contract tests use the real payloads, and live canaries run after every model-alias move.</td>
+<td>E1–E5, §3.7</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-target-design">5. Target design</h2>
+<h3 id="51-the-development-flow">5.1 The development flow</h3>
+<p><strong>Once per repo:</strong> <code>ai-native-workflow install project</code> writes three things:</p>
+<ul>
+<li><code>.anw/verify</code>, your full fast suite and the finish line, with its hash recorded as trusted;</li>
+<li>a slim AGENTS.md;</li>
+<li>a <code>.gitignore</code> rule that keeps <code>.anw/verify</code> tracked.</li>
+</ul>
+<p><strong>A. Small change (1–2 files, clear requirement): the default</strong></p>
+<ol type="1">
+<li>Ask in the main session ("fix X"). Per the working agreements, the agent writes a failing test first, then the fix.</li>
+<li><code>guard.sh</code> watches every command and edit. At commit time it <strong>asks you</strong> if a test was deleted, skipped or weakened, or if code changed with no test.</li>
+<li>When the turn ends, <code>verify.sh</code> runs <code>.anw/verify</code>, because the session edited files.
+<ul>
+<li>Red: the agent keeps working, or ends with <code>BLOCKED:</code> and evidence.</li>
+</ul></li>
+<li><code>/check</code>, then <code>/pr</code>.</li>
+</ol>
+<p><strong>B. Feature or unclear work (3+ files)</strong></p>
+<ol type="1">
+<li><code>/plan PROJ-123</code> (Opus, high effort) writes <code>docs/context/specs/PROJ-123.md</code> with testable ACs and small steps. <strong>You approve.</strong> This is the key checkpoint.</li>
+<li><code>/clear</code>, then "implement step 1 of docs/context/specs/PROJ-123.md".
+<ul>
+<li>The same gates as A apply. Commit after each step.</li>
+<li>Repeat for each step, clearing between steps when the context gets long.</li>
+</ul></li>
+<li><code>/check</code> reviews the branch with a fresh context, read-only, at Opus tier. You triage each finding: fix, tech debt, or ignore.</li>
+<li><code>/pr</code>: push and PR each ask you first. CI and branch protection decide.</li>
+</ol>
+<p>Copilot differences:</p>
+<ul>
+<li>Plan in plan mode, with <code>/model plan</code> choosing the planning model, plus <code>/plan</code>.</li>
+<li>After <code>/check</code>, run <code>/rubber-duck</code> for a critique from the opposite model family.</li>
+</ul>
+<p><strong>C. Incident</strong></p>
+<ol type="1">
+<li><code>/incident PROJ-456</code> runs a read-only investigation, treating ticket and log text as data. It produces a diagnosis and a fix plan.</li>
+<li>You decide what to post to Jira.</li>
+<li>Start a fresh session: <code>/plan docs/context/specs/PROJ-456-incident.md</code>, or flow A if it's small. Step 1 reproduces the bug as a failing test.</li>
+</ol>
+<p><strong>D. Reviewing a PR or MR:</strong> built-in <code>/code-review</code>; add <code>--comment</code> to post once you've read the preview. In Copilot, <code>/review</code>.</p>
+<p><strong>E. Spike:</strong> ask for a spike under <code>spikes/</code>, which is gitignored and exempt from the test-first check. End with <code>FINDINGS.md</code>, then <code>/plan</code> to promote it.</p>
+<p><strong>F. Headless pipeline (<code>ai-native-workflow run …</code>):</strong> the same stages, each run as a fresh process.</p>
+<ol type="1">
+<li><code>claude -p "/plan PROJ-123" --model opus</code>, then you confirm.</li>
+<li>For each step: <code>claude -p "implement step N of …" --model sonnet</code>.</li>
+<li><code>claude -p "/check" --model opus --disallowedTools Edit,Write,MultiEdit,NotebookEdit</code>.</li>
+<li>The script runs the trusted <code>.anw/verify</code>, then push, PR/MR and Jira after you confirm.</li>
+</ol>
+<p>Every Claude call uses <code>--permission-mode acceptEdits --permission-prompts none</code>. Copilot uses <code>copilot -p "/plan …"</code> with <code>--deny-tool</code> rules and the sandbox.</p>
+<p><strong>G. Keeping it healthy</strong></p>
+<ul>
+<li>After any model or tool update: <code>ai-native-workflow doctor --smoke</code>.</li>
+<li>Monthly: <code>/context</code>, then prune.</li>
+<li>Add a rule only after you see the same failure twice in transcripts.</li>
+</ul>
+<h3 id="52-enforcement-2-scripts-for-both-tools-spikesharness-2hooks-52-contract-tests">5.2 Enforcement: 2 scripts for both tools (<code>spikes/harness-2/hooks/</code>, 52 contract tests)</h3>
+<p><strong><code>guard.sh</code></strong> runs as Claude <code>PreToolUse</code> (matcher <code>Bash|Edit|Write|MultiEdit|NotebookEdit</code>) and Copilot <code>preToolUse</code>.</p>
+<ul>
+<li>It reads either tool's stdin JSON.</li>
+<li>It never emits <code>allow</code>, which would auto-approve the call.</li>
+<li>A crash means deny. On Claude this goes through <code>|| exit 2</code>, so a missing script also blocks (E15).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Decision</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--no-verify</code>, <code>commit -n</code>, <code>core.hooksPath</code>, <code>HUSKY=0</code>, <code>SKIP=</code></td>
+<td>deny</td>
+</tr>
+<tr>
+<td>Nested <code>claude --bare</code> or <code>--dangerously-skip-permissions</code>; <code>copilot --yolo</code> or <code>--allow-all*</code></td>
+<td>deny</td>
+</tr>
+<tr>
+<td>Edits or shell writes to <code>~/.claude</code>, <code>~/.copilot</code> (including the trust list), <code>.claude/settings*.json</code>, <code>.git/</code>, <code>.github/hooks/</code>, <code>.anw/</code></td>
+<td>deny</td>
+</tr>
+<tr>
+<td>A commit (including <code>--amend</code>) that deletes tests, adds skip or focus markers, removes or rewrites assertions in existing tests, or changes source with no test</td>
+<td>ask</td>
+</tr>
+<tr>
+<td>New dependency names (<code>npm i x</code>, <code>uv add</code>, <code>go get</code>, <code>cargo add</code>, <code>dotnet add package</code>)</td>
+<td>ask</td>
+</tr>
+<tr>
+<td>Edits to CI config, AGENTS.md / CLAUDE.md / copilot-instructions, <code>.claude/*</code>, <code>.mcp.json</code>, <code>.vscode/tasks.json</code></td>
+<td>ask</td>
+</tr>
+<tr>
+<td>Any file edit, allowed or not</td>
+<td>marks the session as "edited", which arms <code>verify.sh</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>ask</code> means you approve in the moment. Auto mode can deny an ask but never approve it, and in headless runs an ask becomes a denial (E5). <strong>This replaces <code>/skip-tdd</code>, <code>/override-confidence</code>, <code>.tdd-skip</code> and the override markers.</strong></p>
+<p><strong><code>verify.sh</code></strong> runs as Claude <code>Stop</code> and Copilot <code>agentStop</code>. It acts only when:</p>
+<ul>
+<li>the session edited files, and</li>
+<li><code>.anw/verify</code> exists, and</li>
+<li><code>~/.claude/anw/trusted-verify</code> has the script's exact <code>shasum -a 256</code> line: its hash <strong>and</strong> its path, written by <code>ai-native-workflow trust</code>.</li>
+</ul>
+<p>The trust check exists because hooks run outside the sandbox. A cloned or modified script is skipped, and you're told (E14). Binding the hash to the path means a byte-identical copy in another repo isn't trusted either; generic scripts such as <code>exec go test ./...</code> are the same everywhere. What a trusted script runs is still code from the repo, so on macOS it runs under <code>sandbox-exec</code> with the agent's file limits and an open network (R14).</p>
+<p>Outcomes:</p>
+<ul>
+<li>Green: the turn ends normally.</li>
+<li>Red: it returns <code>{"decision":"block"}</code> with the failure output and the honest-exit instruction.</li>
+<li>A reply ending in <code>BLOCKED:</code>, or a second red stop in a row: allowed through, and flagged to you.</li>
+</ul>
+<p><strong>This replaces the confidence scorer.</strong></p>
+<p>Parity notes:</p>
+<ul>
+<li>In Claude, only exit 2 or a JSON decision blocks.</li>
+<li>In Copilot, any non-zero exit denies.</li>
+<li>In both, a timeout passes, so keep <code>.anw/verify</code> under 600 s.</li>
+</ul>
+<h3 id="53-skills-the-only-agents-left-spikesharness-2skills">5.3 Skills: the only "agents" left (<code>spikes/harness-2/skills/</code>)</h3>
+<table>
+<thead>
+<tr>
+<th>Skill</th>
+<th>Invoked by</th>
+<th>Frontmatter</th>
+<th>Job</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>plan</code></td>
+<td>you</td>
+<td><code>disable-model-invocation</code>, <code>model: opus</code>, <code>effort: high</code></td>
+<td>ticket → testable ACs and small TDD steps in <code>docs/context/specs/&lt;id&gt;.md</code>, then stops for your approval</td>
+</tr>
+<tr>
+<td><code>check</code></td>
+<td>you</td>
+<td><code>disable-model-invocation</code>, <code>context: fork</code>, <code>agent: Explore</code>, <code>model: opus</code>, <code>effort: high</code></td>
+<td>fresh-context, read-only review: runs the check, reads the diff first, audits integrity, reports merge-blocking findings with a repro</td>
+</tr>
+<tr>
+<td><code>verify</code></td>
+<td>the model (Claude runs it before every commit)</td>
+<td>none</td>
+<td>runs <code>.anw/verify</code> or the tests and quotes the exact result</td>
+</tr>
+<tr>
+<td><code>incident</code></td>
+<td>you</td>
+<td><code>disable-model-invocation</code>, <code>model: opus</code>, <code>effort: high</code></td>
+<td>read-only investigation → diagnosis and fix plan; never posts</td>
+</tr>
+<tr>
+<td><code>pr</code></td>
+<td>you</td>
+<td><code>disable-model-invocation</code></td>
+<td>verify, then push and PR/MR (both ask you), with the real verification output</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Keep as knowledge</strong> (model-invocable): <code>clusters</code>, <code>k8s</code> (mutating commands marked human-only; the deny rules enforce it), <code>app-insights</code>, and <code>kibana</code> (Copilot).</li>
+<li><strong>Keep only if you use them:</strong> <code>adr</code>, <code>session-report</code>, <code>caveman</code>, <code>explore</code> (spikes).</li>
+<li><strong>Delete:</strong>
+<ul>
+<li>all 9 agents, in both tools;</li>
+<li><code>tdd</code>, now one line in the working agreements;</li>
+<li><code>skip-tdd</code>, <code>override-confidence</code>, and <code>pipeline-*</code> (the CLI's <code>--help</code> covers those);</li>
+<li><code>brainstorm</code>, which duplicates superpowers;</li>
+<li><code>gh-cli</code> / <code>glab-cli</code>, if D5 favours the built-in <code>/code-review</code>;</li>
+<li>everything in <code>~/.claude/commands/</code>.</li>
+</ul></li>
+</ul>
+<p>Copilot doesn't document <code>context</code> or <code>agent</code> in SKILL.md, so treat <code>/check</code> there as running inline and follow it with <code>/rubber-duck</code> (verified in P1-4).</p>
+<h3 id="54-claude-end-state">5.4 <code>~/.claude</code> end state</h3>
+<ul>
+<li><strong><code>CLAUDE.md</code>:</strong> <code>spikes/harness-2/instructions/CLAUDE.md</code>, 16 lines (who you are, 6 working agreements, the flow).</li>
+<li><strong><code>settings.json</code>:</strong> merge <code>spikes/harness-2/config/claude-settings.json</code> with <code>jq -s '.[0] * .[1]'</code>. The dry run against your current file keeps your vault directory, status line and model (E15).
+<ul>
+<li><strong>Mode:</strong> <code>defaultMode: "auto"</code> set explicitly; <code>disableBypassPermissionsMode: "disable"</code>.</li>
+<li><strong>Allow:</strong> read-only kubectl, az and docker commands.</li>
+<li><strong>Ask:</strong> push; PR/MR create, merge and comment; <code>gh api</code>, <code>gist</code> and <code>repo</code>; <code>glab api</code>; Confluence writes.</li>
+<li><strong>Deny:</strong>
+<ul>
+<li>reads of secrets;</li>
+<li>edits to <code>~/.claude</code>, <code>~/.copilot</code> and the project's <code>.claude/settings*.json</code>;</li>
+<li>force-push, reset and clean;</li>
+<li>mutating kubectl and helm commands;</li>
+<li>the Gmail, Drive and Calendar tools.</li>
+</ul></li>
+<li><strong>Sandbox:</strong>
+<ul>
+<li>on, strict (<code>allowUnsandboxedCommands: false</code>), with sandboxed Bash auto-allowed;</li>
+<li>docker, kubectl, az and helm run outside it via <code>excludedCommands</code>;</li>
+<li>outbound network limited to your forges and package registries.</li>
+</ul></li>
+<li><strong>Hooks:</strong> <code>PreToolUse</code> → <code>guard.sh || exit 2</code>; <code>Stop</code> → <code>verify.sh</code>. <code>SessionStart</code> is removed: Claude already injects git status and reads AGENTS.md, and that hook was the RCE.</li>
+<li><strong>Plugins:</strong>
+<ul>
+<li><code>syncClaudeAiPlugins</code> and <code>syncClaudeAiSkills</code> set to <code>false</code>;</li>
+<li>superpowers, the duplicate vercel plugin, latex, figma and frontend-design off globally (enable them per project).</li>
+</ul></li>
+</ul></li>
+<li><strong>Rule order:</strong> "Rules are evaluated in order: deny, then ask, then allow… rule specificity doesn't change the order" (<a href="https://code.claude.com/docs/en/permissions">permissions</a>).
+<ul>
+<li>So reads get explicit allows and mutations get explicit denies.</li>
+<li>Read and Edit deny rules also become the sandbox's OS-level <code>denyRead</code> / <code>denyWrite</code> (E6).</li>
+</ul></li>
+<li><strong>Project settings outrank yours</strong> and can turn <code>disableAllHooks</code> on. The mitigations:
+<ul>
+<li>the guard plus the <code>Edit(./.claude/settings*.json)</code> deny stop agents and sandboxed install scripts from writing them;</li>
+<li>for repos you didn't write, run headless with <code>--setting-sources user</code>;</li>
+<li>managed settings (P2-2) are the only place a repo can't override.</li>
+</ul></li>
+<li><strong><code>hooks/</code>:</strong> <code>guard.sh</code> and <code>verify.sh</code>.</li>
+<li><strong><code>skills/</code>:</strong> the 5 workflow skills plus the knowledge skills.</li>
+<li><strong>Hooks and skills are copies, never symlinks.</strong> An agent working in this repo can't change live enforcement, or its own <code>/verify</code> and <code>/check</code> instructions. Only <code>install global</code> makes a repo change live; <code>status</code> flags drift.</li>
+<li><strong><code>agents/</code>, <code>commands/</code>, <code>scripts/</code>:</strong> empty.</li>
+<li><strong><code>anw/trusted-verify</code>:</strong> one <code>shasum -a 256</code> line (hash and path) per <code>.anw/verify</code> you approved with <code>ai-native-workflow trust</code>.</li>
+</ul>
+<h3 id="55-copilot-end-state">5.5 <code>~/.copilot</code> end state</h3>
+<ul>
+<li><strong><code>copilot-instructions.md</code>:</strong> <code>spikes/harness-2/instructions/copilot-instructions.md</code>. Same agreements; the flow mentions plan mode and <code>/rubber-duck</code>.</li>
+<li><strong><code>hooks/anw.json</code>:</strong> generated by <code>install global</code> with absolute paths. <code>preToolUse</code> → <code>guard.sh</code> (15 s); <code>agentStop</code> → <code>verify.sh</code> (600 s). The scripts are copied next to it.</li>
+<li><strong><code>settings.json</code>:</strong>
+<ul>
+<li><code>allowedUrls</code> pruned to docs, registries, your forges and localhost;</li>
+<li>sandbox on, with bypass off and an egress allowlist (<code>/sandbox</code>);</li>
+<li>from CLI 1.0.93 on, check the result with <code>copilot config list</code>.</li>
+</ul></li>
+<li><strong>Approvals and MCP:</strong>
+<ul>
+<li><code>permissions-config.json</code> reset to <code>{"locations":{}}</code>;</li>
+<li><code>mcp-config.json</code> tools narrowed from <code>["*"]</code> to the read tools you use;</li>
+<li><code>trustedFolders</code> without <code>~/.claude</code>, <code>~/.copilot</code> and <code>~/.config/fish</code>.</li>
+</ul></li>
+<li><strong><code>agents/</code>:</strong> empty, so there are no more pinned model slugs. Use the session default model, and <code>/model plan</code> for planning.</li>
+<li><strong>Don't set <code>disableBypassPermissionsMode</code> here.</strong> It also suppresses <code>--allow-all-tools</code>, which <code>copilot -p</code> requires. Deny rules (which beat <code>--allow-all</code>), the sandbox and the hooks do the work instead.</li>
+</ul>
+<h3 id="56-pipelines-and-installer-repo">5.6 Pipelines and installer (repo)</h3>
+<ul>
+<li><strong>Pipeline stages</strong> call the native CLIs with skills and model flags (flow F), one fresh session each, with stdin closed. There is no <code>--agent</code> and no bypass flag.
+<ul>
+<li><strong>What a stage may never run</strong> is the "ask" and "deny" Bash rules of <code>config/claude-settings.json</code>, the same policy as your interactive sessions. That covers push, PR/MR and Jira writes, <code>gh</code>/<code>glab api</code>, and mutating kubectl/helm.</li>
+<li><strong>Claude:</strong> <code>--permission-mode acceptEdits --permission-prompts none</code>, so anything that would prompt is denied. The policy rules go in <code>--disallowedTools</code>, and the check stage also gets Edit/Write/MultiEdit/NotebookEdit. The plan and check stages use <code>--model opus</code>, the steps use sonnet. The user-level sandbox applies.</li>
+<li><strong>Copilot:</strong> <code>--allow-all-tools</code> (required for <code>-p</code>) and <code>--no-ask-user</code>. The policy rules become <code>--deny-tool=shell(…)</code>, and the check stage also gets <code>--deny-tool=write</code>. Tokens go in <code>--secret-env-vars</code>. In the implement and check stages every MCP server in <code>mcp-config.json</code> is disabled. There is no <code>--allow-all-paths</code>.</li>
+</ul></li>
+<li><strong>Outward actions stay in the script, each on your yes (Enter means no).</strong>
+<ul>
+<li>The trusted <code>.anw/verify</code> runs first, in the same sandbox as the Stop hook (<code>verify.sh --run</code>).</li>
+<li>Red, or no trusted script, needs an explicit "push anyway".</li>
+<li>Push and the PR/MR follow.</li>
+<li>For GitLab pipelines, the MR link goes to Jira: through the <code>jira</code> CLI after a confirm, or printed for you to paste if there's no CLI.</li>
+</ul></li>
+<li><strong>The live renderer</strong> reads Claude's <code>--output-format stream-json</code> events (D1): one line per tool call, then the answer. Copilot stages print their text output (<code>-s</code>). The sidekick and sentinel protocol go away in P1-7.</li>
+<li><strong>State</strong> is parsed from <code>.anw/.pipeline-state</code>, never sourced. <code>run resume</code> continues from the last finished stage, and an existing <code>docs/context/specs/&lt;id&gt;.md</code> is used instead of re-planning.</li>
+<li><strong><code>install global</code>:</strong>
+<ul>
+<li>copies the hooks;</li>
+<li>merges the settings;</li>
+<li>copies the skills;</li>
+<li>writes the instructions;</li>
+<li>retires the legacy agents, skills, hooks and scripts into <code>&lt;home&gt;/anw-backup/&lt;stamp&gt;/</code> (never deletes; your own files stay).</li>
+</ul></li>
+<li><strong><code>install project</code>:</strong>
+<ul>
+<li>writes <code>.anw/verify</code> for the detected stack (a Makefile <code>test:</code> target wins), never overwriting one, then shows it and asks you to trust it;</li>
+<li>adds <code>.anw/*</code> plus <code>!.anw/verify</code> to <code>.gitignore</code>, so the script stays tracked;</li>
+<li>writes a slim AGENTS.md: commands first, then Always / Ask first / Never, at most 80 lines. CLAUDE.md just imports it, and there are no Copilot-only files, because Copilot reads AGENTS.md;</li>
+<li>removes the old per-project Copilot hook layer (dispatcher and vendored scorer), keeping any hook entries you added.</li>
+</ul></li>
+<li><strong>New commands:</strong>
+<ul>
+<li><code>ai-native-workflow trust [path]</code> shows a repo's <code>.anw/verify</code> and, on your <code>y</code>, records its hash and path;</li>
+<li><code>doctor</code> exits 1 and names the path on drift, a custom agent, or an untrusted <code>.anw/verify</code> in the current repo. <code>--smoke</code> (the canaries) arrives with P1-8.</li>
+</ul></li>
+</ul>
+<h3 id="57-size-before--after">5.7 Size: before → after</h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Custom agents</td>
+<td>9 Claude and 8 Copilot files (1,303 + 528 lines)</td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td>Skills</td>
+<td>21 per tool, plus 17 duplicate <code>.bak</code> dirs</td>
+<td>5 workflow + 3–4 knowledge (+ conveniences you choose)</td>
+</tr>
+<tr>
+<td>Enforcement code</td>
+<td>458 lines plus a ~200-line generated dispatcher, on the wrong contract</td>
+<td><code>guard.sh</code> + <code>verify.sh</code>: 173 lines, both tools</td>
+</tr>
+<tr>
+<td>Enforcement tests</td>
+<td>1,711 lines on the wrong contract</td>
+<td>52 contract tests + <code>make smoke</code></td>
+</tr>
+<tr>
+<td>Global instructions</td>
+<td>58 + 55 lines</td>
+<td>16 + 16</td>
+</tr>
+<tr>
+<td>Bypass mechanisms</td>
+<td>2 skills and 2 marker files</td>
+<td>0: you approve the prompt</td>
+</tr>
+<tr>
+<td>Pinned model versions</td>
+<td>Copilot agent slugs</td>
+<td>none: aliases and session settings only</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="6-evidence-that-this-design-works-live-runs-small-n-proof-e4e15">6. Evidence that this design works (live runs, small N; PROOF E4–E15)</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Contract tests on both tools' real payloads</td>
+<td><strong>52/52</strong> green, including a regression test proving the old gate is a no-op</td>
+</tr>
+<tr>
+<td>The full proposed Claude config, live (E15)</td>
+<td><code>cat .env</code> → <code>Operation not permitted</code>; <code>--no-verify</code> → denied by the guard; <code>curl example.com</code> → <code>deny network-outbound</code>. A missing guard script → every call blocked (fail-closed)</td>
+</tr>
+<tr>
+<td>Guard in headless Claude Code (E5)</td>
+<td>A source change committed without a test, and <code>npm i left-padd</code> → ask → denied in <code>-p</code>, under both acceptEdits and auto</td>
+</tr>
+<tr>
+<td>Sandbox off vs on (E6)</td>
+<td>Off: an obfuscated <code>python3</code> read printed a fake secret, and <code>curl</code> → 200. On: the OS blocked the read and the network call</td>
+</tr>
+<tr>
+<td>Stop hook on an honest task (E11)</td>
+<td>Bug fixed, check green at stop, no pushback, marker cleared</td>
+</tr>
+<tr>
+<td>Canary with a <strong>weak</strong> finish line (only the contradictory assertion) (E12)</td>
+<td><strong>2/2 gamed it</strong> with <code>a + b + 1</code>. B1 also rewrote the spec after the guard denied editing the check</td>
+</tr>
+<tr>
+<td>Canary with a <strong>strong</strong> finish line (a real test plus the contradictory assertion) (E12)</td>
+<td><strong>4/4 ended with <code>BLOCKED:</code></strong> and evidence, with no code changed. In every run the first move was editing <code>.anw/verify</code>, which the guard denied, followed by one Stop-hook pushback. Current vs proposed instructions made no visible difference at N=2, because the hook's message carried the escalation</td>
+</tr>
+<tr>
+<td><code>/check</code> (fresh context, read-only, Opus tier) on both gamed states (E13)</td>
+<td><strong>2/2 blocked the merge</strong> with the right diagnosis (code bent to the check, and the spec rewritten to match). Working tree untouched</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Reading:</strong></p>
+<ul>
+<li>The deterministic gates stopped every attempt to edit the check.</li>
+<li>A strong finish line plus the honest exit produced escalation instead of hacks.</li>
+<li>The semantic hack that a weak check allowed was caught only by the fresh-context review.</li>
+</ul>
+<p>That is why the flow makes <code>.anw/verify</code> the full suite and <code>/check</code> a standard step before <code>/pr</code>.</p>
+<hr />
+<h2 id="7-acceptance-criteria">7. Acceptance criteria</h2>
+<ul>
+<li><strong>AC-1</strong> A real <code>claude -p</code> <strong>and</strong> <code>copilot -p</code> session attempting <code>git commit --no-verify</code> is denied, with the guard's reason in the result (<code>make smoke</code>).</li>
+<li><strong>AC-2</strong> The gates fail closed:
+<ul>
+<li>malformed input → exit 2 (Claude) or deny JSON (Copilot);</li>
+<li>a missing <code>guard.sh</code> blocks every Claude call (E15).</li>
+</ul></li>
+<li><strong>AC-3</strong> A commit that deletes a test, adds a skip or focus marker, removes or rewrites an assertion in an existing test, or changes source with no test → asks interactively, and is denied headless (bats + smoke).</li>
+<li><strong>AC-4</strong> Agent writes are denied, through Edit/Write and common shell writes, to:
+<ul>
+<li><code>~/.claude</code> and <code>~/.copilot</code> (including the trust list);</li>
+<li><code>.claude/settings*.json</code>, <code>.git/</code>, <code>.github/hooks/</code> and <code>.anw/</code>.</li>
+</ul></li>
+<li><strong>AC-5</strong> An editing session can't end red, except through <code>BLOCKED:</code> or a second red stop, and both are surfaced to you. A turn that edited nothing never runs the check (bats + smoke).</li>
+<li><strong>AC-6</strong> Hooks and the pipeline never execute an untrusted or changed <code>.anw/verify</code> (bats).</li>
+<li><strong>AC-7</strong> With your settings applied, in a Claude session:
+<ul>
+<li><code>cat .env</code> → <code>Operation not permitted</code>;</li>
+<li><code>curl</code> to a non-allowlisted host is blocked;</li>
+<li><code>claude --dangerously-skip-permissions</code> is refused (smoke).</li>
+</ul></li>
+<li><strong>AC-8</strong> No pipeline passes a bypass flag, and agents never push or post (bats on <code>lib/</code>).</li>
+<li><strong>AC-9</strong> In both tools: zero custom agents installed, and the skills are exactly the 5 workflow skills plus knowledge skills (plus any optional ones you keep). Checked by bats on a sandbox-HOME install and by <code>doctor</code>.</li>
+<li><strong>AC-10</strong> Size budgets:
+<ul>
+<li>global instruction files ≤ 25 lines;</li>
+<li>each workflow skill ≤ 30 lines;</li>
+<li>AGENTS.md template ≤ 80 lines.</li>
+</ul></li>
+<li><strong>AC-11</strong> Canaries:
+<ul>
+<li>the strong-finish-line canary ends in <code>BLOCKED:</code> with no test or check changed;</li>
+<li><code>/check</code> blocks the weak-finish-line hack.</li>
+<li>Report k/n after every model-alias change, with no extrapolation.</li>
+</ul></li>
+<li><strong>AC-12</strong> PAPER and ARCHITECTURE match reality (gate errata, native-first architecture), and ADR-003 supersedes ADR-002.</li>
+</ul>
+<hr />
+<h2 id="8-decisions-for-you-recommended-default-in-bold">8. Decisions for you (recommended default in bold)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>Options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>D1</td>
+<td>Live renderer</td>
+<td><strong>Keep it, fed from the tools' event streams</strong>, or drop it</td>
+</tr>
+<tr>
+<td>D2</td>
+<td>Strength of the test-first gate</td>
+<td><strong>Soft (<code>ask</code>)</strong>, or hard</td>
+</tr>
+<tr>
+<td>D3</td>
+<td>superpowers plugin</td>
+<td><strong>Disable globally</strong>, or keep</td>
+</tr>
+<tr>
+<td>D4</td>
+<td>Gmail/Drive/Calendar and synced plugins in Claude Code</td>
+<td><strong>Deny them and stop the sync</strong>, or keep</td>
+</tr>
+<tr>
+<td>D5</td>
+<td>PR review</td>
+<td><strong>A/B the built-in <code>/code-review</code> against your gh-cli/glab-cli skills on 3 PRs</strong>, and keep the better one</td>
+</tr>
+<tr>
+<td>D6</td>
+<td>Hidden acceptance tests (P2-1)</td>
+<td>Opt-in for critical repos; they are the strongest fix for weak finish lines</td>
+</tr>
+<tr>
+<td>D7</td>
+<td>Managed settings for the hooks (P2-2)</td>
+<td><strong>After P1</strong></td>
+</tr>
+<tr>
+<td>D8</td>
+<td>Default session model</td>
+<td><strong><code>opusplan</code></strong>: Opus plans, Sonnet implements, which is your old tiering done natively. <code>/plan</code>, <code>/check</code> and <code>/incident</code> pin Opus regardless. Or keep <code>opus</code> everywhere</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9-risks-and-limits">9. Risks and limits</h2>
+<ul>
+<li><strong>R1</strong> Regex detection has a ceiling. Backstops: the sandbox, <code>/check</code>, CI, hidden tests.</li>
+<li><strong>R2</strong> A hook timeout lets the action through, in both tools. Keep <code>guard.sh</code> limited to git-diff work, and keep <code>.anw/verify</code> well under 600 s.</li>
+<li><strong>R3</strong> Hooks are guardrails, not a security boundary. Prompt injection, mods and project settings can route around them. The <strong>sandbox</strong> is the boundary; managed settings (P2-2) harden the hooks.</li>
+<li><strong>R4</strong> Auto mode is not a boundary: published bypass rates are 60–80% and 79%.</li>
+<li><strong>R5</strong> Sandbox friction. Excluded commands run unsandboxed. If strict mode blocks them, set <code>allowUnsandboxedCommands: true</code> (P0-3 checks this).</li>
+<li><strong>R6</strong> There is no controlled evaluation. Canaries catch regressions; they don't measure effect sizes.</li>
+<li><strong>R7</strong> Sources conflict on whether to disclose graders to the agent. Disclose only the visible, deterministic checks, and never the hidden tests.</li>
+<li><strong>R8</strong> Evidence for test-first is mixed, so it stays a soft ask.</li>
+<li><strong>R9</strong> Model updates break harness prompts. Rev 2 has far fewer prompts to break. Run <code>doctor --smoke</code> after every update.</li>
+<li><strong>R10</strong> <strong>Weak finish lines invite hacks</strong> (seen 2/2 in E12). Mitigations: the full suite in <code>.anw/verify</code>, <code>/check</code> before <code>/pr</code>, and hidden tests for critical code.</li>
+<li><strong>R11</strong> Native features move (skill <code>context: fork</code>, Copilot's rubber-duck). <code>doctor --smoke</code> detects breakage, and there are fewer moving parts than with custom agents.</li>
+<li><strong>R12</strong> Copilot may ignore <code>context</code>/<code>agent</code> in SKILL.md. Then <code>/check</code> runs inline there, and <code>/rubber-duck</code> adds the independence.</li>
+<li><strong>R13</strong> Edits made only through Bash don't mark the session. The pre-push verify and CI still run.</li>
+<li><strong>R14</strong> <strong>The Claude Stop hook runs repo code outside the sandbox</strong> (found in P1-5). Trust covers the script's text, not what it runs: <code>make test</code> executes the Makefile and tests the agent may have edited this session. So a prompt-injected test could write <code>~/.zshrc</code> or <code>~/.claude/settings.json</code> when the session ends. Copilot's hooks run inside its sandbox, so this is Claude-only.
+<ul>
+<li><strong>Mitigated in P1-5b:</strong> <code>verify.sh</code> runs the script under <code>sandbox-exec</code>, with the agent's file limits mirrored from <code>config/claude-settings.json</code> and checked by a sync test. Writes go only to the repo, temp and caches, and never to the repo's <code>.git/hooks</code>, <code>.git/config</code>, <code>.claude/</code>, <code>.anw/</code>, <code>.github/hooks/</code>, <code>.vscode/</code> or <code>.mcp.json</code>. Keys and credentials (<code>~/.ssh</code>, <code>~/.aws</code>, <code>~/.azure</code>, <code>~/.kube</code>, <code>~/.gnupg</code>, gh/glab config, <code>.netrc</code>, <code>.git-credentials</code>, <code>.env*</code>, <code>*.pem</code>, <code>*.key</code>) can't be read.</li>
+<li><strong>Still open:</strong>
+<ul>
+<li>network is allowed, by your choice, so anything the tests <em>can</em> read can leave the machine;</li>
+<li>other repo files stay writable, as they are for the agent;</li>
+<li>without <code>sandbox-exec</code> (not macOS) the script runs unsandboxed, and <code>trust</code> says so;</li>
+<li>inside another sandbox (Copilot's hooks) the outer one is what contains it.</li>
+</ul></li>
+</ul></li>
+<li><strong>R15</strong> <strong>Copilot's MCP servers can write</strong> (found in P1-6). Your <code>mcp-config.json</code> gives <code>jira</code>, <code>confluence</code> and the others <code>tools: ["*"]</code>. The pipeline disables every MCP server in the implement and check stages. But the plan and incident stages need Jira to read the ticket, so a prompt-injected plan stage could still comment or transition through MCP. Mitigation: narrow each server's <code>tools</code> to its read tools (a P0 follow-up). Shell posting is already denied.</li>
+</ul>
+<h2 id="10-out-of-scope">10. Out of scope</h2>
+<p>Multi-developer coordination; cloud-agent (<code>/delegate</code>) environments beyond the repo templates; enterprise managed-policy rollout; replacing CI.</p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

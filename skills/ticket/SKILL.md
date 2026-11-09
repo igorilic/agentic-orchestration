@@ -34,7 +34,7 @@ What I need: [specific questions]
 ```
 
 ### Step 3: Create Feature Spec
-Create `docs/context/specs/<ticket-id>-<short-name>.md` with sections:
+Create `docs/context/specs/<ticket-id>-<short-name>.html`, a copy of `docs/context/specs/templates/doc.html`, with sections:
 - Source (ticket URL)
 - Context (from description)
 - Acceptance Criteria (from AC field or synthesized)

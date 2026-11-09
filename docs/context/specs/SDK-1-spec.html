@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SDK-1 — Sidekick model-routing + live pipeline visualization (Spec)</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">SDK-1 — Sidekick model-routing + live pipeline visualization (Spec)</h1>
+<time class="sp-article__date" datetime="2026-07-05"><span class="sp-bar"></span><span style="margin-left:.75rem">July 5, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p>Source: <code>docs/context/specs/SDK-1-brainstorm.html</code> (converged) + <code>spikes/sdk-1-renderer/FINDINGS.md</code> (completed spike). ADR: <code>docs/decisions/ADR-002-sentinel-stream-and-sidekick-delegation.html</code> Driver: architect → tdd-developer. Two tracks: <strong>A) sidekick delegation capability</strong>, <strong>B) live milestone visualization</strong> (B renders/persists the events A emits).</p>
+</blockquote>
+<hr />
+<h2 id="problem-statement">Problem Statement</h2>
+<p>The pipeline is sequential and opaque: <code>run_claude_agent</code> buffers an agent's entire stdout to a temp file, blocks on a generic spinner, then <code>cat</code>s the whole file after the process exits (<code>lib/pipeline-core.sh:225-264</code>). There is <strong>no live view</strong> of what an agent is doing, and there is <strong>no cheap-model delegation</strong> — every agent runs one tier end to end, so the reference-image element <code>DELEGATED TO SIDEKICK</code> has no referent in the system today (all 8 Claude agents lack the <code>Task</code> tool). SDK-1 builds the real capability the badge implies and renders it live.</p>
+<h2 id="context">Context</h2>
+<ul>
+<li>Orchestrator is pure bash (<code>ai-native-workflow</code> + <code>lib/*.sh</code>); agents run as opaque subprocesses; zero npm/pip deps. <code>set -euo pipefail</code> is set globally (<code>ai-native-workflow:25</code>).</li>
+<li>A structured-telemetry precedent exists: <code>.anw/specs/&lt;id&gt;-confidence.jsonl</code>. <strong>Correction from the spike:</strong> that file is written by the <em>agent itself</em> (a <code>jq</code> step in <code>architect.md:64-82</code>), not the orchestrator. Only its <strong>field/format conventions</strong> transfer to milestones; the orchestrator-side writer is new code with no in-repo precedent.</li>
+<li>The renderer mechanics are <strong>already de-risked</strong> by the spike (<code>spikes/sdk-1-renderer/render.sh</code>, verified byte-identical to <code>SAMPLE-OUTPUT.txt</code>, clean teardown on abrupt producer death, bash-3.2-safe FIFO/ticker spinner, non-TTY fallback). SDK-1 <strong>reuses</strong> those mechanics; it does not re-litigate them.</li>
+<li>Colors/spinner frames in the spike are byte-identical to <code>lib/common.sh:8-16</code> and <code>lib/pipeline-core.sh:150</code>; production code <code>source</code>s <code>lib/common.sh</code> rather than duplicating.</li>
+<li>MVP targets the <strong>GitHub / Claude</strong> pipeline only: <code>pipeline_github_feature</code> (<code>lib/pipelines.sh:358-544</code>).</li>
+</ul>
+<h3 id="what-the-spike-already-settled-do-not-redo">What the spike already settled (do NOT redo)</h3>
+<table>
+<thead>
+<tr>
+<th>OQ</th>
+<th>Question</th>
+<th>Spike status (cite <code>FINDINGS.md</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Sentinel grammar</td>
+<td><strong>Partially settled.</strong> <code>|</code>-split is safe for genuinely-2-field events with embedded pipes in the free-text field (verified). It is <strong>not</strong> safe for single-field events — a <code>done</code>-event embedded-<code>|</code> truncation bug was found + fixed; use the raw post-evtype remainder (<code>rest</code>), never <code>f1</code>/<code>f2</code>, for single-field events. Prefix-collision is real but low-probability.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Renderer details</td>
+<td><strong>Substantially settled.</strong> Spinner/cursor/teardown verified clean under normal completion and abrupt producer death; tier coloring implemented &amp; aesthetically matched; single-level nesting + stacked consecutive delegations verified; non-TTY output deterministic. Coexist-vs-replace question answered: <strong>replace</strong> the generic spinner, do not coexist.</td>
+</tr>
+</tbody>
+</table>
+<p>The remaining OQs (2, 3, 4, 6, 7) are resolved below by design decision.</p>
+<hr />
+<h2 id="proposed-solution">Proposed Solution</h2>
+<p>Agents print <strong>dumb sentinel lines</strong> to stdout. The orchestrator restructures <code>run_claude_agent</code> into a <strong>live pipe</strong> (<code>claude … 2&gt;&amp;1 | render-stream</code>) where the renderer (ported from the spike) (a) renders the flat indented stream live and (b) appends orchestrator-authored structured events to <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code>. Heavy agents (<code>tdd-developer</code>, <code>qa</code>, <code>architect</code>) gain the <code>Task</code> tool and delegate mechanical sub-work to a new Haiku <code>sidekick</code> agent, narrating each delegation via the same sentinel channel; the parent always reviews sidekick output before accepting.</p>
+<pre><code>agent (claude --agent=… -p)  ──prints sentinels to stdout──►  orchestrator pipe
+   @@ANW|phase|tdd-developer|sonnet                              │
+   @@ANW|step|run|Wrote failing test                             ├─ render-stream:
+   @@ANW|step|ok|Wrote failing test                              │    live flat stream  (TTY)
+   @@ANW|deleg|haiku|scaffolded ClusterBatch boilerplate         │    + append_milestone → JSONL
+   @@ANW|step|ok|Reviewed &amp; accepted sidekick output             │
+   @@ANW|done|Step 3 complete                                    ▼
+                                              .anw/specs/&lt;id&gt;-milestones.jsonl</code></pre>
+<hr />
+<h2 id="decisions-on-the-7-open-questions">Decisions on the 7 open questions</h2>
+<h3 id="oq-1--sentinel-grammar-spike-anchored">OQ-1 — Sentinel grammar (spike-anchored)</h3>
+<ul>
+<li><p><strong>Reserved prefix</strong> <code>@@ANW|</code>, field separator <code>|</code>. Non-sentinel lines are discarded from the live view.</p></li>
+<li><p><strong>Event types</strong> (agent-emitted): <code>phase</code>, <code>step</code>, <code>deleg</code>, <code>deleg_reject</code>, <code>verdict</code>, <code>done</code>. Reserved internal-only tokens (renderer machinery, never emitted by agents): <code>__TICK__</code>, <code>__EOF__</code>.</p></li>
+<li><p><strong>Emission scope vs. delegation scope (kept deliberately separate):</strong> <em>who narrates</em> is NOT the same as <em>who may delegate</em>. <strong>All five</strong> pipeline agents narrate <code>phase</code>/<code>step</code>/<code>done</code> so the live view never goes dark during any phase. Only the <strong>3 delegating</strong> agents (OQ-3) additionally emit <code>deleg</code>/<code>deleg_reject</code>. Only <code>qa</code> and <code>reviewer</code> additionally emit <code>verdict</code>. <strong>OQ-3's 3-agent limit governs the sidekick/<code>Task</code> grant only — it does NOT restrict who narrates.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th style="text-align: center;"><code>phase</code>/<code>step</code>/<code>done</code> (narration)</th>
+<th style="text-align: center;"><code>deleg</code>/<code>deleg_reject</code> (delegation)</th>
+<th style="text-align: center;"><code>verdict</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>requirements-engineer</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><code>architect</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><code>tdd-developer</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">—</td>
+</tr>
+<tr>
+<td><code>qa</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">yes</td>
+</tr>
+<tr>
+<td><code>reviewer</code></td>
+<td style="text-align: center;">yes</td>
+<td style="text-align: center;">—</td>
+<td style="text-align: center;">yes</td>
+</tr>
+</tbody>
+</table>
+<p>Narration for the two non-delegating agents (<code>requirements-engineer</code>, <code>reviewer</code>) and the <code>verdict</code> event for <code>qa</code>/<code>reviewer</code> are taught in <strong>todo Step A-6</strong>; the 3 delegating agents' narration + delegation events are Steps A-4/A-5.</p></li>
+<li><p><strong>Two-field events</strong> — <code>phase|&lt;agent&gt;|&lt;tier&gt;</code>, <code>step|&lt;status&gt;|&lt;text&gt;</code>, <code>deleg|&lt;tier&gt;|&lt;text&gt;</code>, <code>deleg_reject|&lt;tier&gt;|&lt;text&gt;</code>, <code>verdict|&lt;band&gt;|&lt;score&gt;</code>: short field first, free-text field is <code>"${payload#*|}"</code> (everything after the first remaining <code>|</code>). Embedded <code>|</code> in the free-text field is <strong>safe</strong> (spike-verified). For <code>verdict</code>, <code>&lt;band&gt;</code> ∈ <code>GREEN | YELLOW | RED</code> (case-insensitive on input; the renderer uppercases the band, <code>render.sh:259-271</code>) and <code>&lt;score&gt;</code> is the free-text second field; <code>verdict</code> is emitted <strong>only</strong> by <code>qa</code> and <code>reviewer</code> — it now has a producer, closing the A-5 gap where it was parsed + rendered but no agent was taught to emit it.</p></li>
+<li><p><strong>Single-field events</strong> — <code>done|&lt;text&gt;</code>: text is the <strong>raw remainder after the event type</strong> (<code>rest</code>), <strong>never</strong> <code>f1</code>/<code>f2</code> (spike bug fix). New single-field event types MUST use <code>rest</code>.</p></li>
+<li><p><strong><code>status</code></strong> ∈ <code>run | ok | fail</code>. <strong><code>delegated</code></strong> is expressed as a <code>deleg</code> event carrying the sidekick <code>&lt;tier&gt;</code> (haiku); the parent's own milestone is finalized <code>[DELEGATED]</code> by the renderer.</p></li>
+<li><p><strong>Collision avoidance (decision: keep <code>@@ANW|</code>, option (a) from FINDINGS):</strong> accept the residual low-probability collision risk and add a hard rule to every agent prompt: <em>never print a literal <code>@@ANW|…</code> example line in agent-visible output; when documenting the grammar, redact the prefix (write it as <code>@@ANW·|</code> or fenced as "(reserved prefix)").</em> No lower-collision re-encoding for MVP.</p></li>
+<li><p><strong>Arity validation (decision beyond the spike):</strong> the production renderer drops malformed sentinels (unknown event type; <code>step</code>/<code>phase</code>/<code>deleg</code>/<code>deleg_reject</code>/<code>verdict</code> missing their free-text/second field) instead of mis-rendering the status keyword as text (spike gap #1). Dropped sentinels go to the debug log, not the live view. Orphan <code>deleg</code>/<code>deleg_reject</code> (spike gaps #3/#4) render gracefully as-is (accepted; the parent contract always emits <code>step|run</code> before <code>deleg</code>).</p></li>
+</ul>
+<h3 id="oq-2--milestones-jsonl-schema">OQ-2 — Milestones JSONL schema</h3>
+<ul>
+<li>Path <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code> (gitignored, alongside confidence.jsonl). <strong>Orchestrator is the sole writer</strong> via a new <code>append_milestone()</code> helper in <code>lib/milestones.sh</code> — this is new code; only confidence.jsonl's <em>conventions</em> (ISO-8601 UTC <code>ts</code>, one JSON object per line, append-only, <code>jq -n</code>-built) are reused.</li>
+<li>One object per finalized sentinel event. Fields:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ts</code></td>
+<td>string</td>
+<td>orchestrator</td>
+<td>ISO-8601 UTC</td>
+</tr>
+<tr>
+<td><code>event</code></td>
+<td>string</td>
+<td>sentinel</td>
+<td><code>phase｜step｜deleg｜deleg_reject｜verdict｜done</code> (canonical — reconciled to OQ-1's tokens; see note below)</td>
+</tr>
+<tr>
+<td><code>spec_id</code></td>
+<td>string</td>
+<td>orchestrator</td>
+<td>pipeline id (agents don't know it — the key reason the orchestrator writes)</td>
+</tr>
+<tr>
+<td><code>pipeline_step</code></td>
+<td>string</td>
+<td>orchestrator</td>
+<td>e.g. <code>4.2</code> from <code>save_state</code></td>
+</tr>
+<tr>
+<td><code>agent</code></td>
+<td>string</td>
+<td>orchestrator</td>
+<td>current agent name</td>
+</tr>
+<tr>
+<td><code>tier</code></td>
+<td>string</td>
+<td>orchestrator</td>
+<td>parent tier for milestones; sidekick tier for delegations</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>string｜null</td>
+<td>sentinel</td>
+<td><code>run｜ok｜fail</code> for <code>step</code> events; null otherwise</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>string</td>
+<td>sentinel</td>
+<td>free-text field</td>
+</tr>
+<tr>
+<td><code>delegated_to</code></td>
+<td>string｜null</td>
+<td>sentinel</td>
+<td>sidekick tier on delegation events; null otherwise</td>
+</tr>
+<tr>
+<td><code>parent_text</code></td>
+<td>string｜null</td>
+<td>orchestrator</td>
+<td>active milestone text a delegation hangs under; null otherwise</td>
+</tr>
+</tbody>
+</table>
+<p><code>spec_id</code>, <code>pipeline_step</code>, <code>agent</code>, <code>tier</code>, <code>parent_text</code> are injected by the orchestrator (it knows run context the dumb agent does not); <code>event</code>, <code>status</code>, <code>text</code>, <code>delegated_to</code> come from the parsed sentinel.</p>
+<p><strong>Vocabulary reconciliation (fixed a spec-internal drift):</strong> an earlier draft of this table used <code>milestone｜delegation｜delegation_reject</code> for the <code>event</code> field while OQ-1 (and <code>render.sh</code>, the shipped A-3/A-4/A-5 agent contracts, and <code>tests/agent-delegation.bats</code>) use <code>step｜deleg｜deleg_reject</code>. The <strong>canonical</strong> vocabulary is OQ-1's terse tokens; the persisted <code>event</code> field carries the sentinel event type <strong>verbatim</strong>, with no translation layer. Changed here — <code>milestone</code>→<code>step</code>, <code>delegation</code>→<code>deleg</code>, <code>delegation_reject</code>→<code>deleg_reject</code> (<code>phase</code>, <code>verdict</code>, <code>done</code> were already identical in both). Todo Step B-4's renderer-persist assertion is updated to <code>event=deleg</code> to match, so Track B's B-3 writer + B-4 renderer speak the one canonical vocab.</p>
+<h3 id="oq-3--per-agent-delegation-allowlists">OQ-3 — Per-agent delegation allowlists</h3>
+<p>Parent (Opus/Sonnet tier) <strong>always</strong> owns reasoning, test design/assertions, review, and the accept/reject decision, and <strong>vets sidekick output before accepting</strong>. Sidekick may only do:</p>
+<table>
+<thead>
+<tr>
+<th>Agent</th>
+<th>Delegatable to sidekick (mechanical)</th>
+<th>Parent keeps (reasoning)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tdd-developer</code></td>
+<td>scaffold impl/test file boilerplate from templates; apply formatter/linter/type-fix edits; generate fixtures, mocks &amp; stub data; mechanical find-replace / rename</td>
+<td>RED test <strong>assertions</strong>, logic, GREEN decisions, refactor choices</td>
+</tr>
+<tr>
+<td><code>qa</code></td>
+<td>scaffold throwaway probe skeletons; generate boundary-value input tables/fixtures; mechanical test-data generation</td>
+<td>what to probe, pass/fail judgment, security reasoning, the adversarial hunt</td>
+</tr>
+<tr>
+<td><code>architect</code></td>
+<td>scaffold spec/todo/ADR file skeletons from the standard section templates; generate boilerplate headers &amp; the status-checklist table</td>
+<td>the design, step decomposition, AC authoring, risk analysis</td>
+</tr>
+</tbody>
+</table>
+<p><code>reviewer</code> and <code>requirements-engineer</code> get <strong>no</strong> sidekick/<code>Task</code> grant (mostly reasoning — sidekick <strong>delegation</strong> for them is deferred). This is a <strong>delegation-scope</strong> limit only: both still <strong>narrate</strong> <code>phase</code>/<code>step</code>/<code>done</code>, and <code>reviewer</code> also emits <code>verdict</code>, via the same sentinel channel — with <strong>no</strong> <code>## Delegating to the sidekick</code> section and <strong>no</strong> <code>deleg</code>/<code>deleg_reject</code> events. See OQ-1's emission-scope matrix; taught in todo Step A-6.</p>
+<h3 id="oq-4--parent-review-gate-enforcement-decision-soft-contract-auditable">OQ-4 — Parent-review gate enforcement (decision: soft contract, auditable)</h3>
+<ul>
+<li><strong>MVP keeps the gate a soft, prompt-level behavioral contract</strong> — consistent with sibling unenforced rules already in the codebase (e.g. <code>architect.md:87-89</code> "Bash is READ-ONLY" has no tooling gate). No new hard tooling gate in MVP.</li>
+<li><strong>But it is observable/auditable via the sentinel channel:</strong> every <code>deleg</code> MUST be followed by the parent either (a) emitting a milestone narrating its review and accepting (<code>step|ok|Reviewed &amp; accepted sidekick output</code>) or (b) emitting <code>deleg_reject|&lt;tier&gt;|&lt;reason&gt;</code>. Both land in milestones.jsonl, so a human — or a future hard gate — can audit that every delegation was vetted.</li>
+<li><strong>Rendering already settled by the spike:</strong> accept → parent bullet finalized <code>[DELEGATED]</code> + <code>↳</code> nested line; reject → <code>❌ sidekick · &lt;tier&gt;: &lt;reason&gt;</code>.</li>
+<li><strong>Flagged for the user:</strong> hard enforcement (teaching the gate into the confidence-gate hook) is <strong>deferred</strong> and listed under Risks/Out of Scope; approve the soft-contract choice before build.</li>
+</ul>
+<h3 id="oq-5--renderer-details-spike-anchored">OQ-5 — Renderer details (spike-anchored)</h3>
+<ul>
+<li><strong>Replace, do not coexist:</strong> remove <code>spinner_start</code>/<code>spinner_stop</code> from the streamed <code>run_claude_agent</code> path; the renderer owns the single active-line spinner (<code>FINDINGS.md</code> "Spinner conflict — must replace, not coexist").</li>
+<li><strong>Ship the renderer as a standalone script</strong> <code>lib/render-stream.sh</code>, invoked as the downstream of the pipe (<code>claude … 2&gt;&amp;1 | bash "$_ANW_SCRIPT_DIR/lib/render-stream.sh" …</code>). Standalone keeps the renderer's own FIFO/ticker/EXIT-trap machinery isolated from the orchestrator's <code>enable_pipeline_error_trap</code> traps — a sourced function's EXIT trap would collide.</li>
+<li><strong><code>source lib/common.sh</code></strong> for colors/frames (byte-identical per spike); do not duplicate.</li>
+<li><strong>Tier colors:</strong> Opus = MAGENTA, Sonnet = CYAN, Haiku = GREEN, other = BOLD (from the spike's <code>tier_color</code>).</li>
+<li><strong>Nesting:</strong> single level only (no delegation-of-a-delegation). Documented constraint; sidekick has no <code>Task</code> tool, which structurally enforces it.</li>
+<li><strong>Non-TTY / piped:</strong> plain deterministic output, no ANSI, <code>run</code> steps buffered until finalized (spike-verified).</li>
+</ul>
+<h3 id="oq-6--sidekick-agent-definition">OQ-6 — Sidekick agent definition</h3>
+<ul>
+<li>New <code>agents/claude-code/sidekick.md</code>: <code>name: sidekick</code>, <code>model: haiku</code>. Installer needs <strong>zero</strong> changes (<code>install_global_agents</code> globs <code>agents/claude-code/*.md</code>, <code>lib/install-global.sh:601</code>).</li>
+<li><strong>Tools:</strong> <code>Read, Write, Edit, Glob, Grep</code> — <strong>no <code>Bash</code>, no <code>Task</code>.</strong> No Bash keeps it gate-safe (it can never run git/CI/migrations/deploys); no Task structurally prevents recursive delegation. Running formatters/linters (needs Bash) stays with the parent, which hands the sidekick the resulting edits to apply.</li>
+<li><strong>Prompt constraints:</strong> strictly mechanical; must not author test assertions, make design/logic decisions, or judge correctness; must return the artifact for parent review; must <strong>refuse and hand back</strong> if a task requires judgment.</li>
+<li><strong>Sentinels are emitted by the PARENT, not the sidekick.</strong> The sidekick runs <em>inside</em> the parent's Claude turn — its stdout is not separately piped to the orchestrator. The parent narrates the delegation by emitting the <code>deleg</code> / <code>deleg_reject</code> sentinel to its own stdout (which is the stream the orchestrator pipes).</li>
+</ul>
+<h3 id="oq-7--costquality-validation-decision-derive-from-jsonl">OQ-7 — Cost/quality validation (decision: derive from JSONL)</h3>
+<ul>
+<li><strong>Quality safety net</strong> = the parent-review gate (OQ-4) + the existing confidence gate (unchanged). Acceptance: on a delegated run the affected test suite stays green and the confidence verdict does not regress versus a non-delegated baseline of the same step.</li>
+<li><strong>Cost proxy</strong> = count of mechanical tasks shifted to Haiku, derived from milestones.jsonl by a new <code>scripts/milestones-summary.sh</code> reporting: total delegations, accept vs reject count, per-agent delegation counts. No dollar-cost measurement in MVP (deferred). This is a validation <em>approach</em>, not a hard metric.</li>
+</ul>
+<hr />
+<h2 id="acceptance-criteria-testable">Acceptance Criteria (testable)</h2>
+<ul>
+<li><strong>AC-1</strong> — Sentinel grammar frozen: a documented parser renders <code>phase｜step｜deleg｜deleg_reject｜ verdict｜done</code>; embedded <code>|</code> in a two-field event's free-text renders intact; a single-field <code>done</code> with an embedded <code>|</code> renders intact (spike regression preserved).</li>
+<li><strong>AC-2</strong> — Malformed sentinels (unknown event type, or a field-short <code>step</code>/<code>phase</code>/<code>deleg</code>/ <code>verdict</code>) are dropped from the live view rather than mis-rendered as <code>⏺ run</code>.</li>
+<li><strong>AC-3</strong> — <code>lib/render-stream.sh --plain</code> on a fixture stream is byte-identical to a committed golden file (non-TTY determinism).</li>
+<li><strong>AC-4</strong> — <code>append_milestone()</code> writes exactly one valid single-line JSON object per call to <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code> with the OQ-2 field set; N calls → N lines (append-only).</li>
+<li><strong>AC-5</strong> — The renderer, given orchestrator-injected <code>spec_id</code>/<code>pipeline_step</code>/<code>agent</code>/<code>tier</code>, persists each finalized event to milestones.jsonl with those injected fields correct.</li>
+<li><strong>AC-6</strong> — <code>run_claude_agent</code> streams live through the pipe; the agent's real exit code is propagated via <code>${PIPESTATUS[0]}</code> (not the renderer's); a non-zero agent exit still logs <code>AGENT_ERROR</code> and returns non-zero (today's error semantics preserved under <code>errexit</code>/<code>pipefail</code>).</li>
+<li><strong>AC-7</strong> — On the streamed path the generic <code>spinner_start</code>/<code>spinner_stop</code> no longer runs; no leftover spinner/feeder/ticker processes remain after a run (incl. abrupt agent death).</li>
+<li><strong>AC-8</strong> — Non-sentinel agent stdout is suppressed from the live view but captured to a debug log (closes the audit-gap the spike flagged).</li>
+<li><strong>AC-9</strong> — <code>sidekick.md</code> exists with <code>model: haiku</code> and tools exactly <code>Read, Write, Edit, Glob, Grep</code> (no <code>Bash</code>, no <code>Task</code>); the installer glob copies it with zero installer changes.</li>
+<li><strong>AC-10</strong> — <code>tdd-developer</code>, <code>qa</code>, <code>architect</code> each carry <code>Task</code> in <code>tools:</code> and a documented delegation allowlist + parent-review-gate + sentinel-emission contract in their bodies. (These are the delegating agents; full-pipeline narration + the <code>verdict</code> producer for the two non-delegating agents is AC-14.)</li>
+<li><strong>AC-11</strong> — A live <code>Task</code>→<code>sidekick</code> dispatch smoke test against the installed Claude CLI succeeds before any downstream step depends on delegation (GO/NO-GO gate).</li>
+<li><strong>AC-12</strong> — <code>scripts/milestones-summary.sh</code> on a fixture JSONL reports total delegations, accept/reject counts, and per-agent delegation counts.</li>
+<li><strong>AC-13</strong> — <code>sidekick.md</code>'s prompt BODY (OQ-6) contract enumerates five required, independently-testable clauses — mechanical-only allowlist (a closed set), refuse-if-judgment, forbidden-actions list, write-path scope (never <code>.git/</code> internals, CI/CD or workflow files, or secret/credential files outside what the parent explicitly named), and no-destructive-overwrite (never truncate/overwrite an existing file's contents unless the parent named that exact file and supplied the replacement content) — and each clause MUST be asserted by its own <strong>section-scoped</strong> test (extracting only the lines under that clause's <code>## </code> heading, per <code>tests/sidekick-agent.bats</code>'s <code>section()</code> helper) rather than a body-wide grep, so content in one section can never satisfy another section's assertion. Each such test is additionally proven <strong>mutation-resistant</strong>: a mutant with that section's content gutted (heading kept, body removed) from an otherwise-real copy of the file must fail the assertion.</li>
+<li><strong>AC-14</strong> — Full-pipeline emission (no dark phases; <code>verdict</code> has a producer): all five pipeline agents carry a sentinel-emission contract. <code>requirements-engineer</code> and <code>reviewer</code> each gain a <code>## Emitting milestone sentinels</code> section narrating <code>phase｜step｜done</code> (with <code>run｜ok｜fail</code> statuses), <strong>narration-only</strong> — neither gains a <code>## Delegating to the sidekick</code> section nor emits <code>deleg</code>/<code>deleg_reject</code> (delegation scope is unchanged per OQ-3). <code>qa</code> and <code>reviewer</code> additionally document + emit <code>verdict｜&lt;band&gt;｜&lt;score&gt;</code> (band ∈ <code>GREEN｜YELLOW｜RED</code>, band-before-score), matching <code>render.sh:259-271</code>; <code>architect</code> and <code>tdd-developer</code> do <strong>not</strong> document <code>verdict</code> (its producers are exactly <code>qa</code> + <code>reviewer</code>). Each new or extended sentinel section is asserted with the established <strong>section-scoped, mutation-resistant, field-order-anchored</strong> conventions (redaction anchored on the governing sentence; <code>! grep -F</code> literal-prefix collision guard extended to the two newly-narrating files). This <strong>deliberately reverses</strong> the earlier SDK-1 A-5 invariant that <code>reviewer</code>/<code>requirements-engineer</code> carry NO sentinel section.</li>
+</ul>
+<h2 id="technical-design">Technical Design</h2>
+<ul>
+<li><strong>New files:</strong> <code>agents/claude-code/sidekick.md</code>, <code>lib/render-stream.sh</code>, <code>lib/milestones.sh</code>, <code>scripts/milestones-summary.sh</code>, plus test fixtures/golden under <code>tests/fixtures/sdk-1/</code>.</li>
+<li><strong>Modified files:</strong> <code>lib/pipeline-core.sh</code> (<code>run_claude_agent</code> → streamed pipe; extract shared <code>run_agent_streamed</code>), <code>agents/claude-code/{tdd-developer,qa,architect}.md</code> (Task tool + contracts).</li>
+<li><strong>Streaming pipe (the crux, <code>run_claude_agent</code>):</strong> <code>claude … 2&gt;&amp;1 | tee "$debug_log" | bash "$RENDER" …</code> under <code>errexit</code>/<code>pipefail</code> — capture <code>${PIPESTATUS[0]}</code> as the agent exit code, preserve the <code>AGENT_ERROR</code> audit path and return code. Extract a shared <code>run_agent_streamed</code> helper so the deferred <code>run_copilot_agent</code> (<code>lib/pipeline-core.sh:183-223</code>, a near-duplicate) reuses it later.</li>
+<li><strong>Tier resolution:</strong> <code>agent_tier()</code> maps agent→tier (architect/qa=opus, tdd-developer/reviewer= sonnet, sidekick=haiku; unknown→default) so the orchestrator injects the correct <code>tier</code>.</li>
+</ul>
+<h2 id="risks">Risks</h2>
+<ul>
+<li><strong>R1 (highest) — <code>Task</code>→sidekick dispatch is UNVERIFIED in-repo.</strong> No agent uses <code>Task</code> today. Gate the whole delegation half behind the A-1 smoke test; if it fails, fall back to a narrated-only badge and defer real delegation. (<code>FINDINGS.md</code> sidekick notes.)</li>
+<li><strong>R2 — errexit/pipefail exit-code landmine.</strong> Converting to a pipe makes <code>$?</code> the renderer's code; a failing <code>claude</code> may already trip the global <code>ERR</code> trap before the old error block runs. Handle with <code>${PIPESTATUS[0]}</code> + explicit guarding; B-track builds this as an isolated behavior-preserving step first.</li>
+<li><strong>R3 — Parent-review gate is soft (unenforced).</strong> A misbehaving parent could accept bad sidekick output. Mitigated by auditability (OQ-4) + existing confidence gate; hard enforcement deferred.</li>
+<li><strong>R4 — Prefix collision</strong> if an agent prints literal <code>@@ANW|</code> example text. Mitigated by the redaction rule (OQ-1); residual risk accepted for MVP.</li>
+</ul>
+<h2 id="out-of-scope-deferred-fast-follows">Out of Scope (deferred fast-follows)</h2>
+<ul>
+<li>GitLab / <strong>Copilot</strong> pipeline + <code>run_copilot_agent</code> streaming (factor the shared helper now; wire later).</li>
+<li>Replay / status re-render from JSONL; Obsidian session-report embedding.</li>
+<li>Whitepaper figure from a real run (illustrative only — PAPER is a design whitepaper).</li>
+<li>Sidekick <strong>delegation</strong> for <code>reviewer</code> / <code>requirements-engineer</code> (they narrate <code>phase</code>/<code>step</code>/<code>done</code> and <code>reviewer</code> emits <code>verdict</code> per A-6, but hold no <code>Task</code>/sidekick grant — delegation for them stays deferred).</li>
+<li><strong>Hard</strong> enforcement of the parent-review gate (confidence-gate hook integration).</li>
+<li>Dollar-cost measurement; multi-level delegation nesting.</li>
+</ul>
+</content>
+</invoke>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

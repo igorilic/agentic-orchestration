@@ -81,6 +81,8 @@ confirm() {
 }
 
 valid_id() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { error "Not a ticket or feature id: '$1'"; return 1; }; }
+# An HTML spec or report as indented text: tags stripped, the common entities decoded, blank runs squeezed.
+show_doc() { sed -e 's/<[^>]*>//g' -e 's/&lt;/</g; s/&gt;/>/g; s/&quot;/"/g; s/&amp;/\&/g' -e 's/^[[:space:]]*$//' "$1" | cat -s | sed 's/^/    /'; }
 repo_root() {
   local root
   root="$(git rev-parse --show-toplevel 2>/dev/null)" || { error "Run pipelines inside a git repo"; return 1; }
@@ -103,7 +105,7 @@ start_branch() {  # <prefix> <id>: stay on a branch that already names the id, e
 # plan → your approval → one session per step → /check → pipeline_finish.
 pipeline_flow() {
   local pipeline="$1" tool="$2" id="$3" input="$4" prefix="$5" closes="$6"
-  local spec="$SPEC_DIR/$3.md" steps n DONE=""
+  local spec="$SPEC_DIR/$3.html" steps n DONE=""
   if [ "$(state_get PIPELINE)" = "$pipeline" ] && [ "$(state_get ID)" = "$id" ]; then DONE="$(state_get STAGE)"; fi
   RUN_DIR=".anw/runs/$id"; mkdir -p "$RUN_DIR" "$(dirname "$spec")"
   start_branch "$prefix" "$id"
@@ -116,13 +118,13 @@ pipeline_flow() {
       run_stage "$tool" plan plan "/plan $input — write the plan to $spec" || return 1
       [ -f "$spec" ] || { error "The plan stage wrote no $spec"; return 1; }
     fi
-    echo ""; sed 's/^/    /' "$spec"; echo ""
+    echo ""; show_doc "$spec"; echo ""
     confirm "Approve the plan in $spec?" || { info "Not approved. Edit or delete $spec, then: ai-native-workflow run resume"; return 0; }
     DONE=plan; save_state "$pipeline" "$id" "$DONE"
   fi
 
-  steps="$(grep -c '^### Step' "$spec" || true)"
-  [ "${steps:-0}" -gt 0 ] || { error "$spec has no '### Step' sections"; return 1; }
+  steps="$(grep -oE '<h3[^>]*>[[:space:]]*Step [0-9]+' "$spec" | grep -c . || true)"
+  [ "${steps:-0}" -gt 0 ] || { error "$spec has no <h3>Step n</h3> headings"; return 1; }
   for ((n = 1; n <= steps; n++)); do
     stage_done "step-$n" && continue
     run_stage "$tool" implement "step-$n" "Implement step $n of $spec, and only that step: write its test first and watch it fail, then the minimum code. Run ./.anw/verify, and commit (Conventional Commits) once it is green. If the step can't be done as written, stop and reply BLOCKED: <evidence>." || return 1

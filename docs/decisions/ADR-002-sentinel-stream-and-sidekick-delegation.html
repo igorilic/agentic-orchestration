@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>ADR-002 — Sentinel-stream live rendering + real sidekick delegation</title>
+<link rel="stylesheet" href="../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">ADR-002 — Sentinel-stream live rendering + real sidekick delegation</h1>
+<time class="sp-article__date" datetime="2026-10-08"><span class="sp-bar"></span><span style="margin-left:.75rem">October 8, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<ul>
+<li><strong>Status</strong>: Superseded by ADR-003 (2026-10-08). The custom agents, the sidekick and the sentinel protocol are gone; the pipeline renders Claude's own <code>stream-json</code> events.</li>
+<li><strong>Date</strong>: 2026-07-01</li>
+<li><strong>Related</strong>: <code>docs/context/specs/SDK-1-spec.html</code>, <code>docs/context/specs/SDK-1-brainstorm.html</code>, <code>spikes/sdk-1-renderer/FINDINGS.md</code></li>
+</ul>
+<h2 id="context">Context</h2>
+<p>SDK-1 adds (A) cheap-model "sidekick" delegation and (B) a live, agent-attributed pipeline transcript. Two structural forks needed a recorded decision because they change orchestrator behavior and introduce a new pipeline capability with no in-repo precedent:</p>
+<ol type="1">
+<li><strong>How agents communicate live progress to the orchestrator</strong>, given that <code>run_claude_agent</code> (<code>lib/pipeline-core.sh:225-264</code>) buffers all stdout to a temp file and only <code>cat</code>s it after the process exits — there is no live streaming today, and the generic <code>spinner_start</code> writes its own <code>\r</code>-driven frames independently.</li>
+<li><strong>How to render <code>DELEGATED TO SIDEKICK</code> for real</strong> when all 8 Claude agents lack the <code>Task</code> tool and there is no working in-repo precedent for parent→subagent dispatch.</li>
+</ol>
+<h2 id="decision">Decision</h2>
+<p><strong>Transport — dumb sentinels, orchestrator renders + persists.</strong> Agents print reserved <code>@@ANW|</code>-prefixed sentinel lines to stdout. <code>run_claude_agent</code> is restructured into a live pipe (<code>claude … 2&gt;&amp;1 | tee debug.log | render-stream</code>). The renderer (ported from the de-risked spike into <code>lib/render-stream.sh</code>) renders the flat indented stream live <strong>and</strong> appends orchestrator-authored events to <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code>. The orchestrator is the <strong>sole</strong> JSONL writer (it injects <code>spec_id</code>/<code>pipeline_step</code>/<code>agent</code>/<code>tier</code> that the dumb agent does not know); only confidence.jsonl's field/format conventions are reused, not its agent-side writer.</p>
+<ul>
+<li>Single-field sentinel events (<code>done</code>) use the raw post-event-type remainder, never the <code>f1</code>/<code>f2</code> split (spike-found bug). Two-field events keep embedded pipes in the free-text field (spike-verified).</li>
+<li>The generic <code>spinner_start</code>/<code>spinner_stop</code> is <strong>removed from the streamed path</strong>, not run alongside the renderer's active-line spinner — two independent <code>\r</code> timers corrupt the same line (<code>FINDINGS.md</code>).</li>
+<li>The pipe captures <code>${PIPESTATUS[0]}</code> as the agent's real exit code and preserves today's <code>AGENT_ERROR</code>/<code>AGENT_OK</code> audit + return-code semantics under <code>set -euo pipefail</code>.</li>
+</ul>
+<p><strong>Delegation — real Haiku sidekick, soft-enforced review gate.</strong> A new <code>agents/claude-code/sidekick.md</code> (<code>model: haiku</code>; tools <code>Read, Write, Edit, Glob, Grep</code> — no <code>Bash</code>, no <code>Task</code>) does strictly mechanical sub-work. <code>tdd-developer</code>, <code>qa</code>, <code>architect</code> gain <code>Task</code> + a per-agent allowlist. The parent always vets sidekick output before accepting; this gate stays a <strong>soft, auditable</strong> prompt contract for MVP (every delegation is followed by an accept milestone or a <code>deleg_reject</code>, both recorded in JSONL).</p>
+<h2 id="consequences">Consequences</h2>
+<p><strong>Positive</strong></p>
+<ul>
+<li>Live, curated, agent-attributed transcript with a replayable JSONL artifact for free.</li>
+<li>Real model-routing: mechanical work shifts to Haiku; frontier tiers keep reasoning.</li>
+<li>Renderer risk is already retired by the spike; the remaining work is integration.</li>
+<li>Shared <code>run_agent_streamed</code> helper positions <code>run_copilot_agent</code> for the same fix later.</li>
+</ul>
+<p><strong>Negative / Risks</strong></p>
+<ul>
+<li><code>Task</code>→sidekick dispatch is unverified in-repo → gated behind an early smoke test (todo A-1); fall back to a narrated-only badge if it fails.</li>
+<li>errexit/pipefail exit-code handling is easy to get silently wrong → built as an isolated behavior-preserving step (todo B-6) before the renderer is attached.</li>
+<li>The review gate is unenforced by tooling → mitigated by auditability + the existing confidence gate; hard enforcement deferred.</li>
+<li>Reserved-prefix collision if an agent prints literal <code>@@ANW|</code> text → mitigated by a redaction rule.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives Considered</h2>
+<ul>
+<li><strong>Parse raw tool-call telemetry instead of agent-emitted sentinels</strong> — rejected: noisy, not the curated bullet style the brainstorm chose; couples the renderer to CLI-internal formats.</li>
+<li><strong>Keep the generic spinner and add a second renderer spinner</strong> — rejected: two <code>\r</code> timers on one line corrupt the terminal (spike-proven).</li>
+<li><strong>Agent writes milestones.jsonl directly (like confidence.jsonl)</strong> — rejected: the agent cannot know <code>spec_id</code>/<code>pipeline_step</code>; the orchestrator must inject run context.</li>
+<li><strong>Fake the <code>DELEGATED</code> badge with no real delegation</strong> — rejected by the brainstorm; build the real capability the badge implies.</li>
+<li><strong>Hard-enforce the review gate in the confidence-gate hook now</strong> — deferred: no precedent, larger surface; soft+auditable is sufficient for MVP.</li>
+</ul>
+</content>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

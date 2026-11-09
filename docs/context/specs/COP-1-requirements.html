@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>COP-1 — Symmetric Copilot CLI harness for install global</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">COP-1 — Symmetric Copilot CLI harness for <code>install global</code></h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Status:</strong> Proposed (requirements only — awaiting architect) <strong>Date:</strong> 2026-05-02 <strong>Owner:</strong> requirements-engineer → architect <strong>Source:</strong> User request (this conversation), thread <code>ticket COP-1</code> <strong>Related:</strong></p>
+<ul>
+<li><code>ai-native-workflow install global</code> (script <code>ai-native-workflow</code>, <code>install_global</code> at L1659, <code>install_copilot_agents</code> at L3157)</li>
+<li><code>ai-native-workflow install project</code> (<code>install_project_copilot</code> at L3882)</li>
+</ul>
+<hr />
+<h2 id="1-goal">1. Goal</h2>
+<p><code>ai-native-workflow install global</code> currently installs a full harness for <strong>Claude Code</strong> (hooks, skills, agents, helper scripts, settings.json) but only installs <strong>agents</strong> for Copilot CLI. Bring the Copilot CLI side to parity by installing every Copilot-CLI-supported equivalent of the Claude primitives — and explicitly document every Claude primitive that has no Copilot equivalent so the gap is intentional, not accidental.</p>
+<p>The user-visible outcome: after <code>ai-native-workflow install global</code>, a fresh <code>copilot</code> interactive session has the same skills, agents, custom instructions, settings, and (where supported) lifecycle behavior as a fresh <code>claude</code> session.</p>
+<h2 id="2-capability-matrix--claude-code--copilot-cli">2. Capability matrix — Claude Code → Copilot CLI</h2>
+<p>This matrix is the load-bearing artifact. Every "N/A" row carries an explicit reason that the requirements lock in.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Claude Code primitive</th>
+<th>Copilot CLI equivalent</th>
+<th>Install location</th>
+<th>Status today</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>~/.claude/agents/*.md</code> (7 agents)</td>
+<td>Custom agents <code>.agent.md</code></td>
+<td><code>~/.copilot/agents/</code> (override: <code>$COPILOT_HOME/agents/</code>)</td>
+<td><strong>Already installed</strong> by <code>install_copilot_agents</code></td>
+<td>Keep as-is. Optionally extend frontmatter (<code>license</code>, <code>tools</code>) — see FR-7.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>~/.claude/skills/*/SKILL.md</code> (16 skills: tdd, ticket, plan, brainstorm, adr, pr, session-report, skip-tdd, override-confidence, security-review, k8s, kibana, app-insights, clusters, pipeline-github-feature, pipeline-gitlab-feature, pipeline-gitlab-incident)</td>
+<td>Agent skills <code>SKILL.md</code> (officially supported, identical frontmatter, same <code>/&lt;name&gt;</code> invocation)</td>
+<td><code>~/.copilot/skills/&lt;name&gt;/SKILL.md</code></td>
+<td><strong>Not installed</strong> by the CLI today (the skills present in the user's <code>~/.copilot/skills/</code> were placed there manually)</td>
+<td><strong>NEW:</strong> install all 16 skills. See FR-2.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>~/.claude/CLAUDE.md</code> (global instructions)</td>
+<td><code>copilot-instructions.md</code> at home root</td>
+<td><code>~/.copilot/copilot-instructions.md</code></td>
+<td><strong>Not installed</strong></td>
+<td><strong>NEW:</strong> install symmetric global instructions. See FR-3.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>~/.claude/settings.json</code> (hooks registration + Notification + user config)</td>
+<td><code>~/.copilot/settings.json</code> (no hooks key — Copilot CLI hooks are repo-scoped only; see row 5)</td>
+<td><code>~/.copilot/settings.json</code></td>
+<td><strong>Exists</strong> (hand-managed by user with <code>model</code>, <code>effortLevel</code>, <code>allowedUrls</code>)</td>
+<td><strong>NEW (limited):</strong> seed/merge a minimal <code>settings.json</code> only if absent; preserve user values. See FR-4 and the trim-down note in §6.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>~/.claude/hooks/{session-start.sh,tdd-gate.sh,confidence-gate.sh}</code> registered via <code>~/.claude/settings.json</code></td>
+<td>Hooks (<code>sessionStart</code>, <code>preToolUse</code>, <code>postToolUse</code>, <code>userPromptSubmitted</code>, <code>sessionEnd</code>, <code>errorOccurred</code>) — but <strong>scoped to the current working directory only</strong> via <code>.github/hooks/*.json</code></td>
+<td>repository-local <code>.github/hooks/copilot-cli-policy.json</code> (not <code>~/.copilot/</code>)</td>
+<td><strong>N/A for <code>install global</code></strong> — Copilot CLI does not expose a global/user-level hooks file.</td>
+<td><strong>No global install for hooks.</strong> Document this in caveats. Provide a project-level hooks installer instead under <code>install project</code> (out-of-scope for COP-1; track as follow-up COP-2). See §7 Open Questions.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>~/.claude/scripts/{confidence.sh,confidence-cli.sh}</code> (helpers called by hooks)</td>
+<td>Same shell scripts (Copilot CLI shells out to <code>bash</code>/<code>pwsh</code> from hook entries)</td>
+<td><code>~/.copilot/scripts/</code> (consistent symmetric path)</td>
+<td><strong>Not installed</strong></td>
+<td><strong>NEW (conditional):</strong> install scripts to <code>~/.copilot/scripts/</code> only if a project-level Copilot hooks installer ships them. If COP-2 ships, install. If we ship hooks-free, skip. See FR-6.</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>~/.claude/CLAUDE.md</code> per-project (different from global)</td>
+<td>Per-project <code>.github/copilot-instructions.md</code> + <code>.github/instructions/&lt;lang&gt;.instructions.md</code></td>
+<td>per-project</td>
+<td><strong>Already installed</strong> by <code>install_project_copilot</code> at L3882</td>
+<td>Out of scope for COP-1 (this is <code>install project</code>, not <code>install global</code>).</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Notifications hook (osascript on attention required)</td>
+<td><code>beep: true</code> in <code>settings.json</code> (Copilot CLI built-in attention notification)</td>
+<td>N/A — built-in</td>
+<td><strong>N/A</strong> — handled by Copilot CLI itself, no hook needed</td>
+<td>No install needed. Optionally seed <code>beep: true</code> in FR-4.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="three-findings-that-shape-this-matrix">Three findings that shape this matrix</h3>
+<ol type="1">
+<li><strong>Hooks are repo-scoped, not user-scoped, in Copilot CLI.</strong> Confirmed by the official "Using hooks with Copilot CLI" tutorial: hook config files live at <code>.github/hooks/*.json</code> in the repository's working directory, not under <code>~/.copilot/</code>. There is no documented user-global hooks file. This means our Claude-side <code>tdd-gate.sh</code> and <code>confidence-gate.sh</code> — which today are registered globally via <code>~/.claude/settings.json</code> — cannot be globally registered for Copilot CLI. They can only be installed per-project (a future <code>install project</code> extension).</li>
+<li><strong>Skills are first-class in Copilot CLI</strong> with the same <code>SKILL.md</code> + YAML-frontmatter format as Claude Code, the same directory layout (<code>~/.copilot/skills/&lt;name&gt;/SKILL.md</code>), and the same <code>/&lt;name&gt;</code> slash- invocation. This is the cleanest 1:1 mapping in the matrix and is where most of the new install work lives.</li>
+<li><strong>Global instructions exist</strong> at <code>$HOME/.copilot/copilot-instructions.md</code> (officially documented). This is the direct analog to <code>~/.claude/CLAUDE.md</code>.</li>
+</ol>
+<h2 id="3-functional-requirements">3. Functional Requirements</h2>
+<h3 id="fr-1--preserve-existing-copilot-agent-install">FR-1 — Preserve existing Copilot agent install</h3>
+<p>The current behavior of <code>install_copilot_agents</code> (writing 7 <code>.agent.md</code> files to <code>$COPILOT_HOME/agents/</code>, default <code>~/.copilot/agents/</code>) MUST remain unchanged. Re-running the installer MUST timestamp-backup any existing <code>.agent.md</code> files using the existing <code>backup_if_exists</code> helper.</p>
+<h3 id="fr-2--install-copilot-cli-skills-new">FR-2 — Install Copilot CLI skills (NEW)</h3>
+<p>The installer MUST write a <code>SKILL.md</code> for every skill that Claude Code gets to <code>$COPILOT_HOME/skills/&lt;skill-name&gt;/SKILL.md</code>. Required skills: <code>tdd</code>, <code>ticket</code>, <code>plan</code>, <code>brainstorm</code>, <code>adr</code>, <code>pr</code>, <code>session-report</code>, <code>skip-tdd</code>, <code>override-confidence</code>, <code>security-review</code>, <code>k8s</code>, <code>kibana</code>, <code>app-insights</code>, <code>clusters</code>, <code>pipeline-github-feature</code>, <code>pipeline-gitlab-feature</code>, <code>pipeline-gitlab-incident</code> (full set as present in <code>skills/</code> in the repo at install time).</p>
+<p>The skill content for Copilot CLI MAY be identical to the Claude Code content where the skill is platform-agnostic (TDD workflow, ticket-to-spec flow, ADR template). For pipeline skills that mention <code>claude --agent=...</code> the Copilot variant MUST substitute <code>copilot --agent=...</code> so the hand-off lines work in a Copilot session.</p>
+<p>Each <code>SKILL.md</code> MUST have YAML frontmatter with the required <code>name</code> and <code>description</code> fields. Optional <code>license</code> and <code>allowed-tools</code> fields MAY be added (decision deferred to architect — see Open Question OQ-3).</p>
+<h3 id="fr-3--install-global-copilot-instructions-new">FR-3 — Install global Copilot instructions (NEW)</h3>
+<p>The installer MUST write <code>$COPILOT_HOME/copilot-instructions.md</code> with content semantically equivalent to <code>~/.claude/CLAUDE.md</code>. The two files SHOULD share the same source-of-truth template so they cannot drift. The Copilot variant MUST replace <code>Claude Code</code>-specific phrasing (e.g., "Claude Code session", <code>~/.claude/</code>, <code>/&lt;skill&gt;</code> examples that say "Claude") with neutral or Copilot-specific phrasing.</p>
+<p>If <code>$COPILOT_HOME/copilot-instructions.md</code> already exists, the installer MUST timestamp-backup it before overwriting (same rule as <code>~/.claude/CLAUDE.md</code>).</p>
+<h3 id="fr-4--seed-copilot-settingsjson-safely-new-conservative">FR-4 — Seed Copilot settings.json safely (NEW, conservative)</h3>
+<p>The installer MUST NOT overwrite <code>$COPILOT_HOME/settings.json</code> if it already exists with non-default user keys (e.g., <code>model</code>, <code>effortLevel</code>, <code>allowedUrls</code>).</p>
+<p>When <code>$COPILOT_HOME/settings.json</code> is absent:</p>
+<ul>
+<li>Write a minimal default with <code>{"renderMarkdown": true, "theme": "auto"}</code>.</li>
+<li>DO NOT seed <code>model</code> (let Copilot pick its default; the user can override).</li>
+<li>DO NOT seed <code>allowedUrls</code> (user-specific).</li>
+</ul>
+<p>When it exists:</p>
+<ul>
+<li>Use <code>jq</code> to merge in only keys that are missing (additive merge, no overwrite of existing values), guarded by <code>command -v jq</code>.</li>
+<li>If <code>jq</code> is absent, leave the file alone and warn (mirrors the existing Claude <code>install_global_settings</code> jq-absent fallback).</li>
+</ul>
+<p>Note: <code>settings.json</code> does NOT carry hooks — hooks for Copilot CLI live in <code>.github/hooks/*.json</code> per repo. Do not attempt to write a <code>hooks</code> key to <code>~/.copilot/settings.json</code>.</p>
+<h3 id="fr-5--graceful-handling-when-copilot-cli-is-not-installed">FR-5 — Graceful handling when Copilot CLI is not installed</h3>
+<p>The installer MUST keep its current behavior of skipping the entire Copilot section when <code>command -v copilot</code> returns non-zero, logging a single dim line <code>"Copilot CLI not found — skipping Copilot installation"</code> and an install hint. The user MUST still see a successful Claude-side install when Copilot CLI is absent. Exit code MUST remain 0.</p>
+<h3 id="fr-6--helper-scripts-directory-conditional">FR-6 — Helper scripts directory (CONDITIONAL)</h3>
+<p>If and only if the architect decides to ship a project-level Copilot hooks installer in COP-1 (currently scoped OUT, see §6), the installer MUST also copy <code>confidence.sh</code> and <code>confidence-cli.sh</code> to <code>$COPILOT_HOME/scripts/</code> so future repo-level hook scripts can reference them via <code>bash ~/.copilot/scripts/...</code>. If COP-2 takes hooks instead, this requirement deactivates.</p>
+<p>Default decision for COP-1: <strong>skip helper scripts</strong> (no hooks → no helpers needed yet).</p>
+<h3 id="fr-7--agent-frontmatter-alignment-with-copilot-cli-conventions">FR-7 — Agent frontmatter alignment with Copilot CLI conventions</h3>
+<p>The 7 agent files written by <code>install_copilot_agents</code> SHOULD be reviewed against the official Copilot CLI custom-agent docs and extended with optional frontmatter fields (<code>tools</code> allowlist) where it clarifies intent — e.g., the <code>architect</code> agent already has prose saying "Shell access is for READ-ONLY context fetching only", which can be expressed as <code>tools: [read, search, shell(git:*), shell(gh:*)]</code> (exact syntax to be confirmed by architect via Copilot docs).</p>
+<p>This is a soft requirement: existing files work; this is polish.</p>
+<h3 id="fr-8--idempotency-and-backup-parity-with-claude-side">FR-8 — Idempotency and backup parity with Claude side</h3>
+<p>Every file the installer writes to <code>~/.copilot/</code> MUST go through the same <code>backup_if_exists</code> path that the Claude side uses (timestamp suffix <code>.bak.YYYYMMDDHHMMSS</code>). Re-running <code>install global</code> twice in a row MUST produce identical end state and one backup per write per run.</p>
+<h3 id="fr-9--status-command-coverage">FR-9 — Status command coverage</h3>
+<p><code>ai-native-workflow status</code> (the existing diagnostics command at L4088) MUST be extended to verify the new files: <code>~/.copilot/skills/&lt;each&gt;/SKILL.md</code>, <code>~/.copilot/copilot-instructions.md</code>, and <code>~/.copilot/settings.json</code> (presence only, no value check). Missing files render as ✗, present as ✓. This MUST follow the existing <code>check_file</code> pattern (no new logic).</p>
+<h3 id="fr-10--caveats-output">FR-10 — Caveats output</h3>
+<p><code>install_global</code> MUST print a closing block listing every Copilot target it touched, plus an explicit one-line statement that hooks were NOT installed globally because Copilot CLI scopes hooks per-repo, with a forward reference (<code>run install project for repo-scoped Copilot hooks</code>, gated on COP-2 shipping).</p>
+<h2 id="4-non-functional-requirements">4. Non-Functional Requirements</h2>
+<h3 id="nfr-1--honor-copilot_home">NFR-1 — Honor <code>COPILOT_HOME</code></h3>
+<p>Every read/write MUST go through <code>COPILOT_DIR="${COPILOT_HOME:-$HOME/.copilot}"</code>, matching the existing pattern in <code>install_copilot_agents</code> (L3165) and the <code>caveats</code> block in the brew formula. Sandboxed <code>COPILOT_HOME=/tmp/foo</code> installs MUST work identically.</p>
+<h3 id="nfr-2--idempotent">NFR-2 — Idempotent</h3>
+<p>Two consecutive <code>install global</code> runs MUST converge to the same final state. Each run MUST produce at most one backup per file.</p>
+<h3 id="nfr-3--bash-4-compatibility">NFR-3 — Bash 4 compatibility</h3>
+<p>The installer must continue to run under brew's bash 5 and any system bash &gt;= 4.0 (no bash 3 features required, no zsh-only constructs). The existing shebang patching in the brew formula handles this.</p>
+<h3 id="nfr-4--no-new-external-dependencies">NFR-4 — No new external dependencies</h3>
+<p>The Copilot harness install MUST NOT require any tool not already declared by the brew formula (<code>bash</code>, <code>jq</code>; <code>gh</code>/<code>glab</code> recommended).</p>
+<h3 id="nfr-5--performance">NFR-5 — Performance</h3>
+<p>The full <code>install global</code> (Claude + Copilot harness) MUST complete in under 5 seconds on a warm filesystem. Skill content is small heredocs; this should be trivially met.</p>
+<h3 id="nfr-6--test-coverage">NFR-6 — Test coverage</h3>
+<p>New install logic MUST have bats tests under <code>tests/</code> mirroring the existing patterns (<code>install-global.bats</code>, etc.). Required cases: fresh install, re-install (idempotency), <code>COPILOT_HOME</code> override, Copilot CLI absent, partial existing state (some files exist, some don't).</p>
+<h2 id="5-acceptance-criteria">5. Acceptance Criteria</h2>
+<p>Each AC is testable in isolation. Format: Given / When / Then.</p>
+<h3 id="ac-1--skills-install">AC-1 — Skills install</h3>
+<p><strong>Given</strong> a clean <code>$COPILOT_HOME</code> (or <code>~/.copilot/</code>) and Copilot CLI is on PATH, <strong>When</strong> the user runs <code>ai-native-workflow install global</code>, <strong>Then</strong> every skill present in the repo's <code>skills/&lt;name&gt;/SKILL.md</code> source MUST exist at <code>$COPILOT_HOME/skills/&lt;name&gt;/SKILL.md</code> with matching content (or Copilot-adapted content for pipeline skills), AND <code>copilot --help</code>'s <code>/skills list</code> (when run interactively) lists each one.</p>
+<h3 id="ac-2--global-instructions-installed">AC-2 — Global instructions installed</h3>
+<p><strong>Given</strong> a clean <code>$COPILOT_HOME</code>, <strong>When</strong> the user runs <code>ai-native-workflow install global</code>, <strong>Then</strong> <code>$COPILOT_HOME/copilot-instructions.md</code> exists, is non-empty, and contains the skill list, agent pipeline description, and stack detection table from <code>~/.claude/CLAUDE.md</code> (semantic equivalence).</p>
+<h3 id="ac-3--settingsjson-preserved">AC-3 — Settings.json preserved</h3>
+<p><strong>Given</strong> an existing <code>$COPILOT_HOME/settings.json</code> containing <code>{"model": "claude-opus-4.6", "effortLevel": "high"}</code>, <strong>When</strong> the user runs <code>ai-native-workflow install global</code>, <strong>Then</strong> the file STILL contains those two keys with their values unchanged afterward, AND a single <code>.bak.&lt;timestamp&gt;</code> exists alongside.</p>
+<h3 id="ac-4--settingsjson-fresh-install">AC-4 — Settings.json fresh install</h3>
+<p><strong>Given</strong> no <code>$COPILOT_HOME/settings.json</code>, <strong>When</strong> the user runs <code>ai-native-workflow install global</code>, <strong>Then</strong> <code>$COPILOT_HOME/settings.json</code> exists, parses as valid JSON, contains <code>renderMarkdown: true</code>, and does NOT contain a <code>hooks</code> key.</p>
+<h3 id="ac-5--idempotent-re-run">AC-5 — Idempotent re-run</h3>
+<p><strong>Given</strong> <code>install global</code> has been run once, <strong>When</strong> the user runs <code>install global</code> again, <strong>Then</strong> every file under <code>$COPILOT_HOME/</code> matches its repo-source content byte-for-byte, AND exactly one new <code>.bak.&lt;timestamp&gt;</code> per written file exists from the second run.</p>
+<h3 id="ac-6--copilot-cli-absent">AC-6 — Copilot CLI absent</h3>
+<p><strong>Given</strong> <code>command -v copilot</code> returns non-zero, <strong>When</strong> the user runs <code>ai-native-workflow install global</code>, <strong>Then</strong> the command exits 0, prints <code>"Copilot CLI not found — skipping Copilot installation"</code>, leaves <code>$COPILOT_HOME/</code> untouched, AND completes the Claude side normally.</p>
+<h3 id="ac-7--copilot_home-override">AC-7 — <code>COPILOT_HOME</code> override</h3>
+<p><strong>Given</strong> <code>COPILOT_HOME=/tmp/cop-test</code> and Copilot CLI on PATH, <strong>When</strong> the user runs <code>COPILOT_HOME=/tmp/cop-test ai-native-workflow install global</code>, <strong>Then</strong> all new artifacts are written under <code>/tmp/cop-test/</code> and <code>~/.copilot/</code> is untouched.</p>
+<h3 id="ac-8--status-command-reflects-the-new-state">AC-8 — Status command reflects the new state</h3>
+<p><strong>Given</strong> a successful <code>install global</code> run, <strong>When</strong> the user runs <code>ai-native-workflow status</code>, <strong>Then</strong> the Copilot CLI section lists each skill, the global instructions file, and <code>settings.json</code> with ✓ markers.</p>
+<h3 id="ac-9--no-global-hooks-claim">AC-9 — No global hooks claim</h3>
+<p><strong>Given</strong> a successful <code>install global</code> run, <strong>When</strong> the user inspects <code>$COPILOT_HOME/</code>, <strong>Then</strong> there is no <code>hooks/</code> directory, no <code>hooks</code> key in <code>settings.json</code>, and no <code>.github/hooks/</code> artifact (those would be project-scope and out of <code>install global</code>'s remit).</p>
+<h3 id="ac-10--caveat-printed">AC-10 — Caveat printed</h3>
+<p><strong>Given</strong> Copilot CLI is on PATH, <strong>When</strong> <code>install global</code> finishes, <strong>Then</strong> the closing output contains a one-line note that global Copilot hooks are not supported by Copilot CLI and hooks are project-scoped (visible to the user even if they don't read docs).</p>
+<h2 id="6-constraints--out-of-scope">6. Constraints &amp; Out-of-Scope</h2>
+<h3 id="constraints">Constraints</h3>
+<ul>
+<li>C-1: Cannot install Copilot CLI itself; the user is responsible.</li>
+<li>C-2: Cannot register hooks at the user/global scope (Copilot CLI product limitation as of 2026-05). Repo-scope hooks via <code>.github/hooks/*.json</code> are out of scope for <code>install global</code>.</li>
+<li>C-3: Skill content is shipped as bash heredocs in <code>ai-native-workflow</code> (matches the existing pattern). Skills are NOT copied from the repo's <code>skills/</code> source dir at runtime — they are re-emitted from heredocs. Architect MUST decide whether to refactor to "copy from <code>$_ANW_SCRIPT_DIR/skills/&lt;name&gt;/SKILL.md</code>" or keep parallel heredocs (see OQ-1).</li>
+<li>C-4: All new behavior must be backward-compatible: existing users re-running <code>install global</code> must not lose their hand-managed <code>~/.copilot/settings.json</code> keys.</li>
+</ul>
+<h3 id="out-of-scope-explicit">Out of scope (explicit)</h3>
+<ul>
+<li>OOS-1: <strong>Project-level Copilot hooks installer.</strong> Track as follow-up spec <strong>COP-2</strong> (scope: extend <code>install project</code> to write <code>.github/hooks/copilot-cli-policy.json</code> referencing <code>confidence-gate.sh</code> and <code>tdd-gate.sh</code>, plus install those scripts to a per-repo <code>.github/hooks/scripts/</code> dir or to <code>~/.copilot/scripts/</code> if FR-6 activates).</li>
+<li>OOS-2: <strong>MCP server config</strong> (<code>~/.copilot/mcp-config.json</code>). Out of scope. The user manages this manually today; symmetric MCP install is a separate concern (Claude side doesn't fully solve this either).</li>
+<li>OOS-3: <strong>Authentication / <code>copilot login</code>.</strong> Out of scope.</li>
+<li>OOS-4: <strong>Plugins (<code>/plugin</code>).</strong> Out of scope; experimental surface on Copilot CLI side.</li>
+<li>OOS-5: <strong>Per-stack Copilot instructions globally</strong> (analog of <code>.github/instructions/&lt;lang&gt;.instructions.md</code>, but global). Copilot CLI does not document a global per-stack mechanism; covered today per-project by <code>install project</code>.</li>
+</ul>
+<h2 id="7-open-questions--blockers">7. Open Questions / Blockers</h2>
+<p>These need a decision before architect can lock the spec. Tag them <code>f</code>/<code>t</code>/<code>i</code> per the user's per-item triage convention (or just answer).</p>
+<h3 id="oq-1--skill-content-source-heredoc-or-copy">OQ-1 — Skill content source: heredoc or copy?</h3>
+<p>The existing Claude install emits skill SKILL.md as bash heredocs. The Copilot install of skills can either:</p>
+<ul>
+<li><strong>(a)</strong> Add new heredocs (parallel to Claude — same content duplicated twice in the script). Pros: keeps the script self-contained, matches existing pattern. Cons: drift risk, doubles the script size.</li>
+<li><strong>(b)</strong> <code>cp</code> from <code>$_ANW_SCRIPT_DIR/skills/&lt;name&gt;/SKILL.md</code> (single source of truth, repo's <code>skills/</code> directory). Pros: no duplication. Cons: changes the existing pattern. Brew installs to <code>libexec/skills</code> (already done — see formula L36 <code>libexec.install Dir["skills", ...]</code>).</li>
+<li><strong>(c)</strong> Refactor BOTH Claude and Copilot to use approach (b) (riskier but cleanest).</li>
+</ul>
+<p>Architect to decide. Default if undecided: <strong>(b)</strong> — content is already in <code>libexec/skills/</code> thanks to the brew formula, and the new install function can <code>cp -R</code> from there. Pipeline skills that need <code>copilot --agent=</code> substitution can use a <code>sed -i.bak</code> post-copy.</p>
+<h3 id="oq-2--are-copilot-side-skill-triggers-compatible-with-copilots-slash-skill-model">OQ-2 — Are Copilot-side skill triggers compatible with Copilot's slash-skill model?</h3>
+<p>Claude Code's <code>description: triggers on:</code> field is informal — both agents and skills can be triggered by description matching. Copilot CLI's documented invocation is <code>/&lt;skill-name&gt;</code>. Verify that <code>description</code> text in SKILL.md is purely advisory on Copilot side and won't cause auto-loading semantics surprise. Default assumption: identical behavior to Claude. Architect to verify with a quick <code>copilot --help</code> smoke test.</p>
+<h3 id="oq-3--should-we-add-allowed-tools-to-skills">OQ-3 — Should we add <code>allowed-tools</code> to skills?</h3>
+<p>Optional <code>allowed-tools</code> field skips per-tool confirmation prompts on Copilot CLI. Adding <code>allowed-tools: [bash, read, write]</code> to <code>tdd</code> skill would let the workflow run smoother under default permissions. Trade-off: pre-approves tools without the user opting in.</p>
+<p>Default if undecided: <strong>do not add</strong> (conservative — let the user opt-in via <code>--allow-tool</code> flags or <code>/permissions</code> interactive toggles).</p>
+<h3 id="oq-4--should-install-global-recommend-copilot-init-for-the-users-open-repos">OQ-4 — Should <code>install global</code> recommend <code>copilot init</code> for the user's open repos?</h3>
+<p>The user has 20+ trusted folders in <code>~/.copilot/config.json</code>. None of them currently have <code>.github/copilot-instructions.md</code> written by the CLI's <code>install project</code>. Should <code>install global</code>'s caveats nudge the user to run <code>install project</code> in their main repos? Default: <strong>yes, single line in caveats</strong>.</p>
+<h3 id="oq-5--does-the-user-want-the-copilot-symmetric-harness-to-include">OQ-5 — Does the user want the Copilot symmetric harness to include</h3>
+<p>the same Notification mechanism (osascript)? Claude's <code>install_global_settings</code> writes a <code>Notification</code> hook that runs <code>osascript -e 'display notification ...'</code>. Copilot CLI has a built-in <code>beep: true</code> setting. They are not equivalent (beep is audio only; osascript is a macOS notification banner). Should we set <code>beep: true</code> in the seeded settings.json?</p>
+<p>Default: <strong>yes, seed <code>beep: true</code> in the fresh-install path</strong> of FR-4. Skip in the merge path (don't override user's choice).</p>
+<h3 id="oq-6--versioning-the-harness-install">OQ-6 — Versioning the harness install</h3>
+<p>The Claude side prints <code>"Installing AI-native workflow (v${VERSION})"</code> and runs through to a single completion banner. Should the Copilot section have its own sub-header, or roll into the same one? Default: <strong>one banner, two sub-sections</strong> (one for Claude, one for Copilot, each with its own ✓ list). Mirrors existing <code>install_copilot_agents</code> which already prints its own sub-header.</p>
+<h2 id="8-assumptions">8. Assumptions</h2>
+<ul>
+<li>A-1: Copilot CLI version installed on the user's machine supports agent skills (introduced 2025-12 per the GitHub Changelog). The installer does NOT need to detect the Copilot CLI version; if a user has an older Copilot, skills will simply not be loaded — no install error. Document in caveats.</li>
+<li>A-2: User's existing <code>~/.copilot/skills/</code> directory was populated by hand and SHOULD be backed up by the installer's <code>backup_if_exists</code> path (which matches our user's stated install — see the contents listed in §3 of the user's request). The installer must not delete user-authored skills; only the named set in FR-2 are written.</li>
+<li>A-3: <code>copilot --agent=&lt;name&gt;</code> invocation syntax is stable (already used in agent hand-off lines of installed agents).</li>
+<li>A-4: <code>~/.copilot/copilot-instructions.md</code> is loaded automatically by <code>copilot</code> interactive sessions (per docs). No registration needed.</li>
+</ul>
+<h2 id="9-test-plan-outline">9. Test Plan Outline</h2>
+<p>For the <code>qa</code> agent and bats test suite. Each row maps to one bats <code>@test</code>.</p>
+<h3 id="unit--install-behavior">Unit / install behavior</h3>
+<ul>
+<li>T-1: AC-1 — fresh install creates every expected SKILL.md with valid YAML frontmatter (parse with <code>yq</code> or grep for <code>^name:</code> and <code>^description:</code>).</li>
+<li>T-2: AC-2 — <code>copilot-instructions.md</code> present and contains expected marker strings (skill list, agent pipeline names).</li>
+<li>T-3: AC-3 — settings.json merge preserves user keys (seed file with <code>model</code>+<code>effortLevel</code>, run installer, assert keys still present).</li>
+<li>T-4: AC-4 — settings.json fresh install produces valid JSON with <code>renderMarkdown: true</code> and no <code>hooks</code> key.</li>
+<li>T-5: AC-5 — idempotency: run installer twice; assert exactly N backups (one per file) and final content matches source.</li>
+<li>T-6: AC-6 — Copilot absent: stub <code>command -v copilot</code> to fail (prepend a temp dir to <code>PATH</code> with no <code>copilot</code> shim); assert exit code 0 and <code>~/.copilot/</code> untouched.</li>
+<li>T-7: AC-7 — <code>COPILOT_HOME=/tmp/cop-test</code> redirects all writes.</li>
+<li>T-8: AC-9 — assert no <code>hooks/</code> dir or <code>hooks</code> JSON key after install.</li>
+</ul>
+<h3 id="integration">Integration</h3>
+<ul>
+<li>T-9: end-to-end after <code>install global</code>, run <code>copilot -p "/skills list" --allow-all-tools</code> (gated on Copilot CLI being present in CI; skip test otherwise) and assert all installed skill names appear.</li>
+<li>T-10: <code>ai-native-workflow status</code> post-install lists ✓ for every new Copilot artifact (AC-8).</li>
+</ul>
+<h3 id="edge--negative">Edge / negative</h3>
+<ul>
+<li>T-11: User has hand-edited <code>~/.copilot/skills/&lt;name&gt;/SKILL.md</code> with custom content; installer overwrites it but creates a <code>.bak.*</code>. The test asserts: backup exists with old content, file has new content.</li>
+<li>T-12: <code>jq</code> absent during settings.json merge — assert installer warns and does NOT corrupt the file.</li>
+<li>T-13: <code>$COPILOT_HOME</code> points to a path requiring <code>mkdir -p</code> (deep nested) — assert success.</li>
+</ul>
+<h2 id="10-references">10. References</h2>
+<ul>
+<li><a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-skills">GitHub Copilot CLI — Adding agent skills</a></li>
+<li><a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli">GitHub Copilot CLI — Creating and using custom agents</a></li>
+<li><a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions">GitHub Copilot CLI — Adding custom instructions</a></li>
+<li><a href="https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/use-hooks">GitHub Copilot CLI — Using hooks</a></li>
+<li><a href="https://docs.github.com/en/copilot/reference/hooks-configuration">GitHub Copilot CLI — Hooks configuration reference</a></li>
+<li><a href="https://docs.github.com/en/copilot/tutorials/copilot-cli-hooks">GitHub Copilot CLI — Hooks tutorial (repo-scope confirmation)</a></li>
+<li><a href="https://github.blog/changelog/2025-12-18-github-copilot-now-supports-agent-skills/">GitHub Changelog — Copilot now supports Agent Skills (2025-12-18)</a></li>
+<li><a href="https://docs.github.com/en/copilot/concepts/agents/about-agent-skills">About agent skills (concepts)</a></li>
+<li>Local: <code>ai-native-workflow</code> lines 1659–1691 (<code>install_global</code>), 3157–3459 (<code>install_copilot_agents</code>), 3882–3923 (<code>install_project_copilot</code>), 4088–4108 (<code>status</code> Copilot section).</li>
+<li>Local: brew formula <code>Formula/ai-native-workflow.rb</code> (caveats block documents <code>COPILOT_HOME</code>).</li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

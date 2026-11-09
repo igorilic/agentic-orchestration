@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Confidence Gate — Design Spec</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">Confidence Gate — Design Spec</h1>
+<time class="sp-article__date" datetime="2026-05-03"><span class="sp-bar"></span><span style="margin-left:.75rem">May 3, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Date:</strong> 2026-05-02 <strong>Status:</strong> Approved (brainstorming) — pending implementation plan <strong>Author:</strong> Brainstorming session with Igor</p>
+<h2 id="summary">Summary</h2>
+<p>Add a deterministic confidence verdict to the <code>tdd-developer → qa → reviewer</code> pipeline. Each step emits structured receipts as events in a per-spec append-only log; a shell script computes a score and band (GREEN / YELLOW / RED) from those events; a <code>PreToolUse</code> hook on <code>gh pr create</code> / <code>glab mr create</code> enforces the gate. The verdict surfaces as both a number (0–100) and a band, so users can read it descriptively or numerically.</p>
+<p>This spec covers v1: hardcoded rubric, single-spec scope, shell-only implementation.</p>
+<h2 id="goals">Goals</h2>
+<ul>
+<li>Provide a defensible, reproducible signal of "did the pipeline actually deliver against the spec?"</li>
+<li>Block PR/MR creation when the pipeline produces unsafe output (broken tests, must-fix bugs, missing acceptance criteria).</li>
+<li>Surface the verdict numerically (e.g. <code>87/100</code>) and descriptively (<code>GREEN</code>).</li>
+<li>Stay consistent with existing repo conventions: shell-only, hook-enforced, file-based audit trail.</li>
+<li>Co-locate confidence artifacts with the rest of a spec's working state under <code>.context/specs/</code>.</li>
+</ul>
+<h2 id="non-goals-v1">Non-goals (v1)</h2>
+<ul>
+<li>Per-org configurable weights or thresholds.</li>
+<li>Test-coverage-delta as a signal (dropped — too noisy across stacks).</li>
+<li>Cross-spec trend analysis or dashboards.</li>
+<li>Auto-loop-on-RED retry (conflicts with reviewer's 3-loop cap).</li>
+<li>Confidence verdicts for the <code>explorer</code> / <code>spikes/</code> track (no merge there).</li>
+</ul>
+<h2 id="architecture">Architecture</h2>
+<h3 id="new-files">New files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scripts/confidence.sh</code></td>
+<td>Pure deterministic scorer. Reads a per-spec jsonl event log, computes hard gates + scored penalties, prints <code>{band, score, gates, penalties, verdict_text}</code> as JSON. Bash + <code>jq</code>, ~80 lines.</td>
+</tr>
+<tr>
+<td><code>hooks/confidence-gate.sh</code></td>
+<td><code>PreToolUse</code> hook on <code>Bash</code> calls matching <code>gh pr create*</code> and <code>glab mr create*</code>. Resolves spec id from current branch/state, runs <code>confidence.sh</code>, exits 2 on RED unless an override is present.</td>
+</tr>
+<tr>
+<td><code>skills/override-confidence/SKILL.md</code></td>
+<td><code>/override-confidence "&lt;reason&gt;"</code> skill. Mirrors <code>/skip-tdd</code>. Writes a one-shot bypass marker; refuses empty/boilerplate reasons.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="modified-files">Modified files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agents/claude-code/architect.md</code> + <code>agents/copilot-cli/architect.agent.md</code></td>
+<td>After producing the spec, append a <code>spec</code> event to <code>.context/specs/&lt;id&gt;-confidence.jsonl</code> listing the canonical AC items.</td>
+</tr>
+<tr>
+<td><code>agents/claude-code/qa.md</code> + <code>agents/copilot-cli/qa.agent.md</code></td>
+<td>After running tests for a step, append a <code>qa</code> event with test counts, build status, and which AC ids the step's tests cover.</td>
+</tr>
+<tr>
+<td><code>agents/claude-code/reviewer.md</code> + <code>agents/copilot-cli/reviewer.agent.md</code></td>
+<td>After a review pass, append a <code>review</code> event with finding counts, loops used, tech-debt deferrals, and diff line count.</td>
+</tr>
+<tr>
+<td><code>ai-native-workflow</code> (CLI driver)</td>
+<td>After each step: invoke <code>confidence.sh</code>, append a <code>verdict</code> event with <code>scope=step</code>, surface to user. Before PR/MR step: invoke <code>confidence.sh</code> against full log, append <code>verdict</code> event with <code>scope=aggregate</code>, render PR body block. Also writes <code>.git/aw/active-spec</code> pointing at the active spec id so the hook can resolve it.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="storage-layout">Storage layout</h3>
+<p>All per-spec artifacts continue to live under <code>.context/specs/</code>, following the existing flat naming convention:</p>
+<pre><code>.context/specs/
+  PROJ-123-requirements.md      # existing
+  PROJ-123-spec.md              # existing
+  PROJ-123-todo.md              # existing
+  PROJ-123-confidence.jsonl     # new — append-only event log</code></pre>
+<p>The confidence file is committed to the repo as a permanent change artifact. Reviewers can see exactly which AC items the developer claimed coverage for, which findings were triaged, and which review loops fired. The git history of these files becomes the long-term audit trail.</p>
+<p>The override marker is the only transient artifact and lives outside the work tree:</p>
+<pre><code>.git/aw/override-&lt;spec-id&gt;     # one-shot, consumed by next hook fire</code></pre>
+<p>No <code>.gitignore</code> entries are introduced.</p>
+<h2 id="event-log-format">Event log format</h2>
+<p>Each line of <code>&lt;id&gt;-confidence.jsonl</code> is one JSON object. All events have <code>ts</code> (ISO-8601 UTC) and <code>event</code>. Field schemas per event type:</p>
+<h3 id="spec-emitted-once-by-architect"><code>spec</code> (emitted once by architect)</h3>
+<pre class="json"><code>{
+  &quot;ts&quot;: &quot;2026-05-02T18:01:00Z&quot;,
+  &quot;event&quot;: &quot;spec&quot;,
+  &quot;spec_path&quot;: &quot;.context/specs/PROJ-123-spec.md&quot;,
+  &quot;ac_items&quot;: [
+    {&quot;id&quot;: &quot;AC-1&quot;, &quot;text&quot;: &quot;User can log in with valid credentials&quot;},
+    {&quot;id&quot;: &quot;AC-2&quot;, &quot;text&quot;: &quot;Invalid password returns 401&quot;}
+  ]
+}</code></pre>
+<p>Empty <code>ac_items</code> triggers the <code>NO_AC</code> hard gate.</p>
+<h3 id="qa-emitted-once-per-step-by-qa-agent"><code>qa</code> (emitted once per step by qa agent)</h3>
+<pre class="json"><code>{
+  &quot;ts&quot;: &quot;2026-05-02T18:14:22Z&quot;,
+  &quot;event&quot;: &quot;qa&quot;,
+  &quot;step&quot;: 1,
+  &quot;tests_passed&quot;: 12,
+  &quot;tests_failed&quot;: 0,
+  &quot;tests_added&quot;: 3,
+  &quot;build_status&quot;: &quot;ok&quot;,
+  &quot;ac_items_tested&quot;: [&quot;AC-1&quot;]
+}</code></pre>
+<p><code>tests_failed &gt; 0</code> triggers <code>TEST_FAILED</code>. <code>build_status != "ok"</code> triggers <code>BUILD_BROKEN</code>.</p>
+<h3 id="review-emitted-once-per-step-by-reviewer-agent--after-final-loop"><code>review</code> (emitted once per step by reviewer agent — after final loop)</h3>
+<pre class="json"><code>{
+  &quot;ts&quot;: &quot;2026-05-02T18:18:10Z&quot;,
+  &quot;event&quot;: &quot;review&quot;,
+  &quot;step&quot;: 1,
+  &quot;must_fix&quot;:   [{&quot;file&quot;: &quot;auth.go&quot;, &quot;line&quot;: 42, &quot;msg&quot;: &quot;...&quot;}],
+  &quot;should_fix&quot;: [{&quot;file&quot;: &quot;auth.go&quot;, &quot;line&quot;: 58, &quot;msg&quot;: &quot;...&quot;}],
+  &quot;suggestion&quot;: [],
+  &quot;loops_used&quot;: 1,
+  &quot;tech_debt_deferrals&quot;: [],
+  &quot;diff_lines&quot;: 187
+}</code></pre>
+<p>Non-empty <code>must_fix</code> triggers <code>MUST_FIX</code>.</p>
+<h3 id="verdict-emitted-by-confidencesh-written-by-cli-driver"><code>verdict</code> (emitted by <code>confidence.sh</code>, written by CLI driver)</h3>
+<pre class="json"><code>{
+  &quot;ts&quot;: &quot;2026-05-02T18:18:11Z&quot;,
+  &quot;event&quot;: &quot;verdict&quot;,
+  &quot;scope&quot;: &quot;step&quot;,
+  &quot;step&quot;: 1,
+  &quot;score&quot;: 95,
+  &quot;band&quot;: &quot;GREEN&quot;,
+  &quot;gates&quot;: [],
+  &quot;penalties&quot;: {&quot;should_fix&quot;: 0, &quot;suggestion&quot;: 0, &quot;loops&quot;: 0, &quot;tech_debt&quot;: 0, &quot;ac_coverage&quot;: 0, &quot;diff&quot;: 0}
+}</code></pre>
+<p><code>scope</code> is <code>"step"</code> for per-step verdicts and <code>"aggregate"</code> for the final verdict computed at PR/MR time.</p>
+<h3 id="override-emitted-by-override-confidence-and-by-skip-tdd-auto-bypass"><code>override</code> (emitted by <code>/override-confidence</code> and by <code>/skip-tdd</code> auto-bypass)</h3>
+<pre class="json"><code>{
+  &quot;ts&quot;: &quot;2026-05-02T19:50:01Z&quot;,
+  &quot;event&quot;: &quot;override&quot;,
+  &quot;trigger&quot;: &quot;manual&quot;,
+  &quot;reason&quot;: &quot;Reviewer flagged perf regression tracked in PERF-42; not blocking this delivery&quot;,
+  &quot;gates_bypassed&quot;: [&quot;MUST_FIX&quot;]
+}</code></pre>
+<p><code>trigger</code> is <code>"manual"</code> (from <code>/override-confidence</code>) or <code>"skip-tdd-auto"</code> (auto-applied because <code>/skip-tdd</code> was active and only structural gates fired).</p>
+<h3 id="pr_created"><code>pr_created</code></h3>
+<pre class="json"><code>{
+  &quot;ts&quot;: &quot;2026-05-02T19:50:02Z&quot;,
+  &quot;event&quot;: &quot;pr_created&quot;,
+  &quot;url&quot;: &quot;https://github.com/.../pull/42&quot;
+}</code></pre>
+<h2 id="algorithm">Algorithm</h2>
+<pre><code>score = 100
+
+# Per-step penalties summed across all step events:
+score -= 5  * sum(len(should_fix) for each review event)
+score -= 1  * sum(len(suggestion) for each review event)
+score -= 5  * count(review events with loops_used &gt;= 2)
+score -= 10 * count(review events with loops_used &gt;= 3)
+score -= 3  * sum(len(tech_debt_deferrals) for each review event)
+
+# AC coverage (single check across all qa events vs spec event):
+ac_in_spec   = set of AC ids from the `spec` event
+ac_tested    = union of `ac_items_tested` across all qa events
+missing      = ac_in_spec - ac_tested
+score -= min(2 * len(missing), 20)
+
+# Diff size (single check on aggregate diff):
+total_diff = sum(diff_lines for each review event)
+if total_diff &gt; 1000:    score -= 15
+elif total_diff &gt; 400:   score -= 5
+
+score = max(0, score)
+
+# Hard gates (any one fires =&gt; RED):
+gates = []
+if no spec event present, or ac_items empty, or all ac_items lack a testable verb:
+    gates.append(&quot;NO_AC&quot;)
+if any qa event has tests_failed &gt; 0:
+    gates.append(&quot;TEST_FAILED&quot;)
+if any qa event has build_status != &quot;ok&quot;:
+    gates.append(&quot;BUILD_BROKEN&quot;)
+if any review event has non-empty must_fix:
+    gates.append(&quot;MUST_FIX&quot;)
+if any AC id appears in spec but never in any ac_items_tested:
+    gates.append(&quot;AC_NOT_TESTED&quot;)
+if a commit was made bypassing tdd-gate without a logged /skip-tdd reason:
+    gates.append(&quot;TDD_BYPASSED_NO_REASON&quot;)
+
+# Band:
+if gates is non-empty:    band = RED
+elif score &gt;= 80:         band = GREEN
+elif score &gt;= 60:         band = YELLOW
+else:                     band = RED</code></pre>
+<p><strong>Scope-aware gates.</strong> At <code>--scope=step</code>, structural gates (<code>NO_AC</code>, <code>AC_NOT_TESTED</code>) are suppressed because they assess pipeline-level concerns that don't apply to a single step in isolation. The <code>ac_coverage</code> penalty is also suppressed at step scope. Behavioral gates (<code>TEST_FAILED</code>, <code>BUILD_BROKEN</code>, <code>MUST_FIX</code>, <code>TDD_BYPASSED_NO_REASON</code>) fire at any scope — they signal real issues caused by the events being scored. The full set of gates and penalties applies at <code>--scope=aggregate</code> (the default).</p>
+<h3 id="per-step-vs-aggregate">Per-step vs aggregate</h3>
+<p>The same algorithm runs in two scopes:</p>
+<ul>
+<li><strong>Per-step:</strong> filtered to events for a single <code>step</code>. Informational only. Surfaces between pipeline steps so the developer sees a real-time signal. Does not block.</li>
+<li><strong>Aggregate:</strong> the entire log. Enforced by the hook at PR/MR time. The aggregate verdict is what gates the merge.</li>
+</ul>
+<h2 id="hook-enforcement">Hook enforcement</h2>
+<p><code>hooks/confidence-gate.sh</code> registers as a <code>PreToolUse</code> hook matching <code>Bash</code> invocations of <code>gh pr create*</code> or <code>glab mr create*</code>.</p>
+<pre><code>PR/MR creation attempted
+  ├─ resolve &lt;spec-id&gt; from active branch / pipeline state
+  ├─ run scripts/confidence.sh &lt;spec-id&gt;  → JSON verdict on stdout
+  ├─ append `verdict` event with scope=aggregate to log
+  ├─ band == GREEN  → exit 0; PR proceeds
+  ├─ band == YELLOW → exit 0; print warning; PR proceeds
+  └─ band == RED    → resolve overrides:
+        ├─ .git/aw/override-&lt;spec-id&gt; present?
+        │     YES → consume marker, append override event (trigger=manual), exit 0
+        ├─ /skip-tdd marker active for this commit/branch?
+        │     YES → check firing gates:
+        │         ├─ All gates structural (NO_AC, AC_NOT_TESTED)?
+        │         │     → append override event (trigger=skip-tdd-auto, reason=skip-tdd&#39;s reason), exit 0
+        │         └─ Any other gate firing (TEST_FAILED, BUILD_BROKEN, MUST_FIX, TDD_BYPASSED_NO_REASON)?
+        │              → exit 2 with: &quot;skip-tdd does not bypass this gate.
+        │                Use /override-confidence with explicit reason.&quot;
+        └─ no override applicable → exit 2 with verdict + failing gates</code></pre>
+<p>YELLOW does not block at the hook layer because the YELLOW pause already happens in the CLI driver during the pipeline run (the user types <code>go</code> to continue past it). By PR creation time, YELLOW is informational.</p>
+<h2 id="override-mechanism">Override mechanism</h2>
+<h3 id="manual-override-confidence-reason">Manual: <code>/override-confidence "&lt;reason&gt;"</code></h3>
+<p>A skill mirroring <code>/skip-tdd</code>. Behavior:</p>
+<ul>
+<li>Refuses empty reasons or boilerplate (<code>"."</code>, <code>"fix"</code>, <code>"override"</code>, single word, etc.).</li>
+<li>Writes <code>.git/aw/override-&lt;spec-id&gt;</code> containing <code>{reason, branch, ts, user}</code>.</li>
+<li>Auto-clears (file deleted) on the next hook fire, success or failure. One-shot.</li>
+<li>Logs creation to the spec's confidence.jsonl as an <code>override</code> event with <code>trigger=manual</code>.</li>
+</ul>
+<h3 id="auto-applied-via-skip-tdd-structural-gates-only">Auto-applied via <code>/skip-tdd</code> (structural gates only)</h3>
+<p>When the confidence hook fires RED and a <code>/skip-tdd</code> marker is active for the current commit/branch:</p>
+<ul>
+<li><strong>Structural gates</strong> (<code>NO_AC</code>, <code>AC_NOT_TESTED</code>) are auto-bypassed, reusing the <code>/skip-tdd</code> reason as the override reason. Logged as <code>trigger=skip-tdd-auto</code>.</li>
+<li><strong>Behavioral gates</strong> (<code>TEST_FAILED</code>, <code>BUILD_BROKEN</code>, <code>MUST_FIX</code>) are <em>not</em> bypassed. Skip-tdd does not grant a free pass for broken code or real bugs found in review. The user must address the issue or use <code>/override-confidence</code> with an explicit deliberate reason.</li>
+</ul>
+<p><code>TDD_BYPASSED_NO_REASON</code> cannot fire while <code>/skip-tdd</code> is active (the gate's condition is "TDD bypassed <em>and</em> no reason logged"; <code>/skip-tdd</code> is the reason-logging mechanism). If it does fire, it indicates a TDD bypass via some other path and requires explicit <code>/override-confidence</code>.</p>
+<h3 id="why-split">Why split</h3>
+<p><code>/skip-tdd</code> says "this isn't a normal feature change" — that's a fine excuse for missing AC or skipped tests (the docs/config/hotfix cases). It is not a fine excuse for shipping broken code. Splitting the gate classes preserves the safety value of the confidence gate while removing redundant override friction for legitimate skip-tdd cases.</p>
+<h2 id="surfacing-the-verdict">Surfacing the verdict</h2>
+<h3 id="during-pipeline-run">During pipeline run</h3>
+<p>The CLI driver prints per-step verdicts inline:</p>
+<pre><code>[step 2/5] tdd-developer ...    OK
+[step 2/5] qa ...               12 passed, 0 failed
+[step 2/5] reviewer ...         1 must-fix → fix loop
+[step 2/5] reviewer ...         clean, 2 should-fix
+[step 2/5] confidence           YELLOW: 71/100 (-10 should-fix, -5 loop2, -3 tech-debt)
+                                Continue to step 3? [go / fix / abort]</code></pre>
+<p>A YELLOW step does not auto-block, but it does pause for user input. RED at a step prompts the same way but with stronger framing.</p>
+<h3 id="at-prmr-creation-hook">At PR/MR creation (hook)</h3>
+<pre><code>$ glab mr create
+⚠ confidence: RED — gates: [MUST_FIX]
+  step 4 has 1 unresolved must-fix in auth.go:42
+
+  To proceed: address the finding, or run /override-confidence &quot;&lt;reason&gt;&quot;
+
+[exit 2]</code></pre>
+<h3 id="in-the-prmr-body">In the PR/MR body</h3>
+<p>The CLI driver injects a <code>## Confidence</code> section into the PR body when creating it:</p>
+<pre class="markdown"><code>## Confidence
+**GREEN: 87/100**
+
+Penalties: −5 should-fix (1 item), −5 review loop 2, −3 tech-debt deferred
+AC coverage: 4/4 (100%)
+Audit: `.context/specs/PROJ-123-confidence.jsonl`</code></pre>
+<h2 id="testing">Testing</h2>
+<p>Three test layers, modelled on the existing <code>tdd-gate.sh</code> test pattern in this repo:</p>
+<ol type="1">
+<li><strong>Unit tests for <code>scripts/confidence.sh</code></strong> — <code>bats-core</code> with fixture jsonl files in <code>tests/fixtures/</code>. Cover: all-green, mixed-yellow, hard-gate-red for each gate, override active, skip-tdd structural-only bypass, skip-tdd attempting behavioral bypass (must still fail), missing log file, malformed events.</li>
+<li><strong>Hook integration test</strong> — fixture repo with a fake <code>glab</code>/<code>gh</code> shim on PATH that records its arguments; assert the hook exits 0/2 correctly given various log states and override conditions.</li>
+<li><strong>End-to-end via <code>ai-native-workflow run</code></strong> against a fixture spec — runs the pipeline, asserts the right <code>verdict</code> and <code>pr_created</code> events land in the jsonl. One happy-path case and one RED-blocks-PR case for v1.</li>
+</ol>
+<h2 id="open-questions-for-the-implementation-plan">Open questions for the implementation plan</h2>
+<p>(These are decisions to surface during plan-writing, not blockers on this design.)</p>
+<ul>
+<li>Exact bats-core layout: per-script test file vs single suite? (Probably matches existing <code>tests/</code> layout; needs a look.)</li>
+<li>Whether <code>&lt;id&gt;</code> resolution from the active branch should use a CLI flag (<code>--spec PROJ-123</code>) or an environment variable (<code>AW_SPEC_ID</code>) when the branch name doesn't carry it. Likely the CLI driver writes a <code>.git/aw/active-spec</code> pointer; the hook reads it.</li>
+<li>Whether the <code>verdict_text</code> field in the script's stdout should be machine-formatted or human-formatted. Probably both: structured fields for machines, <code>verdict_text</code> for humans.</li>
+</ul>
+<h2 id="acceptance-criteria-for-the-implementation">Acceptance criteria for the implementation</h2>
+<ul>
+<li><code>AC-1</code> Running <code>scripts/confidence.sh &lt;spec-id&gt;</code> against a hand-crafted all-green log prints a JSON verdict with <code>band: "GREEN"</code> and <code>score: 100</code>.</li>
+<li><code>AC-2</code> Each defined hard gate, when triggered by the corresponding event in the log, produces <code>band: "RED"</code> with the correct gate name in the <code>gates</code> array.</li>
+<li><code>AC-3</code> Penalty math matches the rubric exactly: a log with one <code>should_fix</code> item produces <code>score: 95</code>, two produce <code>90</code>, etc.; combined penalties stack additively up to <code>score: 0</code> minimum.</li>
+<li><code>AC-4</code> <code>hooks/confidence-gate.sh</code> exits 2 when the aggregate band is RED and no override applies; exits 0 on GREEN, YELLOW, or RED with valid override.</li>
+<li><code>AC-5</code> <code>/override-confidence "&lt;reason&gt;"</code> creates the marker file; the next hook fire consumes it and writes an <code>override</code> event with <code>trigger: "manual"</code> to the log.</li>
+<li><code>AC-6</code> With <code>/skip-tdd</code> active and only <code>NO_AC</code> firing, the hook exits 0 and logs <code>trigger: "skip-tdd-auto"</code>.</li>
+<li><code>AC-7</code> With <code>/skip-tdd</code> active and <code>MUST_FIX</code> firing, the hook exits 2 with the correct error message.</li>
+<li><code>AC-8</code> <code>architect</code>, <code>qa</code>, and <code>reviewer</code> agents (both Claude and Copilot variants) emit the documented event shapes.</li>
+<li><code>AC-9</code> The CLI driver injects the <code>## Confidence</code> section into the PR/MR body when creating the PR.</li>
+<li><code>AC-10</code> <code>.gitignore</code> is unchanged.</li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

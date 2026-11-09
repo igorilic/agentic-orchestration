@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>BREW-1 — Todo plan</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">BREW-1 — Todo plan</h1>
+<time class="sp-article__date" datetime="2026-05-04"><span class="sp-bar"></span><span style="margin-left:.75rem">May 4, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<p><strong>Spec:</strong> <code>docs/context/specs/BREW-1-anw-script-dir-symlink.html</code> <strong>Total steps:</strong> 2 (resolution fix + integration smoke)</p>
+<p>Each step is a single atomic TDD cycle. The fix itself is genuinely small; splitting further would be ceremonial.</p>
+<hr />
+<h3 id="step-1-resolve-_anw_script_dir-through-symlinks">Step 1: Resolve <code>_ANW_SCRIPT_DIR</code> through symlinks</h3>
+<ul>
+<li><p><strong>Test (RED):</strong> Add <code>tests/script-dir.bats</code> with four bats cases. The script doesn't expose <code>_ANW_SCRIPT_DIR</code> yet, so first add a small introspection probe in the same step (it is part of the same atomic change — without it, the new behavior cannot be observed).</p>
+<p>Cases (against the real <code>ai-native-workflow</code> script via the <code>__print-script-dir</code> internal subcommand):</p>
+<ol type="1">
+<li><code>script-dir: canonical invocation matches script directory</code> — invoke <code>&lt;repo&gt;/ai-native-workflow __print-script-dir</code>, assert output equals <code>&lt;repo&gt;</code> resolved via <code>pwd -P</code>. (AC-1)</li>
+<li><code>script-dir: single-level symlink resolves to real parent dir</code> — <code>ln -s</code> the CLI into a fresh <code>mktemp -d</code>, invoke the symlink, assert output equals the real script directory, <strong>not</strong> the temp dir. (AC-2)</li>
+<li><code>script-dir: symlink chain (a -&gt; b -&gt; real) resolves to real parent dir</code> — two-hop chain in two temp dirs, invoke through the head of the chain, assert real parent. (AC-3)</li>
+<li><code>script-dir: pure-bash fallback works without realpath/greadlink on PATH</code> — run case 2 again with <code>PATH=/usr/bin:/bin</code> (and <code>unset</code> of <code>realpath</code> / <code>greadlink</code> aliases if any), confirm same output. (AC-4)</li>
+</ol>
+<p>All four cases should fail before the fix lands (cases 2/3/4 because of the bug; case 1 because <code>__print-script-dir</code> doesn't exist yet).</p></li>
+<li><p><strong>Implement (GREEN):</strong> Apply two small edits to <code>ai-native-workflow</code>:</p>
+<ol type="1">
+<li><p><strong>Replace line 82</strong> with the helper-function block from the spec:</p>
+<pre class="bash"><code>_anw_resolve_source() {
+  local src=&quot;${BASH_SOURCE[0]}&quot;
+  if command -v realpath &gt;/dev/null 2&gt;&amp;1; then
+    realpath &quot;$src&quot;; return
+  fi
+  if command -v greadlink &gt;/dev/null 2&gt;&amp;1; then
+    greadlink -f &quot;$src&quot;; return
+  fi
+  while [ -L &quot;$src&quot; ]; do
+    local target
+    target=&quot;$(readlink &quot;$src&quot;)&quot;
+    case &quot;$target&quot; in
+      /*) src=&quot;$target&quot; ;;
+      *)  src=&quot;$(cd &quot;$(dirname &quot;$src&quot;)&quot; &amp;&amp; pwd)/$target&quot; ;;
+    esac
+  done
+  echo &quot;$src&quot;
+}
+_ANW_SCRIPT_DIR=&quot;$(cd &quot;$(dirname &quot;$(_anw_resolve_source)&quot;)&quot; &amp;&amp; pwd)&quot;
+unset -f _anw_resolve_source</code></pre></li>
+<li><p><strong>Add the <code>__print-script-dir</code> internal subcommand</strong> in the dispatch table. Place it next to the existing top-level command dispatch (search for the <code>case "$1" in</code> block that handles <code>install|run|detect|status|...</code>). Add:</p>
+<pre class="bash"><code>__print-script-dir)
+  echo &quot;$_ANW_SCRIPT_DIR&quot;
+  exit 0
+  ;;</code></pre>
+<p>The <code>__</code> prefix marks it internal. Do <strong>not</strong> add it to the help text or usage banner — keep it test-only.</p></li>
+</ol></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>ai-native-workflow</code> (edit line 82 region; add internal subcommand in dispatch)</li>
+<li><code>tests/script-dir.bats</code> (new file)</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/script-dir.bats</code> — all 4 pass. Then <code>bats tests/</code> — all 99 pre-existing tests still pass (AC-5).</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(cli): add symlink-resolution tests for _ANW_SCRIPT_DIR</code></li>
+<li><code>fix(cli): resolve _ANW_SCRIPT_DIR through symlink chains</code></li>
+</ul>
+<p>(Two commits per the RED/GREEN convention. Test commit first; it will fail CI in isolation, but the GREEN commit immediately follows in the same PR.)</p></li>
+</ul>
+<hr />
+<h3 id="step-2-integration-smoke--installer-survives-symlink-invocation">Step 2: Integration smoke — installer survives symlink invocation</h3>
+<p>This step guards against the original failure mode end-to-end. <code>tests/install.bats</code> already exercises <code>install global</code> against the canonical script path; we need one test that exercises it through a symlink, replicating the brew layout.</p>
+<ul>
+<li><p><strong>Test (RED):</strong> Add to <code>tests/install.bats</code> (or new <code>tests/install-symlink.bats</code> if the existing file's setup pattern doesn't fit cleanly):</p>
+<pre><code>@test &quot;install: install global succeeds when invoked via a symlink (brew layout)&quot;</code></pre>
+<ul>
+<li>Create temp dir <code>LINKDIR=$(mktemp -d)</code>.</li>
+<li><code>ln -s "$INSTALLER" "$LINKDIR/ai-native-workflow"</code>.</li>
+<li>Set <code>CLAUDE_HOME="$SANDBOX"</code> and run <code>"$LINKDIR/ai-native-workflow" install global</code>.</li>
+<li>Assert exit code is 0.</li>
+<li>Assert at least one canary file is present, e.g. <code>[ -f "$SANDBOX/hooks/confidence-gate.sh" ]</code> and <code>[ -f "$SANDBOX/scripts/confidence-cli.sh" ]</code>.</li>
+<li>Cleanup: <code>rm -rf "$LINKDIR"</code> in teardown.</li>
+</ul>
+<p>Before Step 1's fix, this test would fail with <code>cp: ... No such file or directory</code> errors out of <code>install_global</code>. After Step 1, it should pass — but we add it explicitly to lock the regression.</p></li>
+<li><p><strong>Implement (GREEN):</strong> No production code change expected. Step 1's fix is what makes this test pass. If the test fails here, that's a real defect surfaced — fix forward.</p></li>
+<li><p><strong>Files:</strong></p>
+<ul>
+<li><code>tests/install.bats</code> (one test added) <strong>or</strong> <code>tests/install-symlink.bats</code> (new)</li>
+<li>No production code change expected.</li>
+</ul></li>
+<li><p><strong>Verify:</strong> <code>bats tests/install.bats</code> (or full <code>bats tests/</code>) — green.</p></li>
+<li><p><strong>Commit:</strong></p>
+<ul>
+<li><code>test(install): exercise install global via symlinked CLI invocation</code></li>
+</ul></li>
+</ul>
+<hr />
+<h2 id="status-checklist">Status checklist</h2>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Step 1 — <code>_ANW_SCRIPT_DIR</code> symlink resolution + internal probe</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Test added (<code>tests/script-dir.bats</code>, 4 cases)</label></li>
+<li><label><input type="checkbox" checked="" />Implementation applied (helper function + internal subcommand)</label></li>
+<li><label><input type="checkbox" checked="" />All 99 pre-existing tests still pass</label></li>
+<li><label><input type="checkbox" checked="" />AC-1, AC-2, AC-3, AC-4 covered</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" />Step 2 — Integration smoke through symlink</label>
+<ul class="task-list">
+<li><label><input type="checkbox" checked="" />Test added (<code>install: install global succeeds when invoked via a symlink</code>)</label></li>
+<li><label><input type="checkbox" checked="" />Test passes against fixed CLI</label></li>
+<li><label><input type="checkbox" checked="" />AC-5 confirmed (full bats suite green)</label></li>
+</ul></li>
+<li><label><input type="checkbox" checked="" />AC-6 satisfied: <code>tests/script-dir.bats</code> exists and covers AC-1..AC-3</label></li>
+<li><label><input type="checkbox" />Spec marked <strong>Done</strong> in <code>docs/context/CURRENT_SPRINT.md</code></label></li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

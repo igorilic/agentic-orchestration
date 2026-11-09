@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SDK-1 — Sidekick model-routing + live pipeline visualization</title>
+<link rel="stylesheet" href="../../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">SDK-1 — Sidekick model-routing + live pipeline visualization</h1>
+<time class="sp-article__date" datetime="2026-07-02"><span class="sp-bar"></span><span style="margin-left:.75rem">July 2, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<blockquote>
+<p>Brainstorm capture. Status: <strong>converged → ready for <code>/plan</code></strong>. Date: 2026-06-30. Origin: <code>/brainstorm "visualization of the pipeline and agentic work"</code>, inspired by a "Model Routing Example" card (frontier models + cheaper sidekick, with per-step actions and <code>DELEGATED TO SIDEKICK</code> badges).</p>
+</blockquote>
+<h2 id="one-line-summary">One-line summary</h2>
+<p>Add a <strong>real cheap-model delegation capability</strong> to the agent pipeline (heavy agents hand mechanical sub-work to a Haiku "sidekick" subagent), and <strong>visualize the whole pipeline live in the terminal</strong> as a flat, streaming, agent-attributed action transcript — including the delegations.</p>
+<h2 id="what-this-is-and-what-it-became">What this is (and what it became)</h2>
+<p>The request started as <em>just a visualization</em> of the pipeline. During elicitation it grew a second, larger half: the reference image's signature element — <code>DELEGATED TO SIDEKICK</code> — has <strong>no referent in the current pipeline</strong> (it is sequential, one tier per agent; <code>tdd-developer</code> and <code>qa</code> don't even have a Task/Agent tool). Rather than fake the badge, the decision was to <strong>build the real capability</strong> it implies. So SDK-1 is two stacked builds:</p>
+<ol type="1">
+<li><strong>Sidekick delegation</strong> — a genuine new pipeline capability (the bigger build).</li>
+<li><strong>Live pipeline visualization</strong> — renders the pipeline, including the new delegations.</li>
+</ol>
+<p>This is the actual "model routing" thesis: expensive models for hard reasoning, cheap models for grunt work.</p>
+<hr />
+<h2 id="converged-decisions">Converged decisions</h2>
+<p>Each row is a fork that was explicitly decided during the brainstorm.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision point</th>
+<th>Chosen</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Medium</strong></td>
+<td><strong>Live CLI render</strong></td>
+<td>Renders in the terminal <em>as agents run</em> (real telemetry, streaming). Best fit for a CLI-driven orchestrator; shows agentic work happening live.</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Granularity</strong></td>
+<td><strong>Full action stream</strong></td>
+<td>Match the image's inner-bullet detail — every meaningful inner action per agent, not just coarse phase boundaries or verdicts.</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Action source</strong></td>
+<td><strong>Agent-emitted milestones</strong></td>
+<td>Agents print explicit, clean progress markers → output reads like the image's curated bullets, not a noisy raw tool-call dump. Cost: agent definitions must emit markers.</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Data flow</strong></td>
+<td><strong>Hybrid (sentinel → orchestrator)</strong></td>
+<td>Agents stay <em>dumb</em> (print a sentinel line to stdout). The orchestrator — which already wraps every subprocess with a spinner — is the <strong>single</strong> thing that parses, renders live, AND appends structured events to <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code>. CLI-agnostic; replayable artifact for free.</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>Visual style</strong></td>
+<td><strong>Flat indented stream</strong></td>
+<td><code>▸ agent · tier</code> header lines, <code>⏺</code> milestone bullets, active line shows spinner + elapsed, <code>✓</code> on completion. No live box redraw (fragile in bash at width/resize). Matches existing <code>▸</code>/<code>⏺</code>/<code>✓</code> aesthetic.</td>
+</tr>
+<tr>
+<td>6</td>
+<td><strong>Delegation semantics</strong></td>
+<td><strong>Build real sidekick delegation</strong></td>
+<td>Don't fake the badge. Heavy agents actually dispatch mechanical sub-tasks to a cheaper Haiku sidekick; parent reviews the result (the image's "Reviewed the sidekick's changes").</td>
+</tr>
+<tr>
+<td>7</td>
+<td><strong>Delegation policy</strong></td>
+<td><strong>Fixed mechanical allowlist</strong></td>
+<td>Sidekick may only: scaffold files from templates, apply lint/format/type-fix output, generate fixtures &amp; mocks, mechanical find-replace. Parent (Opus/Sonnet) <strong>always</strong> owns reasoning/tests/review and <strong>vets sidekick output before accepting</strong>. Predictable, gate-safe.</td>
+</tr>
+<tr>
+<td>8</td>
+<td><strong>MVP scope</strong></td>
+<td><strong>All Claude heavy agents</strong></td>
+<td>Roll the sidekick out to <code>tdd-developer</code> + <code>qa</code> + <code>architect</code> (each with its own allowlist) on the GitHub/Claude pipeline, with orchestrator render + JSONL persist.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="architecture-as-decided">Architecture (as decided)</h2>
+<pre><code>agent (claude --agent=… -p)
+   │  prints dumb sentinel lines to stdout, e.g.
+   │     ▸▸M | Wrote failing test | status=done
+   │     ▸▸M | Implemented ClusterBatch path | delegated=haiku
+   │     ▸▸D | sidekick · Haiku: scaffolded boilerplate
+   ▼
+orchestrator (lib/pipeline-core.sh — already wraps each subprocess)
+   ├─ parses sentinels  ──►  renders LIVE (flat indented stream)
+   │                              ▸ tdd-developer · Sonnet
+   │                                ⏺ Wrote failing test
+   │                                ⏺ Implemented ClusterBatch path  [DELEGATED]
+   │                                    ↳ sidekick · Haiku: scaffolded boilerplate
+   │                                ⠙ Running lint &amp; type checks (0m12s)
+   └─ appends structured events ──► .anw/specs/&lt;id&gt;-milestones.jsonl
+                                       {ts, agent, tier, text, delegated, status, ...}
+   (non-sentinel agent stdout is suppressed from the live view / kept in audit.log)</code></pre>
+<h3 id="delegation-mechanism">Delegation mechanism</h3>
+<ul>
+<li>Heavy agents (<code>tdd-developer</code>, <code>qa</code>, <code>architect</code>) gain a <strong>Task/Agent tool</strong> in their frontmatter (they currently lack it) and a <strong><code>sidekick</code> agent definition</strong> (Haiku tier) scoped to the mechanical allowlist.</li>
+<li>When a parent delegates, it emits a <code>[DELEGATED]</code> parent milestone + a nested <code>↳ sidekick · Haiku: …</code> line via the same sentinel channel — so the orchestrator's existing parser handles nesting; no new transport.</li>
+<li><strong>Guardrail:</strong> delegation must not bypass TDD/quality gates. Parent reviews &amp; accepts/rejects sidekick output before continuing. (Maps to a real "Reviewed the sidekick's changes" step.)</li>
+</ul>
+<h3 id="why-this-fits-the-existing-system-from-the-runtime-scan">Why this fits the existing system (from the runtime scan)</h3>
+<ul>
+<li>Orchestrator is <strong>pure bash</strong> (<code>ai-native-workflow</code> + <code>lib/*.sh</code>); agents run as opaque subprocesses; zero npm/pip deps. The hybrid sentinel approach needs <strong>no new runtime</strong> — just stdout parsing + line rendering, consistent with the current spinner/ANSI helpers.</li>
+<li>A structured telemetry pattern already exists (<code>.anw/specs/&lt;id&gt;-confidence.jsonl</code>); the new <code>…-milestones.jsonl</code> mirrors it.</li>
+<li>Model tiers already live in each agent's YAML frontmatter.</li>
+</ul>
+<hr />
+<h2 id="mvp-scope">MVP scope</h2>
+<p><strong>In:</strong></p>
+<ul>
+<li><code>sidekick</code> agent (Haiku) + the mechanical allowlist contract.</li>
+<li><code>tdd-developer</code>, <code>qa</code>, <code>architect</code> each: gain Task tool, per-agent allowlist, emit milestone + delegation sentinels, parent-review gate.</li>
+<li>Orchestrator: sentinel parser + flat-indented live renderer + spinner on active line.</li>
+<li>Persist <code>.anw/specs/&lt;id&gt;-milestones.jsonl</code>.</li>
+<li>Target the <strong>GitHub / Claude Code</strong> pipeline (<code>pipeline_github_feature</code>).</li>
+</ul>
+<p><strong>Deferred (fast-follows):</strong></p>
+<ul>
+<li>GitLab / <strong>Copilot</strong> pipeline (needs verifying copilot passes agent stdout sentinels through).</li>
+<li><strong>Replay / status</strong> command that re-renders a past run from the JSONL + embeds it in the Obsidian session report.</li>
+<li>A <strong>whitepaper figure</strong> generated from a real run's JSONL (the original viz ask; now a byproduct of persistence — note the PAPER is a design whitepaper, keep it illustrative).</li>
+<li>Sidekick for <code>reviewer</code> / <code>requirements-engineer</code> (mostly reasoning, little mechanical work).</li>
+<li>Live "collapse-to-card" visual treatment (was considered, rejected for MVP in favor of flat).</li>
+</ul>
+<hr />
+<h2 id="open-questions-for-plan-architect-to-nail">Open questions for <code>/plan</code> (architect to nail)</h2>
+<ol type="1">
+<li><strong>Sentinel grammar</strong> — exact prefix/format for milestone vs delegation lines, how <code>status</code> (running/done/ok/fail) and <code>delegated=&lt;tier&gt;</code> are encoded, and how to avoid collisions with normal agent output.</li>
+<li><strong>JSONL schema</strong> — final field set for <code>…-milestones.jsonl</code> (ts, agent, tier, parent/child, text, delegated, status, step). Reuse confidence.jsonl conventions.</li>
+<li><strong>Per-agent allowlists</strong> — concrete delegatable task list for <code>tdd-developer</code> vs <code>qa</code> vs <code>architect</code> (they differ: architect scaffolds plan/spec files; qa generates fixtures/probes; tdd scaffolds impl boilerplate + applies fixes).</li>
+<li><strong>Parent-review gate</strong> — how acceptance/rejection of sidekick output is enforced and recorded (and how a rejected delegation renders).</li>
+<li><strong>Renderer details</strong> — spinner-on-active-line behavior, tier badge styling/colors (Opus/Sonnet/Haiku), nesting indentation, behavior under non-TTY / piped output.</li>
+<li><strong>Sidekick agent definition</strong> — tools, model (<code>haiku</code>), and prompt constraints to keep it strictly mechanical.</li>
+<li><strong>Cost/quality validation</strong> — how to confirm delegation actually saves cost without regressing quality (the parent-review gate is the safety net; consider a metric in the JSONL).</li>
+</ol>
+<hr />
+<h2 id="recommended-next-track">Recommended next track</h2>
+<p><strong><code>/plan SDK-1</code></strong> — this is production-ready, real-capability work with TDD implications (new tools, new agent, orchestrator changes, quality gates). It should go through <code>architect → tdd-developer → qa → reviewer</code>. Given the two-part scope, the architect may split it into two spec/todo tracks: <strong>(A) sidekick delegation capability</strong> and <strong>(B) live milestone visualization</strong>, with B depending on A's sentinel/delegation events existing.</p>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

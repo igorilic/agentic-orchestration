@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>ADR-001 — Copilot CLI hooks: single dispatcher with fail-closed trap</title>
+<link rel="stylesheet" href="../.design/styles.css">
+</head>
+<body>
+<div class="sp-layout__bg"><div><div></div></div></div>
+<div class="sp-layout__fg">
+<main class="sp-layout__main">
+<div class="sp-container-outer sp-article"><div class="sp-container-outer__in">
+<div class="sp-container-inner"><div class="sp-container-inner__in">
+<div class="sp-article__col">
+<article>
+<header class="sp-article__header">
+<h1 class="sp-h1">ADR-001 — Copilot CLI hooks: single dispatcher with fail-closed trap</h1>
+<time class="sp-article__date" datetime="2026-10-08"><span class="sp-bar"></span><span style="margin-left:.75rem">October 8, 2026</span></time>
+</header>
+<div class="sp-prose" style="margin-top:2rem">
+<ul>
+<li><strong>Status</strong>: Superseded by ADR-003 (2026-10-08). Copilot CLI supports user-global hooks, so the per-project dispatcher is gone; <code>guard.sh</code> keeps the fail-closed rule for both tools.</li>
+<li><strong>Date</strong>: 2026-05-02</li>
+<li><strong>Related spec</strong>: <code>docs/context/specs/COP-2-spec.html</code></li>
+<li><strong>Drivers</strong>: requirements-engineer (R-1, R-2 findings); user accepted defaults on OQ-1 / OQ-3 / OQ-4 / OQ-5 / OQ-6.</li>
+</ul>
+<h2 id="context">Context</h2>
+<p>GitHub Copilot CLI hooks differ from Claude Code hooks in three ways that affect enforcement guarantees:</p>
+<ol type="1">
+<li><strong>Crash → allow.</strong> Copilot reads the <code>permissionDecision</code> from stdout JSON, not the exit code. A script that crashes or returns without printing JSON results in the action being <strong>allowed</strong>. This is the opposite of Claude's <code>exit 2 = block</code> semantic.</li>
+<li><strong>No <code>matcher</code> field.</strong> Every <code>preToolUse</code> entry fires on every tool use (file reads, edits, bash). Filtering must happen inside the script.</li>
+<li><strong>Undocumented short-circuit and ordering</strong> within a <code>preToolUse</code> array. The docs do not specify whether multiple entries run in declaration order, nor whether a <code>deny</code> from entry N stops entry N+1.</li>
+</ol>
+<p>We must port two Claude gates (<code>tdd-gate.sh</code>, <code>confidence-gate.sh</code>) into Copilot's per-repo <code>.github/hooks/</code> mechanism while preserving the same enforcement guarantees engineers rely on today.</p>
+<h2 id="decision">Decision</h2>
+<p>We will install a <strong>single dispatcher script</strong> (<code>.github/hooks/copilot-cli-dispatcher.sh</code>) registered as the only <code>preToolUse</code> entry the <code>ai-native-workflow</code> installer adds. The dispatcher:</p>
+<ol type="1">
+<li>Installs a <code>trap '... emit_deny ...' ERR</code> as the very first thing after <code>set -euo pipefail</code>. Any unexpected error (parse failure, missing dependency, <code>set -u</code> triggering, scorer crash) prints a <code>deny</code> JSON and exits 0 — Copilot then blocks the action.</li>
+<li>Reads stdin once and filters on <code>toolName == "bash"</code>. Non-bash tool uses get an immediate <code>allow</code> JSON with no further work.</li>
+<li>Resolves the project directory from the payload <code>cwd</code> first, then falls back to <code>git -C &lt;cwd&gt; rev-parse --show-toplevel</code>.</li>
+<li>Sequences the TDD gate and the confidence gate internally (TDD first, since <code>git commit</code> is a more local concern than <code>gh pr create</code>). This sidesteps the unknown short-circuit semantic — we own the ordering.</li>
+<li><strong>Deny reasons surface only via <code>permissionDecisionReason</code> in the stdout JSON.</strong> Earlier drafts of the ADR specified a belt-and-suspenders pattern with both JSON and stderr; that was removed because bats <code>run</code> merges stderr into stdout, and stderr emoji banners broke <code>jq -e</code> parsing of <code>$output</code> in tests. The JSON reason is sufficient.</li>
+</ol>
+<p>The vendored confidence scorer lives at <code>.github/hooks/scripts/confidence.sh</code>, copied per-project from <code>scripts/confidence.sh</code> at install time. The dispatcher resolves the scorer at <code>$PROJECT_DIR/.github/hooks/scripts/confidence.sh</code> — no dependency on a global Claude install.</p>
+<h2 id="consequences">Consequences</h2>
+<h3 id="positive">Positive</h3>
+<ul>
+<li><strong>Fail-closed.</strong> Crashes block actions instead of allowing them, matching Claude's exit-2 semantics.</li>
+<li><strong>Deterministic ordering.</strong> TDD before confidence; we own the sequencing rather than depending on undocumented Copilot behavior.</li>
+<li><strong>Self-contained per project.</strong> Vendored scorer means the gate works for Copilot-only users with no Claude install.</li>
+<li><strong>One file to maintain.</strong> All gate logic in one dispatcher heredoc inside <code>ai-native-workflow</code>, mirroring how the Claude gates are shipped.</li>
+<li><strong>Idempotent install.</strong> Backup-on-mismatch + jq merge of the policy JSON preserves user customizations.</li>
+</ul>
+<h3 id="negative">Negative</h3>
+<ul>
+<li><strong>Drift risk.</strong> The vendored scorer can fall behind brew-managed updates. Mitigated by FR-5 (re-running <code>install project</code> refreshes the vendored copy). A user who hand-edits <code>.github/hooks/scripts/ confidence.sh</code> will lose those edits on next install — same policy as the dispatcher script, surfaced via the backup file.</li>
+<li><strong>Heredoc maintenance.</strong> The dispatcher is shipped as a heredoc inside <code>ai-native-workflow</code>, so changes touch the installer rather than a standalone script. This matches the existing pattern for <code>tdd-gate.sh</code> and <code>session-start.sh</code> heredocs.</li>
+<li><strong>No file-level reuse with Claude hooks.</strong> The Copilot dispatcher duplicates ~80% of the Claude gates' logic. We accept this because payload parsing and decision emission diverge irreducibly between the two tools — a "shared" script would be 80% conditionals.</li>
+</ul>
+<h3 id="risks">Risks</h3>
+<ul>
+<li><strong>R-1 (HIGH, mitigated)</strong> — Copilot crash defaults to allow. The trap is the load-bearing safety mechanism; AC-15 enforces it via test.</li>
+<li><strong>R-2 (HIGH, mitigated)</strong> — non-bash tool calls don't get filtered by Copilot. The <code>toolName</code> filter is the literal first work in the dispatcher; AC-16 enforces it.</li>
+<li><strong>R-5 (MEDIUM, mitigated)</strong> — <code>cwd</code> may not be the repo root. The <code>git rev-parse --show-toplevel</code> fallback handles this; AC-17 enforces.</li>
+</ul>
+<h2 id="alternatives-considered">Alternatives considered</h2>
+<h3 id="a-two-separate-scripts-tdd-gatesh--confidence-gatesh-registered-as-two-pretooluse-entries">A. Two separate scripts (<code>tdd-gate.sh</code> + <code>confidence-gate.sh</code>) registered as two <code>preToolUse</code> entries</h3>
+<ul>
+<li><strong>Reason rejected</strong>: Copilot's short-circuit and ordering behavior within the array is undocumented (OQ-1). If the order isn't guaranteed, or if a deny doesn't short-circuit, behavior is unpredictable. Single dispatcher gives us deterministic control.</li>
+</ul>
+<h3 id="b-use-the-global-claudescriptsconfidencesh-from-the-copilot-script">B. Use the global <code>~/.claude/scripts/confidence.sh</code> from the Copilot script</h3>
+<ul>
+<li><strong>Reason rejected</strong>: Couples Copilot enforcement to a Claude install. Breaks for engineers who only use Copilot. Cross-tool coupling smell.</li>
+</ul>
+<h3 id="c-symlink-the-scorer-instead-of-copying">C. Symlink the scorer instead of copying</h3>
+<ul>
+<li><strong>Reason rejected</strong>: Symlink target may not exist on machines without the global CLI installed. <code>cp</code> is also more <code>git</code>-friendly (the vendored copy can be committed and reviewed).</li>
+</ul>
+<h3 id="d-refactor-the-claude-hooks-to-share-a-library-file">D. Refactor the Claude hooks to share a library file</h3>
+<ul>
+<li><strong>Reason rejected</strong>: Out of scope per requirements. Payload parsing and decision emission diverge irreducibly between tools, so a shared library would be 80% conditionals on <code>${TOOL_FAMILY}</code>. Port today, consider unifying when the divergence narrows.</li>
+</ul>
+<h3 id="e-skip-fail-closed-and-rely-on-set--e-to-crash-early">E. Skip fail-closed and rely on <code>set -e</code> to crash early</h3>
+<ul>
+<li><strong>Reason rejected</strong>: Without the trap, a crash before the JSON is printed results in <strong>allow</strong>, not block. This is the single most important safety property of the design.</li>
+</ul>
+<h2 id="references">References</h2>
+<ul>
+<li><code>docs/context/specs/COP-2-requirements.html</code> (R-1, R-2, OQ-1..6)</li>
+<li><code>docs/context/specs/COP-2-spec.html</code> (sections 3.1, 3.4)</li>
+<li>GitHub Copilot CLI hooks reference: <a href="https://docs.github.com/en/copilot/reference/hooks-configuration">https://docs.github.com/en/copilot/reference/hooks-configuration</a></li>
+</ul>
+</div>
+</article>
+</div></div></div></div></div>
+</main>
+</div>
+</body>
+</html>

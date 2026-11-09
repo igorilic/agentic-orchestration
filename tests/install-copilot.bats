@@ -12,7 +12,7 @@ ROOT="$BATS_TEST_DIRNAME/.."
 }
 
 @test "docs: ARCHITECTURE says the hooks are user-global in both tools" {
-  grep -qi 'user-global' "$ROOT/docs/ARCHITECTURE.md" || false
-  grep -qF '~/.copilot/hooks/anw.json' "$ROOT/docs/ARCHITECTURE.md" || false
-  ! grep -qiE 'repo[- ]scope' "$ROOT/docs/ARCHITECTURE.md" || false
+  grep -qi 'user-global' "$ROOT/docs/ARCHITECTURE.html" || false
+  grep -qF '~/.copilot/hooks/anw.json' "$ROOT/docs/ARCHITECTURE.html" || false
+  ! grep -qiE 'repo[- ]scope' "$ROOT/docs/ARCHITECTURE.html" || false
 }
